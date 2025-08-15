@@ -1261,7 +1261,7 @@ class CopilotInstance {
             <input type="checkbox" data-role="webEnable" /> Tillåt websökning innan svar
           </label>
           <label>Max källor
-      <input type="number" min="1" max="10" step="1" value="3" data-role="webMaxResults" />
+            <input type="number" min="1" step="1" value="3" data-role="webMaxResults" />
           </label>
         </fieldset>
         <label>API-nyckel (denna copilot)
@@ -1536,8 +1536,8 @@ class CopilotInstance {
   // Web search defaults
   const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
   if (this.webEnableEl) this.webEnableEl.checked = webEnable;
-  const webMax = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
-  if (this.webMaxResultsEl) this.webMaxResultsEl.value = String(Math.max(1, Math.min(10, webMax)));
+  const webMax = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10);
+  if (this.webMaxResultsEl) this.webMaxResultsEl.value = String(Number.isFinite(webMax) && webMax > 0 ? webMax : 3);
 
     // Listeners
     this.modelEl.addEventListener('change', () => {
@@ -1666,9 +1666,10 @@ class CopilotInstance {
     }
   if (this.webMaxResultsEl) {
       this.webMaxResultsEl.addEventListener('input', () => {
-    const v = Math.max(1, Math.min(10, parseInt(this.webMaxResultsEl.value, 10) || 3));
-        this.webMaxResultsEl.value = String(v);
-        localStorage.setItem(`examai.copilot.${this.id}.web_max_results`, String(v));
+        const raw = parseInt(this.webMaxResultsEl.value, 10);
+        if (Number.isFinite(raw) && raw > 0) {
+          localStorage.setItem(`examai.copilot.${this.id}.web_max_results`, String(raw));
+        }
       });
     }
   }
@@ -1992,8 +1993,8 @@ class CopilotInstance {
       const body = { message: msg, messages, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
       const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
       if (webEnable) {
-        const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
-        body.web = { enable: true, maxResults: Math.max(1, Math.min(10, maxResults)) };
+        const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10);
+        body.web = { enable: true, maxResults: (Number.isFinite(maxResults) && maxResults > 0) ? maxResults : 3 };
       }
       const m = (model || '').toLowerCase();
   body.max_tokens = maxTok;
@@ -2081,8 +2082,8 @@ class CopilotInstance {
     const body = { message: finalMsgs[finalMsgs.length-1]?.content || '', messages: finalMsgs, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
     const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
     if (webEnable) {
-      const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
-      body.web = { enable: true, maxResults: Math.max(1, Math.min(10, maxResults)) };
+      const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10);
+      body.web = { enable: true, maxResults: (Number.isFinite(maxResults) && maxResults > 0) ? maxResults : 3 };
     }
     const m = (model || '').toLowerCase();
   body.max_tokens = maxTok;

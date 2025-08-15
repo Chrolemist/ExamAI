@@ -108,7 +108,7 @@ def create_app():
                             query_text = (m.get("content") or "").strip()
                             break
                     if query_text:
-                        max_results = max(1, min(10, int(web_cfg.get("maxResults", 3))))
+                        max_results = max(1, int(web_cfg.get("maxResults", 3)))
                         per_page_chars = int(web_cfg.get("perPageChars", 3000))
                         total_chars_cap = int(web_cfg.get("totalCharsCap", 9000))
                         search_timeout = float(web_cfg.get("searchTimeoutSec", 5.0))
