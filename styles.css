@@ -221,3 +221,9 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .conn-menu.show{display:block}
 .conn-menu button{background:transparent;border:1px dashed #2a2a35;color:#cfd3e3;font-size:12px;padding:6px 10px;border-radius:8px;cursor:pointer}
 .conn-menu button:hover{border-color:#3a3a45}
+
+/* Citations block */
+.assistant.cites{opacity:.95}
+.assistant.cites .msg-author{font-weight:600;margin-bottom:4px}
+.assistant.cites .msg-text a{color:#9ecbff;text-decoration:none;margin-right:8px;border-bottom:1px dotted #2a2a35}
+.assistant.cites .msg-text a:hover{color:#cfeaff;border-bottom-color:#3a3a45}

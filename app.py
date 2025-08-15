@@ -1,8 +1,11 @@
 import os
 import io
+import re
+import time
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
+from urllib.parse import quote_plus, urlparse
 
 # Optional .env
 load_dotenv()
@@ -16,6 +19,13 @@ try:
     from pypdf import PdfReader
 except Exception:
     PdfReader = None  # type: ignore
+
+try:
+    import requests
+    from bs4 import BeautifulSoup  # type: ignore
+except Exception:
+    requests = None  # type: ignore
+    BeautifulSoup = None  # type: ignore
 
 
 def create_app():
@@ -87,6 +97,49 @@ def create_app():
                     {"role": "user", "content": user_message},
                 ]
 
+            # Optional: lightweight web search and fetch context
+            web_cfg = (data.get("web") or {}) if isinstance(data.get("web"), dict) else {}
+            if web_cfg.get("enable"):
+                try:
+                    query_text = None
+                    # Find the latest user message for query
+                    for m in reversed(messages):
+                        if isinstance(m, dict) and m.get("role") == "user" and (m.get("content") or "").strip():
+                            query_text = (m.get("content") or "").strip()
+                            break
+                    if query_text:
+                        max_results = int(web_cfg.get("maxResults", 3))
+                        per_page_chars = int(web_cfg.get("perPageChars", 3000))
+                        total_chars_cap = int(web_cfg.get("totalCharsCap", 9000))
+                        search_timeout = float(web_cfg.get("searchTimeoutSec", 5.0))
+                        fetch_timeout = float(web_cfg.get("fetchTimeoutSec", 6.0))
+
+                        sources = _web_search_and_fetch(query_text, max_results=max_results, per_page_chars=per_page_chars, total_chars_cap=total_chars_cap, search_timeout=search_timeout, fetch_timeout=fetch_timeout)
+                        if sources and isinstance(sources, list):
+                            # Build a compact context block with citations
+                            lines = [
+                                "Webbkällor (sammanfattade, använd [n] som hänvisning i svaret om relevant):"
+                            ]
+                            for i, s in enumerate(sources, start=1):
+                                title = s.get("title") or s.get("url") or f"Källa {i}"
+                                url = s.get("url") or ""
+                                snippet = (s.get("text") or "").strip()[:per_page_chars]
+                                # simple sanitization
+                                title = re.sub(r"\s+", " ", title).strip()
+                                url = url.strip()
+                                lines.append(f"[{i}] {title} ({url})\n{snippet}")
+                            web_block = "\n\n".join(lines)
+                            # Prepend as system context so model can ground the answer
+                            messages = [{"role": "system", "content": system_prompt + "\n\n" + web_block}] + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)]
+                        # Store citations to include in response
+                        citations = [{"title": s.get("title"), "url": s.get("url")} for s in sources] if sources else []
+                    else:
+                        citations = []
+                except Exception:
+                    citations = []
+            else:
+                citations = []
+
             # For chat.completions API, the correct parameter is always 'max_tokens'
             max_user = data.get("max_tokens") or data.get("max_completion_tokens") or 1000
             kwargs = {"model": model, "messages": messages, "max_tokens": max_user}
@@ -113,7 +166,7 @@ def create_app():
             except Exception:
                 usage = None
 
-            return jsonify({"reply": reply, "model": model, "finishReason": finish_reason, "truncated": truncated, "usage": usage})
+            return jsonify({"reply": reply, "model": model, "finishReason": finish_reason, "truncated": truncated, "usage": usage, "citations": citations})
 
         except Exception as e:
             # Log and propagate a clearer error/status if available
@@ -240,6 +293,95 @@ def create_app():
             return jsonify({"error": str(e)}), 400
 
     return app
+
+
+# -------------------- Lightweight web search helpers --------------------
+def _web_search_and_fetch(query: str, max_results: int = 3, per_page_chars: int = 3000, total_chars_cap: int = 9000, search_timeout: float = 5.0, fetch_timeout: float = 6.0):
+    """Perform a minimal web search (DuckDuckGo HTML) and fetch readable text from top results.
+    Returns a list of dicts: {title, url, text}. Fails gracefully on network errors.
+    """
+    if not requests:
+        return []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36"
+    }
+    results = []
+    try:
+        q = quote_plus(query)
+        resp = requests.get(f"https://duckduckgo.com/html/?q={q}&kl=se-sv&ia=web", headers=headers, timeout=search_timeout)
+        html = resp.text
+        links = []
+        if BeautifulSoup is not None:
+            soup = BeautifulSoup(html, "html.parser")
+            for a in soup.select("a.result__a, a.result__url, a.result__title"):  # various ddg layouts
+                href = a.get("href")
+                title = a.get_text(" ").strip() or href
+                if href and href.startswith("http"):
+                    links.append({"title": title, "url": href})
+                if len(links) >= max_results:
+                    break
+        else:
+            # Fallback: regex naive extraction
+            for m in re.finditer(r'<a[^>]+href="(http[^"]+)"[^>]*>(.*?)</a>', html, re.I | re.S):
+                url = m.group(1)
+                title = re.sub("<[^>]+>", " ", m.group(2))
+                title = re.sub(r"\s+", " ", title).strip()
+                if url and url.startswith("http"):
+                    links.append({"title": title or url, "url": url})
+                if len(links) >= max_results:
+                    break
+    except Exception:
+        links = []
+
+    # Fetch pages with cap
+    out = []
+    total = 0
+    for it in links[:max_results]:
+        url = it.get("url")
+        title = (it.get("title") or url or "").strip()
+        if not url:
+            continue
+        try:
+            txt = _fetch_readable_text(url, headers=headers, timeout=fetch_timeout)[:per_page_chars]
+            if txt:
+                out.append({"title": title, "url": url, "text": txt})
+                total += len(txt)
+                if total >= total_chars_cap:
+                    break
+        except Exception:
+            continue
+    return out
+
+
+def _fetch_readable_text(url: str, headers=None, timeout: float = 6.0) -> str:
+    if not requests:
+        return ""
+    headers = headers or {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, headers=headers, timeout=timeout)
+    r.raise_for_status()
+    # Prefer text/plain or markdown-ish; otherwise strip HTML
+    ctype = r.headers.get("Content-Type", "").lower()
+    text = r.text
+    if "text/plain" in ctype or url.lower().endswith((".txt", ".md", ".text")):
+        return text
+    if BeautifulSoup is None:
+        # naive tag strip
+        text = re.sub("<script[\s\S]*?</script>", " ", text, flags=re.I)
+        text = re.sub("<style[\s\S]*?</style>", " ", text, flags=re.I)
+        return re.sub("<[^>]+>", " ", text)
+    soup = BeautifulSoup(text, "html.parser")
+    # Try to remove nav/footer/script/style
+    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "form", "aside"]):
+        try:
+            tag.decompose()
+        except Exception:
+            continue
+    # Prefer article/main
+    main = soup.find(["article", "main"]) or soup.body
+    txt = main.get_text("\n", strip=True) if main else soup.get_text("\n", strip=True)
+    # collapse whitespace
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+    return txt.strip()
 
 
 if __name__ == "__main__":

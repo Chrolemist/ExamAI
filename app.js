@@ -1138,6 +1138,8 @@ class CopilotInstance {
   this.speedEl = this.panel.querySelector('[data-role="typingSpeed"]');
   this.speedLabelEl = this.panel.querySelector('[data-role="typingSpeedValue"]');
   this.renderModeEl = this.panel.querySelector('[data-role="renderMode"]');
+  this.webEnableEl = this.panel.querySelector('[data-role="webEnable"]');
+  this.webMaxResultsEl = this.panel.querySelector('[data-role="webMaxResults"]');
   this.apiKeyEl = this.panel.querySelector('[data-role="apiKey"]');
   this.keyBadgeEl = this.panel.querySelector('[data-role="keyStatus"]');
   this.topicEl = this.panel.querySelector('[data-role="topic"]');
@@ -1253,6 +1255,15 @@ class CopilotInstance {
             <option value="md">Snyggt (Markdown)</option>
           </select>
         </label>
+        <fieldset class="subsec">
+          <legend>Webbsökning</legend>
+          <label>
+            <input type="checkbox" data-role="webEnable" /> Tillåt websökning innan svar
+          </label>
+          <label>Max källor
+            <input type="number" min="1" max="5" step="1" value="3" data-role="webMaxResults" />
+          </label>
+        </fieldset>
         <label>API-nyckel (denna copilot)
           <input type="password" placeholder="Valfri – annars används global" data-role="apiKey" />
         </label>
@@ -1522,6 +1533,12 @@ class CopilotInstance {
     const instKey = localStorage.getItem(`examai.copilot.${this.id}.key`) || '';
     if (instKey) this.apiKeyEl.value = '•••• •••• ••••';
 
+  // Web search defaults
+  const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
+  if (this.webEnableEl) this.webEnableEl.checked = webEnable;
+  const webMax = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
+  if (this.webMaxResultsEl) this.webMaxResultsEl.value = String(Math.max(1, Math.min(5, webMax)));
+
     // Listeners
     this.modelEl.addEventListener('change', () => {
       this.model = this.modelEl.value;
@@ -1641,6 +1658,19 @@ class CopilotInstance {
   this.updateKeyStatusBadge();
       toast('API-nyckel sparad.');
     });
+    if (this.webEnableEl) {
+      this.webEnableEl.addEventListener('change', () => {
+        localStorage.setItem(`examai.copilot.${this.id}.web_enable`, String(!!this.webEnableEl.checked));
+        toast(this.webEnableEl.checked ? 'Webbsökning aktiverad.' : 'Webbsökning avstängd.');
+      });
+    }
+    if (this.webMaxResultsEl) {
+      this.webMaxResultsEl.addEventListener('input', () => {
+        const v = Math.max(1, Math.min(5, parseInt(this.webMaxResultsEl.value, 10) || 3));
+        this.webMaxResultsEl.value = String(v);
+        localStorage.setItem(`examai.copilot.${this.id}.web_max_results`, String(v));
+      });
+    }
   }
   #updateSpeedLabel(v) {
     let label = 'Snabb';
@@ -1960,6 +1990,11 @@ class CopilotInstance {
       const model = this.model || 'gpt-5-mini';
       const perKey = localStorage.getItem(`examai.copilot.${this.id}.key`);
       const body = { message: msg, messages, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
+      const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
+      if (webEnable) {
+        const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
+        body.web = { enable: true, maxResults };
+      }
       const m = (model || '').toLowerCase();
   body.max_tokens = maxTok;
       const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -1972,6 +2007,13 @@ class CopilotInstance {
         this.addAssistant(reply);
       } else {
         this.#renderTyping(reply);
+      }
+      if (data && Array.isArray(data.citations) && data.citations.length) {
+        const cites = document.createElement('div');
+        cites.className = 'assistant cites';
+        const items = data.citations.map((c, i) => `<a href="${escapeHtml(c.url||'')}" target="_blank" rel="noopener">[${i+1}] ${escapeHtml(c.title||c.url||'Källa')}</a>`).join(' ');
+        cites.innerHTML = `<div class="msg-author">Källor</div><div class="msg-text">${items}</div>`;
+        this.msgEl.appendChild(cites);
       }
       if (!this._convId) {
         this.history.push({ role: 'user', content: msg });
@@ -2037,6 +2079,11 @@ class CopilotInstance {
       finalMsgs = [...sys, ...messages];
     }
     const body = { message: finalMsgs[finalMsgs.length-1]?.content || '', messages: finalMsgs, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
+    const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
+    if (webEnable) {
+      const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
+      body.web = { enable: true, maxResults };
+    }
     const m = (model || '').toLowerCase();
   body.max_tokens = maxTok;
   const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
