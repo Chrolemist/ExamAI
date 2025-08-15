@@ -41,10 +41,15 @@ def create_app():
         # Input contract
         data = request.get_json(silent=True) or {}
         user_message = (data.get("message") or "").strip()
-        model = (data.get("model") or os.getenv("OPENAI_MODEL") or "gpt-5-mini").strip()
+        model_in = (data.get("model") or os.getenv("OPENAI_MODEL") or "gpt-5-mini").strip()
         # Optional per-request API key (not stored). Otherwise use env var.
-        api_key = (data.get("apiKey") or os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_APIKEY") or os.getenv("OPENAI_KEY"))
-        incoming_messages = data.get("messages")
+        api_key = (
+            data.get("apiKey")
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("OPENAI_APIKEY")
+            or os.getenv("OPENAI_KEY")
+        )
+        incoming_messages = data.get("messages") or []
         has_history = isinstance(incoming_messages, list) and len(incoming_messages) > 0
 
         if not user_message and not has_history:
@@ -58,30 +63,33 @@ def create_app():
 
         client = OpenAI(api_key=api_key)
 
+        # Normalize model: if user passes fictional aliases (e.g., gpt-5* or 3o), map to a real fallback.
+        def _normalize_model(m: str) -> str:
+            mm = (m or "").strip().lower()
+            if mm.startswith("gpt-5") or mm in {"3o", "o3"}:
+                return os.getenv("OPENAI_FALLBACK_MODEL", "gpt-4o-mini")
+            return m
+
+        model = _normalize_model(model_in)
+
         # Note: GPT-5 style models may ignore temperature; we omit it.
         system_prompt = (data.get("system") or "Du är en hjälpsam AI‑assistent.").strip()
 
         try:
             # Build message history: prefer provided 'messages' (list of {role, content}), else single user message
             if has_history:
-                # Ensure system message first
-                if not (isinstance(incoming_messages[0], dict) and incoming_messages[0].get("role") == "system"):
-                    messages = [{"role": "system", "content": system_prompt}] + incoming_messages
-                else:
-                    messages = incoming_messages
+                messages = incoming_messages
+                if not (isinstance(messages[0], dict) and messages[0].get("role") == "system"):
+                    messages = [{"role": "system", "content": system_prompt}] + messages
             else:
                 messages = [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ]
 
+            # For chat.completions API, the correct parameter is always 'max_tokens'
             max_user = data.get("max_tokens") or data.get("max_completion_tokens") or 1000
-
-            kwargs = {"model": model, "messages": messages}
-            if model.startswith("gpt-5") or model in {"gpt-5", "gpt-5-mini", "gpt-5-nano", "3o"}:
-                kwargs["max_completion_tokens"] = max_user
-            else:
-                kwargs["max_tokens"] = max_user
+            kwargs = {"model": model, "messages": messages, "max_tokens": max_user}
 
             resp = client.chat.completions.create(**kwargs)
 
@@ -108,8 +116,17 @@ def create_app():
             return jsonify({"reply": reply, "model": model, "finishReason": finish_reason, "truncated": truncated, "usage": usage})
 
         except Exception as e:
-            # Return a concise error, but include message for debugging local dev
-            return jsonify({"error": str(e)}), 500
+            # Log and propagate a clearer error/status if available
+            try:
+                print("/chat error:", repr(e))
+            except Exception:
+                pass
+            status = getattr(e, "status_code", 500)
+            try:
+                msg = getattr(e, "message", None) or str(e)
+            except Exception:
+                msg = "Unknown error"
+            return jsonify({"error": msg, "model": model, "hint": "Kontrollera API-nyckel och modellnamn."}), int(status) if isinstance(status, int) else 500
 
     def _extract_text(filename: str, stream: bytes) -> str:
         name = (filename or "").lower()
