@@ -184,6 +184,44 @@ def create_app():
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
+    @app.post("/upload")
+    def upload_files():
+        """Upload one or more files and return extracted text per file.
+        Form field name: files (multiple). Optional form field 'maxChars' to cap text length per file.
+        """
+        try:
+            files = request.files.getlist("files") or []
+            if not files:
+                return jsonify({"error": "No files provided (field 'files')"}), 400
+            try:
+                max_chars = int(request.form.get("maxChars", "50000"))
+            except Exception:
+                max_chars = 50000
+
+            items = []
+            total_chars = 0
+            for f in files:
+                raw = f.read()
+                text = _extract_text(f.filename, raw)
+                truncated = False
+                if len(text) > max_chars:
+                    text = text[:max_chars]
+                    truncated = True
+                total_chars += len(text)
+                items.append({
+                    "name": f.filename,
+                    "chars": len(text),
+                    "truncated": truncated,
+                    "text": text,
+                })
+            return jsonify({
+                "count": len(items),
+                "totalChars": total_chars,
+                "items": items,
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
     return app
 
 

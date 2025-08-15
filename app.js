@@ -706,3 +706,51 @@ els.menuResize?.addEventListener('touchstart', (e) => {
   const w = parseInt(localStorage.getItem('examai.menu.width') || '300', 10);
   if (!isNaN(w)) setMenuWidth(w);
 })();
+
+// --- Drag & drop into chat: upload PDFs/TXT/MD and attach text to history ---
+function setupChatDrop() {
+  const dropTargets = [els.messages, els.userInput];
+  const highlight = (on) => {
+    dropTargets.forEach(t => { if (t) t.classList.toggle('drag', !!on); });
+  };
+  dropTargets.forEach(t => {
+    if (!t) return;
+    t.addEventListener('dragover', (e) => { e.preventDefault(); highlight(true); });
+    t.addEventListener('dragleave', () => highlight(false));
+    t.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      highlight(false);
+      const files = Array.from(e.dataTransfer?.files || []);
+      if (!files.length) return;
+      const form = new FormData();
+      for (const f of files) form.append('files', f, f.name);
+      form.append('maxChars', '60000');
+      setAvatarBusy(true);
+      try {
+        const res = await fetch('/upload', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok) {
+          toast(data.error || 'Kunde inte läsa filer', 'error');
+          return;
+        }
+        const count = data.count || (data.items ? data.items.length : 0);
+        const names = (data.items || []).map(it => it.name).join(', ');
+        addBubble(`(Importerade ${count} fil(er): ${names})`, 'bot');
+        // Append each file's text as a system content block in history so the model can use it
+        for (const it of (data.items || [])) {
+          const label = `Innehåll från ${it.name}${it.truncated ? ' (trunkerad)' : ''}`;
+          chatHistory.push({ role: 'system', content: `${label}:
+\n${it.text || ''}` });
+        }
+        toast(`Läste ${count} fil(er). Texten används i nästa fråga.`);
+      } catch (err) {
+        console.error(err);
+        toast('Nätverksfel vid filuppladdning', 'error');
+      } finally {
+        setAvatarBusy(false);
+      }
+    });
+  });
+}
+
+setupChatDrop();

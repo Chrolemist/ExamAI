@@ -81,6 +81,12 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 .dropzone.drag{border-color:var(--accent);color:#cfeaff;background:rgba(0,212,255,0.04)}
 .file-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .file-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid #2a2a35;border-radius:999px;background:#141419;color:var(--subtle);font-size:12px}
+
+/* Chat drop highlight */
+#messages.drag, #userInput.drag {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+}
 .file-chip .x{cursor:pointer;color:#888}
 
 /* Inputs */
