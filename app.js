@@ -1255,13 +1255,13 @@ class CopilotInstance {
             <option value="md">Snyggt (Markdown)</option>
           </select>
         </label>
-        <fieldset class="subsec">
+    <fieldset class="subsec">
           <legend>Webbsökning</legend>
           <label>
             <input type="checkbox" data-role="webEnable" /> Tillåt websökning innan svar
           </label>
           <label>Max källor
-            <input type="number" min="1" max="5" step="1" value="3" data-role="webMaxResults" />
+      <input type="number" min="1" max="10" step="1" value="3" data-role="webMaxResults" />
           </label>
         </fieldset>
         <label>API-nyckel (denna copilot)
@@ -1537,7 +1537,7 @@ class CopilotInstance {
   const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
   if (this.webEnableEl) this.webEnableEl.checked = webEnable;
   const webMax = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
-  if (this.webMaxResultsEl) this.webMaxResultsEl.value = String(Math.max(1, Math.min(5, webMax)));
+  if (this.webMaxResultsEl) this.webMaxResultsEl.value = String(Math.max(1, Math.min(10, webMax)));
 
     // Listeners
     this.modelEl.addEventListener('change', () => {
@@ -1664,9 +1664,9 @@ class CopilotInstance {
         toast(this.webEnableEl.checked ? 'Webbsökning aktiverad.' : 'Webbsökning avstängd.');
       });
     }
-    if (this.webMaxResultsEl) {
+  if (this.webMaxResultsEl) {
       this.webMaxResultsEl.addEventListener('input', () => {
-        const v = Math.max(1, Math.min(5, parseInt(this.webMaxResultsEl.value, 10) || 3));
+    const v = Math.max(1, Math.min(10, parseInt(this.webMaxResultsEl.value, 10) || 3));
         this.webMaxResultsEl.value = String(v);
         localStorage.setItem(`examai.copilot.${this.id}.web_max_results`, String(v));
       });
@@ -1993,7 +1993,7 @@ class CopilotInstance {
       const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
       if (webEnable) {
         const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
-        body.web = { enable: true, maxResults };
+        body.web = { enable: true, maxResults: Math.max(1, Math.min(10, maxResults)) };
       }
       const m = (model || '').toLowerCase();
   body.max_tokens = maxTok;
@@ -2082,7 +2082,7 @@ class CopilotInstance {
     const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
     if (webEnable) {
       const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10) || 3;
-      body.web = { enable: true, maxResults };
+      body.web = { enable: true, maxResults: Math.max(1, Math.min(10, maxResults)) };
     }
     const m = (model || '').toLowerCase();
   body.max_tokens = maxTok;

@@ -108,7 +108,7 @@ def create_app():
                             query_text = (m.get("content") or "").strip()
                             break
                     if query_text:
-                        max_results = int(web_cfg.get("maxResults", 3))
+                        max_results = max(1, min(10, int(web_cfg.get("maxResults", 3))))
                         per_page_chars = int(web_cfg.get("perPageChars", 3000))
                         total_chars_cap = int(web_cfg.get("totalCharsCap", 9000))
                         search_timeout = float(web_cfg.get("searchTimeoutSec", 5.0))
@@ -366,8 +366,8 @@ def _fetch_readable_text(url: str, headers=None, timeout: float = 6.0) -> str:
         return text
     if BeautifulSoup is None:
         # naive tag strip
-        text = re.sub("<script[\s\S]*?</script>", " ", text, flags=re.I)
-        text = re.sub("<style[\s\S]*?</style>", " ", text, flags=re.I)
+        text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
+        text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
         return re.sub("<[^>]+>", " ", text)
     soup = BeautifulSoup(text, "html.parser")
     # Try to remove nav/footer/script/style
