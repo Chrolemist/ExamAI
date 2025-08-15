@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ExamAI</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <link rel="stylesheet" href="./styles.css?v=20250814-1" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Top app bar -->
+      <header class="appbar">
+        <div class="appbar-inner">
+          <div class="brand">
+            <div class="logo" aria-hidden="true"></div>
+            <span>Min lärbok</span>
+          </div>
+          <div class="search" role="search">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="var(--subtle)" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <input id="q" type="search" placeholder="Sök i teori, exempel och övningar…" autocomplete="off" />
+          </div>
+        </div>
+      </header>
+      <!-- Floating action buttons -->
+  <button id="menuFab" class="fab fab-left" title="Meny">☰</button>
+      <button id="copilotFab" class="fab fab-right" title="Copilot">
+        <svg id="hexMiniCopilot" class="hex-mini" viewBox="0 0 100 100" aria-hidden="true" shape-rendering="geometricPrecision">
+          <defs>
+            <linearGradient id="hexGradFabR" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#7c5cff"/>
+              <stop offset="100%" stop-color="#00d4ff"/>
+            </linearGradient>
+          </defs>
+          <polygon points="50,6 92,28 92,72 50,94 8,72 8,28" fill="none" stroke="url(#hexGradFabR)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
+        </svg>
+      </button>
+
+      <!-- Main content panels with left overview -->
+      <div class="layout">
+        <aside class="sidebar" aria-label="Översikt">
+          <div class="section">
+            <h3>Översikt</h3>
+            <nav class="toc" id="toc">
+              <a href="#teori">Teori</a>
+              <a href="#exempel">Exempel</a>
+              <a href="#ovningar">Övningsuppgifter</a>
+            </nav>
+          </div>
+        </aside>
+        <main class="content">
+        <section id="teori" class="panel" aria-label="Teori">
+          <div class="head"><h2>Teori</h2><span class="note">Från din dokumentation</span></div>
+          <div class="body">
+            <div id="theoryGrid" class="grid"></div>
+            <div class="note" id="theoryEmpty">Ingen teori ännu. Skapa eller ladda en exempeltenta.</div>
+          </div>
+        </section>
+        <section id="exempel" class="panel" aria-label="Exempel">
+          <div class="head"><h2>Exempel</h2><span class="note">Från din dokumentation</span></div>
+          <div class="body">
+            <div id="examplesGrid" class="grid"></div>
+            <div class="note" id="examplesEmpty">Inga exempel ännu. Skapa eller ladda en exempeltenta.</div>
+          </div>
+        </section>
+        <section id="ovningar" class="panel" aria-label="Övningsuppgifter">
+          <div class="head"><h2>Övningsuppgifter</h2><span class="note">Från din dokumentation</span></div>
+          <div class="body">
+            <div id="exerciseGrid" class="grid"></div>
+            <div class="note" id="exerciseEmpty">Inga övningar ännu. Skapa eller ladda en exempeltenta.</div>
+          </div>
+        </section>
+        </main>
+      </div>
+
+      <!-- Copilot panel (slides from right) -->
+      <section id="copilotPanel" class="panel-drawer right hidden">
+        <div id="copilotResize" class="drawer-resize-handle left" aria-hidden="true"></div>
+        <header class="drawer-head">
+          <div class="hex-avatar" id="hexAvatar" title="Copilot">
+            <svg id="hexIcon" viewBox="0 0 100 100" aria-hidden="true" shape-rendering="geometricPrecision">
+              <defs>
+                <linearGradient id="hexGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#7c5cff"/>
+                  <stop offset="100%" stop-color="#00d4ff"/>
+                </linearGradient>
+              </defs>
+              <polygon points="50,6 92,28 92,72 50,94 8,72 8,28" fill="none" stroke="url(#hexGrad)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
+            </svg>
+            <div id="hexNotifications" class="hex-notify"></div>
+          </div>
+          <div class="meta">
+            <div class="name" id="copilotName">Copilot</div>
+            <span id="keyStatus" class="badge badge-error">Ingen nyckel</span>
+          </div>
+          <button id="settingsToggle" class="btn btn-ghost" aria-label="Inställningar">Inställningar ▾</button>
+          <button id="copilotClose" class="icon-btn" aria-label="Stäng">✕</button>
+        </header>
+        <div id="settingsPanel" class="settings collapsed">
+          <label>Modell
+            <select id="modelSelect">
+              <option value="gpt-5">gpt-5</option>
+              <option value="gpt-5-mini" selected>gpt-5-mini</option>
+              <option value="gpt-5-nano">gpt-5-nano</option>
+              <option value="3o">3o</option>
+            </select>
+          </label>
+          <label>Copilot-namn
+            <input id="copilotNameInput" type="text" placeholder="Namn" />
+          </label>
+          <label>Max tokens
+            <input id="maxTokens" type="range" min="1000" max="30000" step="64" value="1000" />
+            <div class="subtle"><span id="maxTokensValue">1000</span></div>
+          </label>
+          <label>Skrivhastighet
+            <input id="typingSpeed" type="range" min="0" max="100" step="1" value="10" />
+            <div class="subtle">(<span id="typingSpeedValue">Snabb</span>)</div>
+          </label>
+          <label>Visningsläge
+            <select id="renderMode">
+              <option value="raw" selected>Rå text</option>
+              <option value="md">Snyggt (Markdown)</option>
+            </select>
+          </label>
+          <div class="api-key-row">
+            <input id="apiKeyInput" type="password" placeholder="OpenAI API-nyckel" />
+            <button id="deleteKeyBtn" class="btn btn-ghost">Ta bort</button>
+          </div>
+          <div class="row" style="justify-content:space-between">
+            <button id="clearChatBtn" class="btn">Rensa chatten</button>
+          </div>
+          <label>Sparade chattar
+            <select id="savedChatsSelect"></select>
+          </label>
+          <div class="row" style="justify-content:flex-end">
+            <button id="loadChatBtn" class="btn">Ladda</button>
+          </div>
+        </div>
+        <div id="messages" class="messages"></div>
+        <form id="composer" class="composer">
+          <textarea id="userInput" placeholder="Skriv här..." rows="2"></textarea>
+          <button class="send-btn" title="Skicka">➤</button>
+        </form>
+      </section>
+
+      <!-- Menu panel (slides from left) -->
+      <section id="menuPanel" class="panel-drawer left hidden">
+        <div id="menuResize" class="drawer-resize-handle right" aria-hidden="true"></div>
+        <header class="drawer-head">
+          <div class="brand">Meny</div>
+          <button id="menuClose" class="icon-btn" aria-label="Stäng">✕</button>
+        </header>
+        <div class="menu-body">
+          <div class="row">
+            <button id="btnCreateExam" class="btn btn-primary">Skapa tenta</button>
+            <button id="btnLoadExam" class="btn">Ladda sparad tenta</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Fullscreen modal for exam view -->
+      <section id="examModal" class="modal hidden">
+        <div class="modal-content">
+          <header class="drawer-head"><div class="brand">Tenta</div><button id="examClose" class="icon-btn">✕</button></header>
+          <div id="examViewer" class="exam"></div>
+        </div>
+      </section>
+
+      <!-- Modal: Skapa tenta / välj filer -->
+      <section id="filePickerModal" class="modal hidden">
+        <div class="modal-content">
+          <header class="drawer-head"><div class="brand">Skapa tenta</div><button id="filePickerClose" class="icon-btn">✕</button></header>
+          <div class="exam" style="padding:14px">
+            <div class="grid2">
+              <div class="card">
+                <div class="label">Föreläsningar (en eller flera)</div>
+                <input id="filesLectures" type="file" accept=".pdf,.txt,.md" multiple />
+                <div id="dzLectures" class="dropzone" aria-label="Dra & släpp föreläsningsfiler här">Dra & släpp här</div>
+                <div id="listLectures" class="file-list"></div>
+              </div>
+              <div class="card">
+                <div class="label">Tenta (en eller flera, kombineras)</div>
+                <input id="filesExams" type="file" accept=".txt,.md,.text,.pdf" multiple />
+                <div id="dzExams" class="dropzone" aria-label="Dra & släpp tentafiler här">Dra & släpp här</div>
+                <div id="listExams" class="file-list"></div>
+              </div>
+            </div>
+              <label for="examTitle" class="input-label">Titel (valfri)</label>
+              <input id="examTitle" type="text" placeholder="Ange en titel på tentan" class="text-input"/>
+            <div style="display:flex;justify-content:center;margin-top:14px">
+              <button id="confirmBuildExam" class="btn btn-primary">Skapa tenta</button>
+            </div>
+            <div id="createExamResult" class="subtle" style="margin-top:8px"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Modal: Ladda sparad tenta -->
+      <section id="savedExamsModal" class="modal hidden">
+        <div class="modal-content">
+          <header class="drawer-head"><div class="brand">Sparade tentor</div><button id="savedExamsClose" class="icon-btn">✕</button></header>
+          <div class="exam" style="padding:14px">
+            <div id="savedExamsList" class="list"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.2/dist/markdown-it.min.js"></script>
+  <script src="./app.js?v=20250815-9" type="module"></script>
+  </body>
+</html>
