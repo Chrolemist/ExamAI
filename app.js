@@ -47,12 +47,15 @@ const els = {
   // Resize handle
   copilotResize: document.getElementById('copilotResize'),
   menuResize: document.getElementById('menuResize'),
+  attachmentsBar: document.getElementById('attachmentsBar'),
 };
 
 // In-memory chat history for the current page session
 let chatHistory = [];
 // Track whether server provides an API key via .env
 let hasServerKey = false;
+// Staged file attachments awaiting upload on next send
+let stagedFiles = [];
 
 // Constants and helpers needed during init
 const COPILOT_MIN = 280;
@@ -319,6 +322,38 @@ async function sendMessage() {
   els.userInput.value = '';
   // Reset height after sending
   els.userInput.style.height = INPUT_MIN_H + 'px';
+
+  // If we have staged files, upload them first and append to history
+  if (stagedFiles.length) {
+    const form = new FormData();
+    for (const f of stagedFiles) form.append('files', f, f.name);
+    form.append('maxChars', '60000');
+    setAvatarBusy(true);
+    try {
+      const resU = await fetch('/upload', { method: 'POST', body: form });
+      const dataU = await resU.json();
+      if (!resU.ok) {
+        toast(dataU.error || 'Kunde inte läsa bilagor', 'error');
+      } else {
+        const count = dataU.count || (dataU.items ? dataU.items.length : 0);
+        const names = (dataU.items || []).map(it => it.name).join(', ');
+        addBubble(`(Läste ${count} bilaga(or): ${names})`, 'bot');
+        for (const it of (dataU.items || [])) {
+          const label = `Innehåll från ${it.name}${it.truncated ? ' (trunkerad)' : ''}`;
+          chatHistory.push({ role: 'system', content: `${label}:
+\n${it.text || ''}` });
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      toast('Nätverksfel vid bilagor', 'error');
+    } finally {
+      setAvatarBusy(false);
+      // Clear staged UI regardless of success so user can re-stage if needed
+      stagedFiles = [];
+      renderAttachments();
+    }
+  }
 
   // Use saved max tokens
   let maxTok = parseInt(localStorage.getItem(MAXTOK_STORAGE) || '1000', 10);
@@ -722,35 +757,51 @@ function setupChatDrop() {
       highlight(false);
       const files = Array.from(e.dataTransfer?.files || []);
       if (!files.length) return;
-      const form = new FormData();
-      for (const f of files) form.append('files', f, f.name);
-      form.append('maxChars', '60000');
-      setAvatarBusy(true);
-      try {
-        const res = await fetch('/upload', { method: 'POST', body: form });
-        const data = await res.json();
-        if (!res.ok) {
-          toast(data.error || 'Kunde inte läsa filer', 'error');
-          return;
+      const newOnes = [];
+      for (const f of files) {
+        // Avoid duplicates by name+size
+        if (!stagedFiles.find(x => x.name === f.name && x.size === f.size)) {
+          stagedFiles.push(f);
+          newOnes.push(f.name);
         }
-        const count = data.count || (data.items ? data.items.length : 0);
-        const names = (data.items || []).map(it => it.name).join(', ');
-        addBubble(`(Importerade ${count} fil(er): ${names})`, 'bot');
-        // Append each file's text as a system content block in history so the model can use it
-        for (const it of (data.items || [])) {
-          const label = `Innehåll från ${it.name}${it.truncated ? ' (trunkerad)' : ''}`;
-          chatHistory.push({ role: 'system', content: `${label}:
-\n${it.text || ''}` });
-        }
-        toast(`Läste ${count} fil(er). Texten används i nästa fråga.`);
-      } catch (err) {
-        console.error(err);
-        toast('Nätverksfel vid filuppladdning', 'error');
-      } finally {
-        setAvatarBusy(false);
+      }
+      if (newOnes.length) {
+        toast(`${newOnes.length} fil(er) tillagda. Skicka för att läsa.`);
+        renderAttachments();
       }
     });
   });
 }
 
 setupChatDrop();
+
+function renderAttachments() {
+  const bar = els.attachmentsBar;
+  if (!bar) return;
+  if (!stagedFiles.length) {
+    bar.classList.add('hidden');
+    bar.innerHTML = '';
+    return;
+  }
+  bar.classList.remove('hidden');
+  bar.innerHTML = '';
+  stagedFiles.forEach((f, idx) => {
+    const chip = document.createElement('div');
+    chip.className = 'attachment-chip';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = `${f.name} (${Math.round(f.size/1024)} KB)`;
+    const rm = document.createElement('button');
+    rm.className = 'rm';
+    rm.type = 'button';
+    rm.title = 'Ta bort';
+    rm.textContent = '×';
+    rm.addEventListener('click', () => {
+      stagedFiles.splice(idx, 1);
+      renderAttachments();
+    });
+    chip.appendChild(name);
+    chip.appendChild(rm);
+    bar.appendChild(chip);
+  });
+}
