@@ -1,53 +1,5 @@
 // Minimal frontend logic to wire the existing UI to the Flask backend /chat
-
-const els = {
-  copilotFab: document.getElementById('copilotFab'),
-  copilotPanel: document.getElementById('copilotPanel'),
-  copilotClose: document.getElementById('copilotClose'),
-  // Left menu removed
-  messages: document.getElementById('messages'),
-  composer: document.getElementById('composer'),
-  userInput: document.getElementById('userInput'),
-  modelSelect: document.getElementById('modelSelect'),
-  apiKeyInput: document.getElementById('apiKeyInput'),
-  deleteKeyBtn: document.getElementById('deleteKeyBtn'),
-  keyStatus: document.getElementById('keyStatus'),
-  settingsToggle: document.getElementById('settingsToggle'),
-  settingsPanel: document.getElementById('settingsPanel'),
-  copilotNameInput: document.getElementById('copilotNameInput'),
-  copilotName: document.getElementById('copilotName'),
-  hexAvatar: document.getElementById('hexAvatar'),
-  hexNotifications: document.getElementById('hexNotifications'),
-  maxTokens: document.getElementById('maxTokens'),
-  maxTokensValue: document.getElementById('maxTokensValue'),
-  typingSpeed: document.getElementById('typingSpeed'),
-  typingSpeedValue: document.getElementById('typingSpeedValue'),
-  renderMode: document.getElementById('renderMode'),
-  // Exam modal elements
-  btnCreateExam: document.getElementById('btnCreateExam'),
-  filePickerModal: document.getElementById('filePickerModal'),
-  filePickerClose: document.getElementById('filePickerClose'),
-  dzLectures: document.getElementById('dzLectures'),
-  dzExams: document.getElementById('dzExams'),
-  filesLectures: document.getElementById('filesLectures'),
-  filesExams: document.getElementById('filesExams'),
-  listLectures: document.getElementById('listLectures'),
-  listExams: document.getElementById('listExams'),
-  confirmBuildExam: document.getElementById('confirmBuildExam'),
-  examModal: document.getElementById('examModal'),
-  examClose: document.getElementById('examClose'),
-  examViewer: document.getElementById('examViewer'),
-  examTitle: document.getElementById('examTitle'),
-  // Saved chats UI
-  clearChatBtn: document.getElementById('clearChatBtn'),
-  savedChatsSelect: document.getElementById('savedChatsSelect'),
-  loadChatBtn: document.getElementById('loadChatBtn'),
-  // Resize handle
-  copilotResize: document.getElementById('copilotResize'),
-  // menuResize removed
-  attachmentsBar: document.getElementById('attachmentsBar'),
-  pauseFlowBtn: document.getElementById('pauseFlowBtn'),
-};
+import { els } from './js/dom.js';
 
 // In-memory chat history for the current page session
 let chatHistory = [];
