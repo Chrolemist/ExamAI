@@ -1,5 +1,6 @@
 // Minimal frontend logic to wire the existing UI to the Flask backend /chat
 import { els } from './js/dom.js';
+import { toast, toggleDrawer, showModal, escapeHtml } from './js/ui.js';
 
 // In-memory chat history for the current page session
 let chatHistory = [];
@@ -319,27 +320,14 @@ const GraphPersistence = (() => {
 })();
 
 // Drawer helpers
-function toggleDrawer(panel, from) {
-  const isHidden = panel.classList.contains('hidden') || !panel.classList.contains('show');
-  panel.classList.add('from-' + from);
-  panel.classList.remove('hidden');
-  if (isHidden) {
-    panel.classList.add('show');
-  } else {
-    panel.classList.remove('show');
-    setTimeout(() => panel.classList.add('hidden'), 250);
-  }
-}
+// moved to js/ui.js
 
 els.copilotFab?.addEventListener('click', () => toggleDrawer(els.copilotPanel, 'right'));
 els.copilotClose?.addEventListener('click', () => toggleDrawer(els.copilotPanel, 'right'));
 // Left menu removed – no toggle listeners
 
 // Toggle file picker modal
-function showModal(modal, show) {
-  if (!modal) return;
-  modal.classList.toggle('hidden', !show);
-}
+// moved to js/ui.js
 
 els.btnCreateExam?.addEventListener('click', () => showModal(els.filePickerModal, true));
 els.filePickerClose?.addEventListener('click', () => showModal(els.filePickerModal, false));
@@ -553,30 +541,7 @@ function setAvatarBusy(busy) {
   icon.classList.toggle('hex-spin', busy);
 }
 
-function toast(msg, kind = 'info') {
-  // Ensure a notifications container exists even without the main drawer
-  let container = els.hexNotifications;
-  if (!container) {
-    container = document.getElementById('hexNotifications');
-  }
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'hexNotifications';
-    container.className = 'hex-notify global';
-    // Minimal positioning fallback
-    container.style.position = 'fixed';
-    container.style.top = '12px';
-    container.style.right = '12px';
-    container.style.zIndex = 9999;
-    document.body.appendChild(container);
-  }
-  const b = document.createElement('div');
-  b.className = 'hex-bubble ' + (kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : '');
-  b.textContent = msg;
-  container.appendChild(b);
-  setTimeout(() => b.classList.add('fade-out'), 1800);
-  setTimeout(() => b.remove(), 2200);
-}
+// moved to js/ui.js
 
 // Global user display name helpers (used across all copilots)
 const USER_NAME_KEY = 'examai.user.name';
@@ -590,14 +555,7 @@ function setGlobalUserName(name) {
 }
 
 // Simple HTML escape for author labels
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+// moved to js/ui.js
 
 // Auto-resize the input textarea while typing
 const INPUT_MIN_H = 40; // px
