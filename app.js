@@ -119,89 +119,9 @@ const GlobalReset = (() => {
 
 // Internet hub moved to js/graph/internet-hub.js
 import { InternetHub } from './js/graph/internet-hub.js';
+import { GraphPersistence } from './js/graph/graph-persistence.js';
 
-// ================= Graph Persistence (nodes + links) =================
-// Stores copilot ids and directional links with anchor sides. Restores on load.
-const GraphPersistence = (() => {
-  const KEY_COPILOTS = 'examai.graph.copilots';
-  const KEY_LINKS = 'examai.graph.links';
-  function _readCopilots() {
-    try { return JSON.parse(localStorage.getItem(KEY_COPILOTS) || '[]') || []; } catch { return []; }
-  }
-  function _writeCopilots(list) {
-    try { localStorage.setItem(KEY_COPILOTS, JSON.stringify(Array.from(new Set(list)))); } catch {}
-  }
-  function _readLinks() {
-    try { return JSON.parse(localStorage.getItem(KEY_LINKS) || '[]') || []; } catch { return []; }
-  }
-  function _writeLinks(list) {
-    try { localStorage.setItem(KEY_LINKS, JSON.stringify(list)); } catch {}
-  }
-  function registerCopilot(id) {
-    const all = _readCopilots();
-    if (!all.includes(id)) { all.push(id); _writeCopilots(all); }
-  }
-  function unregisterCopilot(id) {
-    const all = _readCopilots().filter(x => x !== id);
-    _writeCopilots(all);
-    // also drop any links involving this id
-    removeWhere(l => (l.fromType === 'copilot' && l.fromId === id) || (l.toType === 'copilot' && l.toId === id));
-  }
-  function addLink(link) {
-    // link: { fromType, fromId, fromSide, toType, toId, toSide }
-    const norm = { ...link };
-    const sig = `${norm.fromType}:${norm.fromId}:${norm.fromSide}->${norm.toType}:${norm.toId}:${norm.toSide}`;
-    const list = _readLinks();
-    if (!list.some(l => `${l.fromType}:${l.fromId}:${l.fromSide}->${l.toType}:${l.toId}:${l.toSide}` === sig)) {
-      list.push(norm); _writeLinks(list);
-    }
-  }
-  function removeWhere(pred) {
-    const list = _readLinks();
-    const next = list.filter(l => { try { return !pred(l); } catch { return true; } });
-    _writeLinks(next);
-  }
-  async function restore() {
-    try {
-      // Ensure required singletons
-      try { InternetHub.element(); } catch {}
-      const user = (typeof UserNode !== 'undefined') ? UserNode.ensure() : null;
-      // Restore copilots
-      const ids = _readCopilots();
-      if (Array.isArray(ids)) {
-        ids.forEach(id => { try { CopilotManager.add(id); } catch {} });
-      }
-      // Restore links
-      const links = _readLinks();
-      for (const l of links) {
-        try {
-          if (l.fromType === 'copilot' && l.toType === 'internet') {
-            const inst = CopilotManager.instances.get(l.fromId);
-            if (inst) InternetHub.linkCopilot(inst);
-            continue;
-          }
-          if (l.fromType === 'copilot' && l.toType === 'copilot') {
-            const a = CopilotManager.instances.get(l.fromId);
-            const b = CopilotManager.instances.get(l.toId);
-            if (a && b && a.id !== b.id) { try { a.linkTo(b, l.fromSide || 'x', l.toSide || 'x', { persist: false }); } catch {} }
-            continue;
-          }
-          if (l.toType === 'user' && user) {
-            const a = CopilotManager.instances.get(l.fromId);
-            if (a) { try { UserNode.linkFromCopilotSides(a, l.fromSide || 'x', l.toSide || 'x'); } catch {} }
-            continue;
-          }
-          if (l.fromType === 'user' && l.toType === 'copilot' && user) {
-            const b = CopilotManager.instances.get(l.toId);
-            if (b) { try { UserNode.linkToCopilotSides(b, l.fromSide || 'x', l.toSide || 'x'); } catch {} }
-            continue;
-          }
-        } catch {}
-      }
-    } catch {}
-  }
-  return { registerCopilot, unregisterCopilot, addLink, removeWhere, restore };
-})();
+// GraphPersistence moved to js/graph/graph-persistence.js
 
 // Drawer helpers
 // moved to js/ui.js
@@ -3301,4 +3221,4 @@ const UserNode = (() => {
 // Create the user node on load
 try { UserNode.ensure(); } catch {}
 // Restore saved graph (copilots + links)
-try { GraphPersistence.restore(); } catch {}
+try { GraphPersistence.restore({ InternetHub, UserNode, CopilotManager }); } catch {}
