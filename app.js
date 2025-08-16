@@ -200,15 +200,17 @@ const InternetHub = (() => {
   function getCenter(el) { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; }
   function linkCopilot(inst, startPtEl, endPtEl) {
     const hub = element();
-    const a = getCenter(startPtEl || inst.panel);
-    const b = getCenter(endPtEl || hub);
+    // Always connect from copilot icon (FAB) to the hub center
+    const a = getCenter(inst.fab);
+    const b = getCenter(hub);
     const lineId = `link_internet_${inst.id}`;
     ConnectionLayer.draw(lineId, a, b);
-    const updateLine = () => ConnectionLayer.draw(lineId, getCenter(startPtEl || inst.panel), getCenter(endPtEl || hub));
-    inst.panel.addEventListener('mousemove', updateLine);
+    const updateLine = () => ConnectionLayer.draw(lineId, getCenter(inst.fab), getCenter(hub));
+    // Update when FAB or Internet hub moves, or viewport changes
     window.addEventListener('resize', updateLine);
     window.addEventListener('scroll', updateLine, { passive:true });
     window.addEventListener('examai:internet:moved', updateLine);
+    window.addEventListener('examai:fab:moved', updateLine);
     linked.add(inst.id);
     inst.connections.set(LINK_KEY, { lineId, updateLine, ro: [] });
     window.dispatchEvent(new CustomEvent('examai:internet:linked', { detail: { copilotId: inst.id } }));
@@ -219,10 +221,10 @@ const InternetHub = (() => {
     const item = inst.connections.get(LINK_KEY);
     if (item) {
       ConnectionLayer.remove(item.lineId);
-      inst.panel.removeEventListener('mousemove', item.updateLine);
       window.removeEventListener('resize', item.updateLine);
       window.removeEventListener('scroll', item.updateLine);
       window.removeEventListener('examai:internet:moved', item.updateLine);
+      window.removeEventListener('examai:fab:moved', item.updateLine);
       inst.connections.delete(LINK_KEY);
     }
     linked.delete(inst.id);
@@ -1523,8 +1525,9 @@ class CopilotInstance {
           }
           if (other) {
             ConversationManager.link(this, other);
-            const startEl = startPointEl || this.panel;
-            const endPtEl = endPt;
+            // Always anchor to FAB icons for stability
+            const startEl = this.fab;
+            const endPtEl = (endPt.closest('.fab')) || other.fab;
             const lineId = stableLinkId(this.id, other.id);
             const updateLine = () => {
               const a = getCenter(startEl);
@@ -1532,16 +1535,12 @@ class CopilotInstance {
               ConnectionLayer.draw(lineId, a, b);
             };
             // listeners for movement
-            this.panel.addEventListener('mousemove', updateLine);
-            other.panel.addEventListener('mousemove', updateLine);
+            // Update on viewport and FAB moves
             window.addEventListener('resize', updateLine);
             window.addEventListener('scroll', updateLine, { passive: true });
             window.addEventListener('examai:fab:moved', updateLine);
             // observers
-            const roA = new ResizeObserver(updateLine);
-            const roB = new ResizeObserver(updateLine);
-            roA.observe(this.panel);
-            roB.observe(other.panel);
+            const roA = null, roB = null; // no panel resize observers needed when anchoring to FABs
             setTimeout(updateLine, 0);
             // Track connection for unlink
             this.connections.set(other.id, { lineId, updateLine, ro: [roA, roB] });
@@ -1662,19 +1661,15 @@ class CopilotInstance {
     if (!this._convId) { toast('Inte länkad.', 'warn'); return; }
     for (const [otherId, { lineId, updateLine, ro }] of this.connections.entries()) {
       ConnectionLayer.remove(lineId);
-      this.panel.removeEventListener('mousemove', updateLine);
       const other = CopilotManager.instances.get(otherId);
-      if (other) {
-        other.panel.removeEventListener('mousemove', updateLine);
-        other.connections.delete(this.id);
-      }
-  window.removeEventListener('resize', updateLine);
-  window.removeEventListener('scroll', updateLine);
-  window.removeEventListener('examai:internet:moved', updateLine);
-  window.removeEventListener('examai:fab:moved', updateLine);
+      if (other) { other.connections.delete(this.id); }
+      window.removeEventListener('resize', updateLine);
+      window.removeEventListener('scroll', updateLine);
+      window.removeEventListener('examai:internet:moved', updateLine);
+      window.removeEventListener('examai:fab:moved', updateLine);
       if (ro && Array.isArray(ro)) {
-        try { ro[0]?.disconnect(); } catch {}
-        try { ro[1]?.disconnect(); } catch {}
+        try { ro[0]?.disconnect?.(); } catch {}
+        try { ro[1]?.disconnect?.(); } catch {}
       }
     }
     this.connections.clear();
@@ -1726,18 +1721,15 @@ class CopilotInstance {
           else if (fab && fab !== this.fab) { const id = parseInt(fab.getAttribute('data-copilot-id'), 10); other = CopilotManager.instances.get(id); }
           if (other) {
             ConversationManager.link(this, other);
-            const startEl = startPointEl || this.fab;
-            const endEl = endPt;
+            const startEl = this.fab;
+            const endEl = (endPt.closest('.fab')) || other.fab;
             const lineId = stableLinkId(this.id, other.id);
             const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(startEl), getCenter(endEl)); };
             // listeners
-            this.panel.addEventListener('mousemove', updateLine);
-            other.panel.addEventListener('mousemove', updateLine);
             window.addEventListener('resize', updateLine);
             window.addEventListener('scroll', updateLine, { passive:true });
             window.addEventListener('examai:fab:moved', updateLine);
-            const roA = new ResizeObserver(updateLine); const roB = new ResizeObserver(updateLine);
-            roA.observe(this.panel); roB.observe(other.panel);
+            const roA = null, roB = null;
             setTimeout(updateLine, 0);
             this.connections.set(other.id, { lineId, updateLine, ro: [roA, roB] });
             other.connections.set(this.id, { lineId, updateLine, ro: [roB, roA] });
