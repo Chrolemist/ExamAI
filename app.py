@@ -109,6 +109,8 @@ def create_app():
                     {"role": "user", "content": user_message},
                 ]
 
+            # Note: Removed hardcoded conversation constraints (no-questions/loop guard)
+
             # Optional: web search and fetch context (prefer Playwright if available)
             web_cfg = (data.get("web") or {}) if isinstance(data.get("web"), dict) else {}
             if web_cfg.get("enable"):
@@ -122,22 +124,18 @@ def create_app():
 
                     # Derive a useful query from conversation history
                     def _collect_domains(msgs):
+                        """Extract explicit domains mentioned by the user from recent messages.
+                        Avoid hardcoded outlet mappings; only collect actual domain-like tokens the user wrote.
+                        """
                         doms = []
                         try:
+                            pat = re.compile(r"\b([a-z0-9][-a-z0-9\.]+\.[a-z]{2,})(?:/|\b)", re.I)
                             for m in reversed(msgs[-8:]):
-                                txt = (m.get("content") or "").lower()
-                                for k, d in {
-                                    'aftonbladet': 'aftonbladet.se',
-                                    'svt': 'svt.se',
-                                    'expressen': 'expressen.se',
-                                    'dn': 'dn.se',
-                                    'svd': 'svd.se',
-                                    'eurojackpot': 'eurojackpot.org',
-                                    'svenskaspel': 'svenskaspel.se',
-                                }.items():
-                                    if k in txt or d in txt:
-                                        if d not in doms:
-                                            doms.append(d)
+                                txt = (m.get("content") or "")
+                                for g in pat.findall(txt):
+                                    d = g.lower().strip().strip('/')
+                                    if d not in doms:
+                                        doms.append(d)
                         except Exception:
                             pass
                         return doms
@@ -241,70 +239,7 @@ def create_app():
                         # Store citations to include in response
                         citations = [{"title": s.get("title"), "url": s.get("url")} for s in sources] if sources else []
 
-                        # If no sources found, attempt targeted site fetch when query mentions known outlets/services
-                        if not sources:
-                            try:
-                                ql = (query_text or "").lower()
-                                NEWS_DOMAINS = {
-                                    'aftonbladet': 'https://www.aftonbladet.se',
-                                    'svt': 'https://www.svt.se',
-                                    'expressen': 'https://www.expressen.se',
-                                    'dn': 'https://www.dn.se',
-                                    'svd': 'https://www.svd.se',
-                                }
-                                TARGETED_EXTRA = {
-                                    'eurojackpot': [
-                                        'https://www.eurojackpot.org/en/results',
-                                        'https://www.svenskaspel.se/eurojackpot/resultat',
-                                    ],
-                                }
-                                targeted = []
-                                for k, domain in NEWS_DOMAINS.items():
-                                    if k in ql:
-                                        targeted.append(domain)
-                                for k, urls in TARGETED_EXTRA.items():
-                                    if k in ql:
-                                        targeted.extend(urls)
-                                # If user asked generically for latest news, try a short list of popular outlets
-                                if not targeted and any(tok in ql for tok in ['senaste nyhet', 'senaste nyheterna', 'senaste nyheten']):
-                                    targeted = list(NEWS_DOMAINS.values())[:3]
-                                fetched = []
-                                for url in targeted:
-                                    try:
-                                        txt = _fetch_readable_text(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=fetch_timeout)
-                                        if txt:
-                                            fetched.append({'title': url, 'url': url, 'text': txt[:per_page_chars]})
-                                    except Exception:
-                                        continue
-                                if fetched:
-                                    sources = fetched
-                                    lines = [
-                                        "Webbkällor (sammanfattade, använd [n] som hänvisning i svaret om relevant):"
-                                    ]
-                                    for i, s in enumerate(sources, start=1):
-                                        title = s.get('title') or s.get('url') or f'Källa {i}'
-                                        url = s.get('url') or ''
-                                        snippet = (s.get('text') or '').strip()[:per_page_chars]
-                                        title = re.sub(r"\s+", " ", title).strip()
-                                        url = url.strip()
-                                        lines.append(f"[{i}] {title} ({url})\n{snippet}")
-                                    web_block = "\n\n".join(lines)
-                                    try:
-                                        ts = time.strftime("%Y-%m-%d %H:%M")
-                                    except Exception:
-                                        ts = "idag"
-                                    web_guidance = (
-                                        "ANVISNING: Du har precis hämtat aktuella webbkällor (" + ts + ") nedan. "
-                                        "Svara med hjälp av dessa källor, var konkret och inkludera hänvisningar som [n]. "
-                                        "Undvik generella friskrivningar om realtidsdata."
-                                    )
-                                    combined_system = system_prompt + "\n\n" + web_guidance + "\n\n" + web_block
-                                    messages = [{"role": "system", "content": combined_system}] + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)]
-                                    citations = [{"title": s.get("title"), "url": s.get("url")} for s in sources]
-                                else:
-                                    citations = []
-                            except Exception:
-                                citations = []
+                        # No hardcoded targeted site fetch; leave citations empty if no sources
                 except Exception:
                     citations = []
             else:
@@ -350,6 +285,7 @@ def create_app():
             resp = client.chat.completions.create(**kwargs)
 
             reply = resp.choices[0].message.content if resp.choices else ""
+            # Note: Removed reply post-processing that forced guidance like "Säg 1, 2 eller 3 ..."
             finish_reason = None
             try:
                 finish_reason = resp.choices[0].finish_reason  # type: ignore[attr-defined]
@@ -530,8 +466,9 @@ def _web_search_links(query: str, max_results: int = 3, search_timeout: float = 
     }
     try:
         q = quote_plus(query)
+        kl = os.getenv("SEARCH_LOCALE", "se-sv")
         resp = requests.get(
-            f"https://duckduckgo.com/html/?q={q}&kl=se-sv&ia=web",
+            f"https://duckduckgo.com/html/?q={q}&kl={kl}&ia=web",
             headers=headers,
             timeout=search_timeout,
         )
