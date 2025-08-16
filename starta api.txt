@@ -1,0 +1,6 @@
+bash -lc 'set -e
+# Stop any server on 8011
+PID=$(lsof -ti:8011 -sTCP:LISTEN || true)
+if [ -n "$PID" ]; then kill -9 $PID || true; fi
+# Start API
+source ~/miniforge3/etc/profile.d/conda.sh && conda activate examai && PORT=8011 python app.py'
