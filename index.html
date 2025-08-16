@@ -31,32 +31,10 @@
           </div>
         </div>
       </header>
-      <!-- Floating action buttons -->
-  <button id="menuFab" class="fab fab-left" title="Meny">☰</button>
-      <button id="copilotFab" class="fab fab-right" title="Copilot">
-        <svg id="hexMiniCopilot" class="hex-mini" viewBox="0 0 100 100" aria-hidden="true" shape-rendering="geometricPrecision">
-          <defs>
-            <linearGradient id="hexGradFabR" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#7c5cff"/>
-              <stop offset="100%" stop-color="#00d4ff"/>
-            </linearGradient>
-          </defs>
-          <polygon points="50,6 92,28 92,72 50,94 8,72 8,28" fill="none" stroke="url(#hexGradFabR)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
-        </svg>
-      </button>
+  <!-- Floating action buttons (left menu removed) -->
 
-      <!-- Main content panels with left overview -->
+      <!-- Main content panels (left overview removed) -->
       <div class="layout">
-        <aside class="sidebar" aria-label="Översikt">
-          <div class="section">
-            <h3>Översikt</h3>
-            <nav class="toc" id="toc">
-              <a href="#teori">Teori</a>
-              <a href="#exempel">Exempel</a>
-              <a href="#ovningar">Övningsuppgifter</a>
-            </nav>
-          </div>
-        </aside>
         <main class="content">
         <section id="teori" class="panel" aria-label="Teori">
           <div class="head"><h2>Teori</h2><span class="note">Från din dokumentation</span></div>
@@ -82,91 +60,8 @@
         </main>
       </div>
 
-      <!-- Copilot panel (slides from right) -->
-      <section id="copilotPanel" class="panel-drawer right hidden">
-        <div id="copilotResize" class="drawer-resize-handle left" aria-hidden="true"></div>
-        <header class="drawer-head">
-          <div class="hex-avatar" id="hexAvatar" title="Copilot">
-            <svg id="hexIcon" viewBox="0 0 100 100" aria-hidden="true" shape-rendering="geometricPrecision">
-              <defs>
-                <linearGradient id="hexGrad" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stop-color="#7c5cff"/>
-                  <stop offset="100%" stop-color="#00d4ff"/>
-                </linearGradient>
-              </defs>
-              <polygon points="50,6 92,28 92,72 50,94 8,72 8,28" fill="none" stroke="url(#hexGrad)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
-            </svg>
-            <div id="hexNotifications" class="hex-notify"></div>
-          </div>
-          <div class="meta">
-            <div class="name" id="copilotName">Copilot</div>
-            <span id="keyStatus" class="badge badge-error">Ingen nyckel</span>
-          </div>
-          <button id="settingsToggle" class="btn btn-ghost" aria-label="Inställningar">Inställningar ▾</button>
-          <button id="copilotClose" class="icon-btn" aria-label="Stäng">✕</button>
-        </header>
-        <div id="settingsPanel" class="settings collapsed">
-          <label>Modell
-            <select id="modelSelect">
-              <option value="gpt-5">gpt-5</option>
-              <option value="gpt-5-mini" selected>gpt-5-mini</option>
-              <option value="gpt-5-nano">gpt-5-nano</option>
-              <option value="3o">3o</option>
-            </select>
-          </label>
-          <label>Copilot-namn
-            <input id="copilotNameInput" type="text" placeholder="Namn" />
-          </label>
-          <label>Max tokens
-            <input id="maxTokens" type="range" min="1000" max="30000" step="64" value="1000" />
-            <div class="subtle"><span id="maxTokensValue">1000</span></div>
-          </label>
-          <label>Skrivhastighet
-            <input id="typingSpeed" type="range" min="0" max="100" step="1" value="10" />
-            <div class="subtle">(<span id="typingSpeedValue">Snabb</span>)</div>
-          </label>
-          <label>Visningsläge
-            <select id="renderMode">
-              <option value="raw" selected>Rå text</option>
-              <option value="md">Snyggt (Markdown)</option>
-            </select>
-          </label>
-          <div class="api-key-row">
-            <input id="apiKeyInput" type="password" placeholder="OpenAI API-nyckel" />
-            <button id="deleteKeyBtn" class="btn btn-ghost">Ta bort</button>
-          </div>
-          <div class="row" style="justify-content:space-between">
-            <button id="clearChatBtn" class="btn">Rensa chatten</button>
-          </div>
-          <label>Sparade chattar
-            <select id="savedChatsSelect"></select>
-          </label>
-          <div class="row" style="justify-content:flex-end">
-            <button id="loadChatBtn" class="btn">Ladda</button>
-          </div>
-        </div>
-        <div id="messages" class="messages"></div>
-  <div id="attachmentsBar" class="attachments hidden" aria-live="polite"></div>
-        <form id="composer" class="composer">
-          <textarea id="userInput" placeholder="Skriv här..." rows="2"></textarea>
-          <button class="send-btn" title="Skicka">➤</button>
-        </form>
-      </section>
-
-      <!-- Menu panel (slides from left) -->
-      <section id="menuPanel" class="panel-drawer left hidden">
-        <div id="menuResize" class="drawer-resize-handle right" aria-hidden="true"></div>
-        <header class="drawer-head">
-          <div class="brand">Meny</div>
-          <button id="menuClose" class="icon-btn" aria-label="Stäng">✕</button>
-        </header>
-        <div class="menu-body">
-          <div class="row">
-            <button id="btnCreateExam" class="btn btn-primary">Skapa tenta</button>
-            <button id="btnLoadExam" class="btn">Ladda sparad tenta</button>
-          </div>
-        </div>
-      </section>
+  <!-- Main copilot drawer removed: use + to add individual copilots -->
+  <!-- Left menu panel removed -->
 
       <!-- Fullscreen modal for exam view -->
       <section id="examModal" class="modal hidden">

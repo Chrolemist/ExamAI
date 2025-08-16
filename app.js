@@ -4,9 +4,7 @@ const els = {
   copilotFab: document.getElementById('copilotFab'),
   copilotPanel: document.getElementById('copilotPanel'),
   copilotClose: document.getElementById('copilotClose'),
-  menuFab: document.getElementById('menuFab'),
-  menuPanel: document.getElementById('menuPanel'),
-  menuClose: document.getElementById('menuClose'),
+  // Left menu removed
   messages: document.getElementById('messages'),
   composer: document.getElementById('composer'),
   userInput: document.getElementById('userInput'),
@@ -46,7 +44,7 @@ const els = {
   loadChatBtn: document.getElementById('loadChatBtn'),
   // Resize handle
   copilotResize: document.getElementById('copilotResize'),
-  menuResize: document.getElementById('menuResize'),
+  // menuResize removed
   attachmentsBar: document.getElementById('attachmentsBar'),
   globalUserNameInput: document.getElementById('globalUserNameInput'),
   pauseFlowBtn: document.getElementById('pauseFlowBtn'),
@@ -118,6 +116,123 @@ const PauseManager = (() => {
 // Wire pause/resume button
 els.pauseFlowBtn?.addEventListener('click', () => PauseManager.toggle());
 
+// ================= Internet Hub (web access node) =================
+// A draggable round node with connection points; copilots gain web access only when linked to this hub.
+const InternetHub = (() => {
+  let el = null;
+  const LINK_KEY = 'internet-noden';
+  const linked = new Set(); // store copilot ids
+  let dragging = false, sx=0, sy=0, ox=0, oy=0;
+  function ensure() {
+    if (el) return el;
+    const d = document.createElement('div');
+    d.id = 'internetHub';
+    d.className = 'internet-hub fab';
+    d.title = 'Internet';
+    d.innerHTML = `
+      <svg class="globe" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="url(#gradHub)" stroke-width="1.6"><defs><linearGradient id="gradHub" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7c5cff"/><stop offset="100%" stop-color="#00d4ff"/></linearGradient></defs><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></g></svg>
+    `;
+    // default pos
+    const vh = Math.max(240, window.innerHeight || 240);
+    d.style.left = '18px';
+    d.style.top = (vh - 110) + 'px';
+    d.style.right = 'auto';
+    d.style.bottom = 'auto';
+    // Add connection points (t,b,l,r)
+    ['t','b','l','r'].forEach(side => {
+      const p = document.createElement('div');
+      p.className = 'conn-point';
+      p.setAttribute('data-side', side);
+      d.appendChild(p);
+    });
+    document.body.appendChild(d);
+    // Drag to move
+    const onDown = (e) => {
+      dragging = true;
+      const p = e.touches ? e.touches[0] : e;
+      sx = p.clientX; sy = p.clientY;
+      const r = d.getBoundingClientRect();
+      ox = r.left; oy = r.top;
+      document.addEventListener('mousemove', onMove, { passive:false });
+      document.addEventListener('mouseup', onUp, { passive:false });
+      document.addEventListener('touchmove', onMove, { passive:false });
+      document.addEventListener('touchend', onUp, { passive:false });
+      e.preventDefault();
+    };
+    const onMove = (e) => {
+      if (!dragging) return;
+      const p = e.touches ? e.touches[0] : e;
+      const nx = ox + (p.clientX - sx);
+      const ny = oy + (p.clientY - sy);
+      d.style.left = nx + 'px';
+      d.style.top = ny + 'px';
+      d.style.right = 'auto'; d.style.bottom = 'auto';
+      window.dispatchEvent(new CustomEvent('examai:internet:moved'));
+      e.preventDefault();
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+      try {
+        const r = d.getBoundingClientRect();
+        localStorage.setItem('examai.internetHub.pos', JSON.stringify({ x: r.left, y: r.top }));
+      } catch {}
+    };
+    d.addEventListener('mousedown', onDown, { passive:false });
+    d.addEventListener('touchstart', onDown, { passive:false });
+    // Restore pos
+    try {
+      const saved = localStorage.getItem('examai.internetHub.pos');
+      if (saved) {
+        const { x, y } = JSON.parse(saved);
+        if (Number.isFinite(x)) d.style.left = x + 'px';
+        if (Number.isFinite(y)) d.style.top = y + 'px';
+      }
+    } catch {}
+    el = d;
+    return el;
+  }
+  function element() { return ensure(); }
+  function getCenter(el) { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; }
+  function linkCopilot(inst, startPtEl, endPtEl) {
+    const hub = element();
+    const a = getCenter(startPtEl || inst.panel);
+    const b = getCenter(endPtEl || hub);
+    const lineId = `link_internet_${inst.id}`;
+    ConnectionLayer.draw(lineId, a, b);
+    const updateLine = () => ConnectionLayer.draw(lineId, getCenter(startPtEl || inst.panel), getCenter(endPtEl || hub));
+    inst.panel.addEventListener('mousemove', updateLine);
+    window.addEventListener('resize', updateLine);
+    window.addEventListener('scroll', updateLine, { passive:true });
+    window.addEventListener('examai:internet:moved', updateLine);
+    linked.add(inst.id);
+    inst.connections.set(LINK_KEY, { lineId, updateLine, ro: [] });
+    window.dispatchEvent(new CustomEvent('examai:internet:linked', { detail: { copilotId: inst.id } }));
+    setTimeout(updateLine, 0);
+  }
+  function unlinkCopilot(inst) {
+    if (!linked.has(inst.id)) return;
+    const item = inst.connections.get(LINK_KEY);
+    if (item) {
+      ConnectionLayer.remove(item.lineId);
+      inst.panel.removeEventListener('mousemove', item.updateLine);
+      window.removeEventListener('resize', item.updateLine);
+      window.removeEventListener('scroll', item.updateLine);
+      window.removeEventListener('examai:internet:moved', item.updateLine);
+      inst.connections.delete(LINK_KEY);
+    }
+    linked.delete(inst.id);
+    window.dispatchEvent(new CustomEvent('examai:internet:unlinked', { detail: { copilotId: inst.id } }));
+  }
+  function isLinked(copilotId) { return linked.has(copilotId); }
+  function setActive(v) { element().classList.toggle('active', !!v); }
+  return { element, linkCopilot, unlinkCopilot, isLinked, setActive, LINK_KEY };
+})();
+
 // Drawer helpers
 function toggleDrawer(panel, from) {
   const isHidden = panel.classList.contains('hidden') || !panel.classList.contains('show');
@@ -133,8 +248,7 @@ function toggleDrawer(panel, from) {
 
 els.copilotFab?.addEventListener('click', () => toggleDrawer(els.copilotPanel, 'right'));
 els.copilotClose?.addEventListener('click', () => toggleDrawer(els.copilotPanel, 'right'));
-els.menuFab?.addEventListener('click', () => toggleDrawer(els.menuPanel, 'left'));
-els.menuClose?.addEventListener('click', () => toggleDrawer(els.menuPanel, 'left'));
+// Left menu removed – no toggle listeners
 
 // Toggle file picker modal
 function showModal(modal, show) {
@@ -219,17 +333,28 @@ const RENDER_MODE_STORAGE = 'examai.render_mode'; // 'raw' | 'md'
 function loadKey() {
   const key = localStorage.getItem(KEY_STORAGE) || '';
   if (key) {
-    els.apiKeyInput.value = '•••• •••• ••••';
-  els.apiKeyInput.setAttribute('readonly', 'true');
-    els.keyStatus.textContent = 'Nyckel sparad';
-    els.keyStatus.classList.remove('badge-error');
-    els.keyStatus.classList.add('badge-ok');
+    if (els.apiKeyInput) {
+      els.apiKeyInput.value = '•••• •••• ••••';
+      els.apiKeyInput.setAttribute('readonly', 'true');
+    }
+    if (els.keyStatus) {
+      els.keyStatus.textContent = 'Nyckel sparad';
+      els.keyStatus.classList.remove('badge-error');
+      els.keyStatus.classList.add('badge-ok');
+    }
+  // Notify listeners (copilot badges) that global key is available
+  try { window.dispatchEvent(new CustomEvent('examai:globalKeyChanged', { detail: { present: true } })); } catch {}
   } else {
-    els.apiKeyInput.value = '';
-  els.apiKeyInput.removeAttribute('readonly');
-    els.keyStatus.textContent = 'Ingen nyckel';
-    els.keyStatus.classList.remove('badge-ok');
-    els.keyStatus.classList.add('badge-error');
+    if (els.apiKeyInput) {
+      els.apiKeyInput.value = '';
+      els.apiKeyInput.removeAttribute('readonly');
+    }
+    if (els.keyStatus) {
+      els.keyStatus.textContent = 'Ingen nyckel';
+      els.keyStatus.classList.remove('badge-ok');
+      els.keyStatus.classList.add('badge-error');
+    }
+  try { window.dispatchEvent(new CustomEvent('examai:globalKeyChanged', { detail: { present: false } })); } catch {}
   }
 }
 
@@ -272,16 +397,12 @@ function setStoredName(name) {
 })();
 
 els.deleteKeyBtn?.addEventListener('click', () => {
-  // If server manages the key, block deletion and warn
-  if (hasServerKey) {
-    toast('Nyckeln hanteras via servern (.env) och kan inte tas bort här.', 'warn');
-    return;
-  }
   const ok = confirm('Ta bort sparad API-nyckel?');
   if (!ok) return;
   localStorage.removeItem(KEY_STORAGE);
   loadKey();
   toast('API-nyckel borttagen.');
+  try { window.dispatchEvent(new CustomEvent('examai:globalKeyChanged', { detail: { present: false } })); } catch {}
 });
 
 els.globalKeyToggle?.addEventListener('change', (e) => {
@@ -318,13 +439,14 @@ els.apiKeyInput?.addEventListener('blur', () => {
   localStorage.setItem(KEY_STORAGE, candidate);
   loadKey();
   toast('API-nyckel sparad.');
+  try { window.dispatchEvent(new CustomEvent('examai:globalKeyChanged', { detail: { present: true } })); } catch {}
 });
 
 function initSettings() {
   loadKey();
   const name = getStoredName();
-  els.copilotName.textContent = name;
-  els.copilotNameInput.value = name;
+  if (els.copilotName) els.copilotName.textContent = name;
+  if (els.copilotNameInput) els.copilotNameInput.value = name;
   loadMaxTokens();
   // Load persisted copilot width
   const w = parseInt(localStorage.getItem('examai.copilot.width') || '360', 10);
@@ -359,10 +481,26 @@ function setAvatarBusy(busy) {
 }
 
 function toast(msg, kind = 'info') {
+  // Ensure a notifications container exists even without the main drawer
+  let container = els.hexNotifications;
+  if (!container) {
+    container = document.getElementById('hexNotifications');
+  }
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'hexNotifications';
+    container.className = 'hex-notify global';
+    // Minimal positioning fallback
+    container.style.position = 'fixed';
+    container.style.top = '12px';
+    container.style.right = '12px';
+    container.style.zIndex = 9999;
+    document.body.appendChild(container);
+  }
   const b = document.createElement('div');
   b.className = 'hex-bubble ' + (kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : '');
   b.textContent = msg;
-  els.hexNotifications.appendChild(b);
+  container.appendChild(b);
   setTimeout(() => b.classList.add('fade-out'), 1800);
   setTimeout(() => b.remove(), 2200);
 }
@@ -568,24 +706,30 @@ async function checkKeyStatus() {
     const data = await res.json();
     hasServerKey = !!data.hasKey;
     if (hasServerKey) {
-      els.keyStatus.textContent = 'Nyckel i server (.env)';
-      els.keyStatus.classList.remove('badge-error');
-      els.keyStatus.classList.add('badge-ok');
-      els.apiKeyInput.value = '•••• •••• ••••';
-      els.apiKeyInput.setAttribute('readonly', 'true');
-      // Inform user via tooltip; actual warning shown on click
-      if (els.deleteKeyBtn) {
-        els.deleteKeyBtn.title = 'Nyckeln hanteras via servern (.env)';
+      if (els.keyStatus) {
+        els.keyStatus.textContent = 'Nyckel i server (.env) – kan skrivas över här';
+        els.keyStatus.classList.remove('badge-error');
+        els.keyStatus.classList.add('badge-ok');
+      }
+      if (els.apiKeyInput) {
+        if (localStorage.getItem(KEY_STORAGE)) {
+          els.apiKeyInput.value = '•••• •••• ••••';
+        } else {
+          els.apiKeyInput.value = '';
+        }
+        els.apiKeyInput.removeAttribute('readonly');
       }
     } else if (!localStorage.getItem(KEY_STORAGE)) {
-      els.keyStatus.textContent = 'Ingen nyckel';
-      els.keyStatus.classList.remove('badge-ok');
-      els.keyStatus.classList.add('badge-error');
-      els.apiKeyInput.removeAttribute('readonly');
+      if (els.keyStatus) {
+        els.keyStatus.textContent = 'Ingen nyckel';
+        els.keyStatus.classList.remove('badge-ok');
+        els.keyStatus.classList.add('badge-error');
+      }
+      if (els.apiKeyInput) els.apiKeyInput.removeAttribute('readonly');
     }
-    if (!hasServerKey && els.deleteKeyBtn) {
-      els.deleteKeyBtn.removeAttribute('title');
-    }
+    if (els.deleteKeyBtn) { els.deleteKeyBtn.removeAttribute('title'); }
+  // Inform listeners that server key availability changed
+  try { window.dispatchEvent(new CustomEvent('examai:serverKeyStatusChanged', { detail: { hasServerKey } })); } catch {}
   } catch {}
 }
 
@@ -766,10 +910,6 @@ function onMove(e) {
     const dx = startX - x; // drag leftwards increases width for right drawer
     const next = startW + dx;
     setCopilotWidth(next);
-  } else if (targetPanel === 'menu') {
-    const dx = x - startX; // drag rightwards increases width for left drawer
-    const next = startW + dx;
-    setMenuWidth(next);
   }
 }
 
@@ -784,9 +924,6 @@ function onUp() {
   if (targetPanel === 'copilot') {
     const w = parseInt((els.copilotPanel?.style.width || '360px').replace('px',''), 10) || 360;
     localStorage.setItem('examai.copilot.width', String(w));
-  } else if (targetPanel === 'menu') {
-    const w = parseInt((els.menuPanel?.style.width || '300px').replace('px',''), 10) || 300;
-    localStorage.setItem('examai.menu.width', String(w));
   }
   targetPanel = null;
 }
@@ -809,36 +946,7 @@ els.copilotResize?.addEventListener('touchstart', (e) => {
   document.addEventListener('touchend', onUp);
 });
 
-function setMenuWidth(px) {
-  const clamped = Math.max(MENU_MIN, Math.min(MENU_MAX, px));
-  if (els.menuPanel) {
-    els.menuPanel.style.width = clamped + 'px';
-  }
-}
-
-els.menuResize?.addEventListener('mousedown', (e) => {
-  resizing = true;
-  startX = e.clientX;
-  startW = parseInt((els.menuPanel?.style.width || window.getComputedStyle(els.menuPanel).width || '300px').replace('px',''), 10) || 300;
-  targetPanel = 'menu';
-  document.addEventListener('mousemove', onMove);
-  document.addEventListener('mouseup', onUp);
-});
-
-els.menuResize?.addEventListener('touchstart', (e) => {
-  resizing = true;
-  startX = e.touches[0].clientX;
-  startW = parseInt((els.menuPanel?.style.width || window.getComputedStyle(els.menuPanel).width || '300px').replace('px',''), 10) || 300;
-  targetPanel = 'menu';
-  document.addEventListener('touchmove', onMove, { passive: false });
-  document.addEventListener('touchend', onUp);
-});
-
-// Load persisted menu width on init
-(() => {
-  const w = parseInt(localStorage.getItem('examai.menu.width') || '300', 10);
-  if (!isNaN(w)) setMenuWidth(w);
-})();
+// Left menu removed – resizer and persisted width not applicable
 
 // --- Drag & drop into chat: upload PDFs/TXT/MD and attach text to history ---
 function setupChatDrop() {
@@ -1092,15 +1200,51 @@ const ConversationManager = (() => {
     const conv = conversations.get(convId);
     if (!conv) return;
     conv.members.delete(copilot.id);
+    // If conversation now has fewer than 2 members, dissolve it and
+    // merge its remaining shared history back into the single member (if any),
+    // then remove the conversation to avoid self-replies.
     const size = conv.members.size;
     if (size <= 0) {
       conversations.delete(convId);
       return;
     }
+    if (size === 1) {
+      // Get the remaining member
+      const remainingId = Array.from(conv.members)[0];
+      const remainingInst = CopilotManager.instances.get(remainingId);
+      if (remainingInst) {
+        // Append shared history to the remaining copilot's personal history
+        try {
+          for (const m of conv.history || []) {
+            if (m && m.role) remainingInst.history.push(m);
+          }
+        } catch (e) {}
+        // Clear any pending turns and prevent further processing
+        conv.pending = [];
+        conv.busy = false;
+  // Clear the remaining instance's conv pointer so it no longer references a deleted conv
+  try { remainingInst._convId = null; } catch (e) {}
+      }
+      conversations.delete(convId);
+      return;
+    }
+    // More than one member: keep conversation and adjust turnIdx
     conv.turnIdx = conv.turnIdx % size;
   }
 
-  return { link, addMember, getMembers, getHistory, recordAssistant, enqueueUser, removeMember, resumeAll };
+  function removePendingFor(copilotId) {
+    conversations.forEach((conv, id) => {
+      if (!conv || !Array.isArray(conv.pending)) return;
+      const before = conv.pending.length;
+      conv.pending = conv.pending.filter(p => p && p.from !== copilotId);
+      if (conv.pending.length !== before) {
+        // if queue changed and there are no pending items left, ensure not busy
+        if (!conv.pending.length) conv.busy = false;
+      }
+    });
+  }
+
+  return { link, addMember, getMembers, getHistory, recordAssistant, enqueueUser, removeMember, resumeAll, removePendingFor };
 })();
 
 class CopilotInstance {
@@ -1141,6 +1285,11 @@ class CopilotInstance {
   this.webEnableEl = this.panel.querySelector('[data-role="webEnable"]');
   this.webMaxResultsEl = this.panel.querySelector('[data-role="webMaxResults"]');
   this.apiKeyEl = this.panel.querySelector('[data-role="apiKey"]');
+  // Web text budget sliders
+  this.webPerPageCharsEl = this.panel.querySelector('[data-role="webPerPageChars"]');
+  this.webPerPageCharsValueEl = this.panel.querySelector('[data-role="webPerPageCharsValue"]');
+  this.webTotalCharsEl = this.panel.querySelector('[data-role="webTotalChars"]');
+  this.webTotalCharsValueEl = this.panel.querySelector('[data-role="webTotalCharsValue"]');
   this.keyBadgeEl = this.panel.querySelector('[data-role="keyStatus"]');
   this.topicEl = this.panel.querySelector('[data-role="topic"]');
   this.roleEl = this.panel.querySelector('[data-role="role"]');
@@ -1159,9 +1308,13 @@ class CopilotInstance {
   this.#wireResize();
   this.#initInputAutoResize();
   this.#wirePanelDrag();
+  this.#wireFabConnections();
+  this.#wireFabContextMenu();
   this.updateKeyStatusBadge();
   // re-evaluate after possible async server key check
   setTimeout(() => this.updateKeyStatusBadge(), 1200);
+  // Attach listeners for global/server key changes once
+  try { this._attachKeyListenersOnce(this); } catch {}
   // Initialize author label to global user name and react to changes
   this.userName = getGlobalUserName();
   if (this.authorEl) this.authorEl.textContent = `Skriver som: ${this.userName}`;
@@ -1195,6 +1348,18 @@ class CopilotInstance {
   b.style.right = 'auto';
   b.style.bottom = 'auto';
   b.style.position = 'fixed';
+    // Add connection points on the minimized icon (t, b, l, r)
+    ;['t','b','l','r'].forEach(side => {
+      const p = document.createElement('div');
+      p.className = 'conn-point';
+      p.setAttribute('data-side', side);
+      b.appendChild(p);
+    });
+  // Add a floating label above the FAB showing the copilot name
+  const lbl = document.createElement('div');
+  lbl.className = 'fab-label';
+  lbl.textContent = this.name || '';
+  b.appendChild(lbl);
     document.body.appendChild(b);
     return b;
   }
@@ -1214,7 +1379,8 @@ class CopilotInstance {
   <div class="meta"><div class="name">${this.name}</div></div>
   <span class="badge" data-role="roleBadge" title="Roll (klicka för att toggla)">Roll</span>
         <span class="badge badge-error" data-role="keyStatus">Ingen nyckel</span>
-        <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+  <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+  <button class="icon-btn" data-action="delete" title="Radera">🗑</button>
         <button class="icon-btn" data-action="close">✕</button>
       </header>
       <div class="settings collapsed" data-role="settings">
@@ -1257,11 +1423,16 @@ class CopilotInstance {
         </label>
     <fieldset class="subsec">
           <legend>Webbsökning</legend>
-          <label>
-            <input type="checkbox" data-role="webEnable" /> Tillåt websökning innan svar
-          </label>
           <label>Max källor
             <input type="number" min="1" step="1" value="3" data-role="webMaxResults" />
+          </label>
+          <label>Max text per källa
+            <input type="range" min="1000" max="12000" step="250" value="3000" data-role="webPerPageChars" />
+            <div class="subtle"><span data-role="webPerPageCharsValue">3000</span> tecken</div>
+          </label>
+          <label>Total textbudget
+            <input type="range" min="2000" max="24000" step="500" value="9000" data-role="webTotalChars" />
+            <div class="subtle"><span data-role="webTotalCharsValue">9000</span> tecken</div>
           </label>
         </fieldset>
         <label>API-nyckel (denna copilot)
@@ -1287,21 +1458,23 @@ class CopilotInstance {
       sec.appendChild(p);
     });
     document.body.appendChild(sec);
-    sec.querySelector('[data-action="close"]').addEventListener('click', () => this.hide());
+  sec.querySelector('[data-action="close"]').addEventListener('click', () => this.hide());
     sec.querySelector('[data-action="settings"]').addEventListener('click', () => {
       this.settingsEl.classList.toggle('collapsed');
     });
+  const delBtn = sec.querySelector('[data-action="delete"]');
+  if (delBtn) delBtn.addEventListener('click', () => this.destroy());
     return sec;
   }
   #wireConnections() {
-    const points = this.connPoints;
+  const points = this.connPoints;
   let dragging = false; let start = null; let ghostId = null; let overPoint = null; let startPointEl = null;
     const getCenter = (el) => {
       const r = el.getBoundingClientRect();
       return { x: r.left + r.width/2, y: r.top + r.height/2 };
     };
     const pickPointAt = (x, y) => {
-      const all = document.querySelectorAll('.panel-flyout .conn-point');
+      const all = document.querySelectorAll('.panel-flyout .conn-point, .internet-hub .conn-point, .fab .conn-point');
       for (const p of all) {
         const r = p.getBoundingClientRect();
         if (x >= r.left-6 && x <= r.right+6 && y >= r.top-6 && y <= r.bottom+6) return p;
@@ -1333,34 +1506,42 @@ class CopilotInstance {
       ghostId = null;
   // If dropped on another copilot's point, link conversations
       if (endPt) {
-        const otherPanel = endPt.closest('.panel-flyout');
-        if (otherPanel && otherPanel !== this.panel) {
-          const otherId = parseInt(otherPanel.getAttribute('data-copilot-id'), 10);
-          const other = CopilotManager.instances.get(otherId);
+        const hubEl = endPt.closest('.internet-hub');
+        if (hubEl) {
+          // Link to Internet hub
+          InternetHub.linkCopilot(this, startPointEl, endPt);
+        } else {
+          const otherPanel = endPt.closest('.panel-flyout');
+          const otherFab = endPt.closest('.fab');
+          let other = null;
+          if (otherPanel && otherPanel !== this.panel) {
+            const otherId = parseInt(otherPanel.getAttribute('data-copilot-id'), 10);
+            other = CopilotManager.instances.get(otherId);
+          } else if (otherFab && otherFab !== this.fab) {
+            const otherId = parseInt(otherFab.getAttribute('data-copilot-id'), 10);
+            other = CopilotManager.instances.get(otherId);
+          }
           if (other) {
-            const convId = ConversationManager.link(this, other);
-            // Draw a persistent line between the actual connection points
-    const startPtEl = startPointEl || this.panel; // starting point on this panel
-            const endPtEl = endPt; // drop target point on other panel
-            const aCenter = getCenter(startPtEl);
-            const bCenter = getCenter(endPtEl);
+            ConversationManager.link(this, other);
+            const startEl = startPointEl || this.panel;
+            const endPtEl = endPt;
             const lineId = stableLinkId(this.id, other.id);
-            ConnectionLayer.draw(lineId, aCenter, bCenter);
-            // Keep line updated on movement/resize/scroll
             const updateLine = () => {
-              ConnectionLayer.draw(lineId, getCenter(startPtEl), getCenter(endPtEl));
+              const a = getCenter(startEl);
+              const b = getCenter(endPtEl);
+              ConnectionLayer.draw(lineId, a, b);
             };
-            // register listeners
+            // listeners for movement
             this.panel.addEventListener('mousemove', updateLine);
             other.panel.addEventListener('mousemove', updateLine);
             window.addEventListener('resize', updateLine);
             window.addEventListener('scroll', updateLine, { passive: true });
-            // observe size/position changes
+            window.addEventListener('examai:fab:moved', updateLine);
+            // observers
             const roA = new ResizeObserver(updateLine);
             const roB = new ResizeObserver(updateLine);
             roA.observe(this.panel);
             roB.observe(other.panel);
-            // Initial ensure after drop settles
             setTimeout(updateLine, 0);
             // Track connection for unlink
             this.connections.set(other.id, { lineId, updateLine, ro: [roA, roB] });
@@ -1370,17 +1551,57 @@ class CopilotInstance {
       }
     };
     points.forEach(pt => {
+      // Hover menu to unlink from FAB conn-points (so unlink works from icon mode)
+      let hoverTimerFab = null;
+      const showFabMenu = () => {
+        const hasInternet = InternetHub.isLinked(this.id);
+        let menu = document.querySelector('.conn-menu');
+        if (!menu) {
+          menu = document.createElement('div');
+          menu.className = 'conn-menu';
+          menu.innerHTML = `
+            <div style="display:flex;gap:6px">
+              <button data-action="unlink">Unlink</button>
+              <button data-action="unlink-internet">Från Internet</button>
+            </div>`;
+          document.body.appendChild(menu);
+        }
+        const r = pt.getBoundingClientRect();
+        menu.style.left = `${r.left + window.scrollX + 8}px`;
+        menu.style.top = `${r.top + window.scrollY + 8}px`;
+        menu.classList.add('show');
+        const onDocClick = (ev) => {
+          if (!menu.contains(ev.target)) {
+            menu.classList.remove('show');
+            document.removeEventListener('mousedown', onDocClick);
+          }
+        };
+        document.addEventListener('mousedown', onDocClick);
+        const btn = menu.querySelector('[data-action="unlink"]');
+        btn.onclick = (ev) => { ev.stopPropagation(); menu.classList.remove('show'); this.unlinkSelf(); document.removeEventListener('mousedown', onDocClick); };
+        const btnNet = menu.querySelector('[data-action="unlink-internet"]');
+        if (btnNet) { btnNet.style.display = hasInternet ? 'inline-block' : 'none'; btnNet.onclick = (ev) => { ev.stopPropagation(); menu.classList.remove('show'); InternetHub.unlinkCopilot(this); document.removeEventListener('mousedown', onDocClick); }; }
+      };
+      pt.addEventListener('mouseenter', () => { hoverTimerFab = setTimeout(showFabMenu, 600); });
+      pt.addEventListener('mouseleave', () => { if (hoverTimerFab) { clearTimeout(hoverTimerFab); hoverTimerFab = null; } });
+      // right-click on the conn-point should also show the menu
+      pt.addEventListener('contextmenu', (e) => { e.preventDefault(); showFabMenu(); });
       // Hover menu to unlink
       let hoverTimer = null;
       const showMenu = () => {
         if (!this._convId) return;
         const members = ConversationManager.getMembers(this._convId) || [];
-        if (members.length <= 1) return;
+        const hasInternet = InternetHub.isLinked(this.id);
+        if (members.length <= 1 && !hasInternet) return;
         let menu = document.querySelector('.conn-menu');
         if (!menu) {
           menu = document.createElement('div');
           menu.className = 'conn-menu';
-          menu.innerHTML = '<button data-action="unlink" title="Koppla isär">Unlink</button>';
+          menu.innerHTML = `
+            <div style="display:flex;gap:6px">
+              <button data-action="unlink" title="Koppla isär">Unlink</button>
+              <button data-action="unlink-internet" title="Koppla från Internet">Från Internet</button>
+            </div>`;
           document.body.appendChild(menu);
         }
         const r = pt.getBoundingClientRect();
@@ -1401,6 +1622,16 @@ class CopilotInstance {
           this.unlinkSelf();
           document.removeEventListener('mousedown', onDocClick);
         };
+        const btnNet = menu.querySelector('[data-action="unlink-internet"]');
+        if (btnNet) {
+          btnNet.style.display = hasInternet ? 'inline-block' : 'none';
+          btnNet.onclick = (ev) => {
+            ev.stopPropagation();
+            menu.classList.remove('show');
+            InternetHub.unlinkCopilot(this);
+            document.removeEventListener('mousedown', onDocClick);
+          };
+        }
       };
       pt.addEventListener('mouseenter', () => {
         hoverTimer = setTimeout(showMenu, 600);
@@ -1437,18 +1668,187 @@ class CopilotInstance {
         other.panel.removeEventListener('mousemove', updateLine);
         other.connections.delete(this.id);
       }
-      window.removeEventListener('resize', updateLine);
-      window.removeEventListener('scroll', updateLine);
+  window.removeEventListener('resize', updateLine);
+  window.removeEventListener('scroll', updateLine);
+  window.removeEventListener('examai:internet:moved', updateLine);
+  window.removeEventListener('examai:fab:moved', updateLine);
       if (ro && Array.isArray(ro)) {
         try { ro[0]?.disconnect(); } catch {}
         try { ro[1]?.disconnect(); } catch {}
       }
     }
     this.connections.clear();
-    ConversationManager.removeMember(this._convId, this);
+    // Remove any pending turns that reference this copilot to avoid later self-replies
+    try {
+      if (this._convId && ConversationManager && typeof ConversationManager.removePendingFor === 'function') {
+        ConversationManager.removePendingFor(this.id);
+      }
+    } catch (e) {}
+    try { ConversationManager.removeMember(this._convId, this); } catch (e) {}
     this._convId = null;
     this.panel.classList.remove('active-speaking');
     toast('Urkopplad.');
+  }
+  #wireFabConnections() {
+    const points = Array.from(this.fab.querySelectorAll('.conn-point'));
+    let dragging = false; let start = null; let ghostId = null; let overPoint = null; let startPointEl = null;
+    const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
+    const pickPointAt = (x, y) => {
+      const all = document.querySelectorAll('.panel-flyout .conn-point, .internet-hub .conn-point, .fab .conn-point');
+      for (const p of all) { const r = p.getBoundingClientRect(); if (x >= r.left-6 && x <= r.right+6 && y >= r.top-6 && y <= r.bottom+6) return p; }
+      return null;
+    };
+    const onMove = (e) => {
+      if (!dragging) return; const p = e.touches ? e.touches[0] : e;
+      const b = { x: p.clientX, y: p.clientY };
+      ConnectionLayer.draw(ghostId, start, b);
+      const hit = pickPointAt(b.x, b.y);
+      if (overPoint && overPoint !== hit) overPoint.classList.remove('hover');
+      overPoint = hit; if (overPoint) overPoint.classList.add('hover');
+      e.preventDefault();
+    };
+    const onUp = () => {
+      if (!dragging) return; dragging = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+      if (overPoint) overPoint.classList.remove('hover');
+      const endPt = overPoint; if (ghostId) ConnectionLayer.remove(ghostId); ghostId = null;
+      if (endPt) {
+        const hubEl = endPt.closest('.internet-hub');
+        if (hubEl) { InternetHub.linkCopilot(this, startPointEl, endPt); }
+        else {
+          const panel = endPt.closest('.panel-flyout');
+          const fab = endPt.closest('.fab');
+          let other = null;
+          if (panel) { const id = parseInt(panel.getAttribute('data-copilot-id'), 10); other = CopilotManager.instances.get(id); }
+          else if (fab && fab !== this.fab) { const id = parseInt(fab.getAttribute('data-copilot-id'), 10); other = CopilotManager.instances.get(id); }
+          if (other) {
+            ConversationManager.link(this, other);
+            const startEl = startPointEl || this.fab;
+            const endEl = endPt;
+            const lineId = stableLinkId(this.id, other.id);
+            const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(startEl), getCenter(endEl)); };
+            // listeners
+            this.panel.addEventListener('mousemove', updateLine);
+            other.panel.addEventListener('mousemove', updateLine);
+            window.addEventListener('resize', updateLine);
+            window.addEventListener('scroll', updateLine, { passive:true });
+            window.addEventListener('examai:fab:moved', updateLine);
+            const roA = new ResizeObserver(updateLine); const roB = new ResizeObserver(updateLine);
+            roA.observe(this.panel); roB.observe(other.panel);
+            setTimeout(updateLine, 0);
+            this.connections.set(other.id, { lineId, updateLine, ro: [roA, roB] });
+            other.connections.set(this.id, { lineId, updateLine, ro: [roB, roA] });
+          }
+        }
+      }
+    };
+    points.forEach(pt => {
+      pt.addEventListener('mousedown', (e) => {
+        dragging = true; overPoint = null; const c = getCenter(pt); start = c; startPointEl = pt; ghostId = `ghost_${this.id}_${Date.now()}`;
+        document.addEventListener('mousemove', onMove, { passive:false });
+        document.addEventListener('mouseup', onUp, { passive:false });
+        e.preventDefault(); e.stopPropagation();
+      }, { passive:false });
+      pt.addEventListener('touchstart', (e) => {
+        dragging = true; overPoint = null; const c = getCenter(pt); start = c; startPointEl = pt; ghostId = `ghost_${this.id}_${Date.now()}`;
+        document.addEventListener('touchmove', onMove, { passive:false });
+        document.addEventListener('touchend', onUp, { passive:false });
+        e.preventDefault(); e.stopPropagation();
+      }, { passive:false });
+    });
+  }
+
+  // Context menu for FAB: right-click (desktop) and long-press (touch)
+  #wireFabContextMenu() {
+    const fab = this.fab;
+    if (!fab) return;
+    let longPressTimer = null;
+    const clearLongPress = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
+
+    const removeExisting = () => {
+      const existing = document.querySelector(`.fab-menu[data-id="${this.id}"]`);
+      if (existing) existing.remove();
+    };
+
+    const showMenuAt = (x, y) => {
+      removeExisting();
+      const menu = document.createElement('div');
+      menu.className = 'fab-menu';
+      menu.setAttribute('data-id', String(this.id));
+      menu.innerHTML = `
+        <div class="fab-menu-row">
+          <button data-action="unlink">Unlink</button>
+          <button data-action="unlink-internet">Från Internet</button>
+        </div>
+        <div style="border-top:1px solid rgba(255,255,255,0.03);margin-top:6px;padding-top:6px;display:flex;justify-content:flex-end">
+          <button data-action="delete" class="danger">Radera</button>
+        </div>`;
+      document.body.appendChild(menu);
+      // position with small offsets and keep on screen
+      const pad = 8;
+      const mw = 180;
+      const left = Math.min(Math.max(pad, x), window.innerWidth - mw - pad);
+      const top = Math.min(Math.max(pad, y), window.innerHeight - 40 - pad);
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
+      menu.classList.add('show');
+
+      const onDocClick = (ev) => {
+        if (!menu.contains(ev.target)) {
+          menu.classList.remove('show');
+          setTimeout(() => menu.remove(), 120);
+          document.removeEventListener('mousedown', onDocClick);
+          document.removeEventListener('touchstart', onDocClick);
+        }
+      };
+      document.addEventListener('mousedown', onDocClick);
+      document.addEventListener('touchstart', onDocClick);
+
+      const btnUnlink = menu.querySelector('[data-action="unlink"]');
+      const btnNet = menu.querySelector('[data-action="unlink-internet"]');
+      const btnDel = menu.querySelector('[data-action="delete"]');
+
+      btnUnlink.onclick = (ev) => {
+        ev.stopPropagation();
+        removeExisting();
+        this.unlinkSelf();
+      };
+      btnNet.onclick = (ev) => {
+        ev.stopPropagation();
+        removeExisting();
+        InternetHub.unlinkCopilot(this);
+      };
+      btnDel.onclick = (ev) => {
+        ev.stopPropagation();
+        removeExisting();
+        const ok = confirm('Radera denna copilot? Detta kan inte ångras.');
+        if (ok) this.destroy();
+      };
+    };
+
+    // Desktop right-click
+    fab.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      // Avoid showing when dragging
+      const now = Date.now();
+      if (now - (this._lastDragAt || 0) < 300) return;
+      showMenuAt(e.clientX, e.clientY);
+    });
+
+    // Touch long-press
+    fab.addEventListener('touchstart', (e) => {
+      clearLongPress();
+      const p = e.touches ? e.touches[0] : e;
+      longPressTimer = setTimeout(() => {
+        showMenuAt(p.clientX, p.clientY);
+      }, 600);
+    }, { passive: true });
+    fab.addEventListener('touchend', clearLongPress);
+    fab.addEventListener('touchmove', clearLongPress);
+    fab.addEventListener('touchcancel', clearLongPress);
   }
   #wireDrag() {
     const fab = this.fab;
@@ -1474,10 +1874,12 @@ class CopilotInstance {
       moved = true;
       const nx = ox + dx;
       const ny = oy + dy;
-      fab.style.left = nx + 'px';
+  fab.style.left = nx + 'px';
       fab.style.top = ny + 'px';
       fab.style.right = 'auto';
       fab.style.bottom = 'auto';
+  // Notify connections to update lines
+  window.dispatchEvent(new CustomEvent('examai:fab:moved'));
     };
     const onUp = () => {
       if (!dragging) return;
@@ -1517,6 +1919,26 @@ class CopilotInstance {
       if (this.panel.classList.contains('hidden')) this.show(); else this.hide();
     });
   }
+  destroy() {
+    // Unlink from Internet if linked
+    try { InternetHub.unlinkCopilot(this); } catch {}
+    // Unlink from conversations and remove connection lines
+    try { this.unlinkSelf(); } catch {}
+    // Remove any remaining connection lines tracked under special keys
+    for (const [key, { lineId, updateLine }] of this.connections.entries()) {
+      try { ConnectionLayer.remove(lineId); } catch {}
+      try { window.removeEventListener('examai:fab:moved', updateLine); } catch {}
+      try { window.removeEventListener('resize', updateLine); } catch {}
+      try { window.removeEventListener('scroll', updateLine); } catch {}
+    }
+    this.connections.clear();
+    // Remove DOM elements
+    try { this.panel.remove(); } catch {}
+    try { this.fab.remove(); } catch {}
+    // Remove from manager
+    try { CopilotManager.instances.delete(this.id); } catch {}
+    toast('Copilot borttagen.');
+  }
   #wireSettings() {
     // Initialize values
     this.modelEl.value = localStorage.getItem(`examai.copilot.${this.id}.model`) || this.model;
@@ -1533,11 +1955,31 @@ class CopilotInstance {
     const instKey = localStorage.getItem(`examai.copilot.${this.id}.key`) || '';
     if (instKey) this.apiKeyEl.value = '•••• •••• ••••';
 
-  // Web search defaults
-  const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
-  if (this.webEnableEl) this.webEnableEl.checked = webEnable;
+  // Web search defaults: enabled only when linked to Internet hub (simple logic)
+  const webLinked = InternetHub.isLinked(this.id);
+  if (this.webEnableEl) {
+    this.webEnableEl.checked = webLinked;
+    this.webEnableEl.disabled = true;
+  this.webEnableEl.title = webLinked ? 'Webb tillåts via Internet-noden' : 'Koppla till Internet-noden för webbtillgång';
+  }
   const webMax = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10);
   if (this.webMaxResultsEl) this.webMaxResultsEl.value = String(Number.isFinite(webMax) && webMax > 0 ? webMax : 3);
+
+  // Initialize web text budgets
+  const perPageDefault = 3000;
+  const totalBudgetDefault = 9000;
+  const perPageSaved = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_per_page_chars`) || String(perPageDefault), 10);
+  const totalSaved = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_total_chars_cap`) || String(totalBudgetDefault), 10);
+  if (this.webPerPageCharsEl) {
+    const v = Number.isFinite(perPageSaved) ? perPageSaved : perPageDefault;
+    this.webPerPageCharsEl.value = String(v);
+    if (this.webPerPageCharsValueEl) this.webPerPageCharsValueEl.textContent = String(v);
+  }
+  if (this.webTotalCharsEl) {
+    const v = Number.isFinite(totalSaved) ? totalSaved : totalBudgetDefault;
+    this.webTotalCharsEl.value = String(v);
+    if (this.webTotalCharsValueEl) this.webTotalCharsValueEl.textContent = String(v);
+  }
 
     // Listeners
     this.modelEl.addEventListener('change', () => {
@@ -1553,6 +1995,8 @@ class CopilotInstance {
       if (nm) nm.textContent = this.name;
   if (this.authorEl) this.authorEl.textContent = `Skriver som: ${getGlobalUserName()}`;
   if (this.fab) this.fab.title = this.name;
+  // update fab label when name changes
+  try { const lbl = this.fab.querySelector('.fab-label'); if (lbl) lbl.textContent = this.name; } catch (e) {}
       if (tmrName) clearTimeout(tmrName);
       tmrName = setTimeout(() => {
         localStorage.setItem(`examai.copilot.${this.id}.name`, this.name);
@@ -1657,18 +2101,52 @@ class CopilotInstance {
       this.apiKeyEl.value = '•••• •••• ••••';
   this.updateKeyStatusBadge();
       toast('API-nyckel sparad.');
+      try { window.dispatchEvent(new CustomEvent('examai:perKeyChanged', { detail: { id: this.id, present: true } })); } catch {}
     });
-    if (this.webEnableEl) {
-      this.webEnableEl.addEventListener('change', () => {
-        localStorage.setItem(`examai.copilot.${this.id}.web_enable`, String(!!this.webEnableEl.checked));
-        toast(this.webEnableEl.checked ? 'Webbsökning aktiverad.' : 'Webbsökning avstängd.');
-      });
-    }
-  if (this.webMaxResultsEl) {
+    // If per-copilot key is cleared, reflect it immediately
+    this.apiKeyEl.addEventListener('input', () => {
+      const raw = (this.apiKeyEl.value || '').trim();
+      if (!raw) {
+        localStorage.removeItem(`examai.copilot.${this.id}.key`);
+        this.updateKeyStatusBadge();
+        try { window.dispatchEvent(new CustomEvent('examai:perKeyChanged', { detail: { id: this.id, present: false } })); } catch {}
+      }
+    });
+  // Reflect Internet link in UI; checkbox is just an indicator
+    const updateWebUi = () => {
+      const linked = InternetHub.isLinked(this.id);
+      if (this.webEnableEl) {
+    this.webEnableEl.checked = linked;
+    this.webEnableEl.disabled = true;
+  this.webEnableEl.title = linked ? 'Webb tillåts via Internet-noden' : 'Koppla till Internet-noden för webbtillgång';
+      }
+    };
+    window.addEventListener('examai:internet:linked', (e) => { if (e.detail?.copilotId === this.id) updateWebUi(); });
+    window.addEventListener('examai:internet:unlinked', (e) => { if (e.detail?.copilotId === this.id) updateWebUi(); });
+    updateWebUi();
+    if (this.webMaxResultsEl) {
       this.webMaxResultsEl.addEventListener('input', () => {
         const raw = parseInt(this.webMaxResultsEl.value, 10);
         if (Number.isFinite(raw) && raw > 0) {
           localStorage.setItem(`examai.copilot.${this.id}.web_max_results`, String(raw));
+        }
+      });
+    }
+    if (this.webPerPageCharsEl) {
+      this.webPerPageCharsEl.addEventListener('input', () => {
+        const raw = parseInt(this.webPerPageCharsEl.value, 10);
+        if (Number.isFinite(raw) && raw >= 500) {
+          localStorage.setItem(`examai.copilot.${this.id}.web_per_page_chars`, String(raw));
+          if (this.webPerPageCharsValueEl) this.webPerPageCharsValueEl.textContent = String(raw);
+        }
+      });
+    }
+    if (this.webTotalCharsEl) {
+      this.webTotalCharsEl.addEventListener('input', () => {
+        const raw = parseInt(this.webTotalCharsEl.value, 10);
+        if (Number.isFinite(raw) && raw >= 1000) {
+          localStorage.setItem(`examai.copilot.${this.id}.web_total_chars_cap`, String(raw));
+          if (this.webTotalCharsValueEl) this.webTotalCharsValueEl.textContent = String(raw);
         }
       });
     }
@@ -1684,19 +2162,20 @@ class CopilotInstance {
   }
   updateKeyStatusBadge() {
     if (!this.keyBadgeEl) return;
-    const perKey = localStorage.getItem(`examai.copilot.${this.id}.key`);
-    const globalKey = localStorage.getItem('examai.openai.key');
-    // hasServerKey is a global set by checkKeyStatus()
+    const perKey = !!localStorage.getItem(`examai.copilot.${this.id}.key`);
+    const globalKey = !!localStorage.getItem('examai.openai.key');
+    const server = !!hasServerKey;
+    // Priority: per-copilot > global > server > none
     if (perKey) {
-      this.keyBadgeEl.textContent = 'Nyckel sparad';
-      this.keyBadgeEl.classList.remove('badge-error');
-      this.keyBadgeEl.classList.add('badge-ok');
-    } else if (typeof hasServerKey !== 'undefined' && hasServerKey) {
-      this.keyBadgeEl.textContent = 'Nyckel i server (.env)';
+      this.keyBadgeEl.textContent = 'Nyckel: per‑copilot';
       this.keyBadgeEl.classList.remove('badge-error');
       this.keyBadgeEl.classList.add('badge-ok');
     } else if (globalKey) {
-      this.keyBadgeEl.textContent = 'Nyckel sparad';
+      this.keyBadgeEl.textContent = 'Nyckel: global';
+      this.keyBadgeEl.classList.remove('badge-error');
+      this.keyBadgeEl.classList.add('badge-ok');
+    } else if (server) {
+      this.keyBadgeEl.textContent = 'Nyckel i server (.env)';
       this.keyBadgeEl.classList.remove('badge-error');
       this.keyBadgeEl.classList.add('badge-ok');
     } else {
@@ -1705,6 +2184,21 @@ class CopilotInstance {
       this.keyBadgeEl.classList.add('badge-error');
     }
   }
+
+  // React to global/server key changes
+  _attachKeyListenersOnce = (() => {
+    let attached = false;
+    return (inst) => {
+      if (attached) return;
+      attached = true;
+      window.addEventListener('examai:globalKeyChanged', () => inst.updateKeyStatusBadge());
+      window.addEventListener('examai:serverKeyStatusChanged', () => inst.updateKeyStatusBadge());
+      window.addEventListener('examai:perKeyChanged', (e) => {
+        // If some other per-key changed, we still recompute (no harm)
+        inst.updateKeyStatusBadge();
+      });
+    };
+  })();
   updateRoleBadge() {
     if (!this.roleBadgeEl) return;
     const hasRole = !!(this.role && this.role.trim());
@@ -1990,15 +2484,23 @@ class CopilotInstance {
       }
       const model = this.model || 'gpt-5-mini';
       const perKey = localStorage.getItem(`examai.copilot.${this.id}.key`);
-      const body = { message: msg, messages, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
-      const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
-      if (webEnable) {
+  const body = { message: msg, messages, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
+  const webEnable = InternetHub.isLinked(this.id);
+    if (webEnable) {
         const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10);
-        body.web = { enable: true, maxResults: (Number.isFinite(maxResults) && maxResults > 0) ? maxResults : 3 };
+        const perPage = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_per_page_chars`) || '3000', 10);
+        const totalCap = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_total_chars_cap`) || '9000', 10);
+        body.web = {
+          enable: true,
+          maxResults: (Number.isFinite(maxResults) && maxResults > 0) ? maxResults : 3,
+          perPageChars: (Number.isFinite(perPage) && perPage >= 500) ? perPage : 3000,
+          totalCharsCap: (Number.isFinite(totalCap) && totalCap >= 1000) ? totalCap : 9000
+        };
       }
       const m = (model || '').toLowerCase();
   body.max_tokens = maxTok;
-      const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (webEnable) InternetHub.setActive(true);
+  const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
       if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
@@ -2015,6 +2517,13 @@ class CopilotInstance {
         const items = data.citations.map((c, i) => `<a href="${escapeHtml(c.url||'')}" target="_blank" rel="noopener">[${i+1}] ${escapeHtml(c.title||c.url||'Källa')}</a>`).join(' ');
         cites.innerHTML = `<div class="msg-author">Källor</div><div class="msg-text">${items}</div>`;
         this.msgEl.appendChild(cites);
+      } else {
+        // If user asked for a link/source but no citations, hint about Internet hub
+        const lastUser = msg.toLowerCase();
+        if (/(länk|lank|käll|källa|kalla)/.test(lastUser)) {
+          const linked = InternetHub.isLinked(this.id);
+          if (!linked) toast('Inga källor returnerades. Koppla denna copilot till Internet-noden för att få klickbara länkar.', 'warn');
+        }
       }
       if (!this._convId) {
         this.history.push({ role: 'user', content: msg });
@@ -2025,9 +2534,9 @@ class CopilotInstance {
         // Remove speaking highlight after reply lands
         this.panel.classList.remove('active-speaking');
       }
-    } catch (e) {
+  } catch (e) {
       this.addAssistant('Nätverksfel.');
-    }
+  } finally { InternetHub.setActive(false); }
   }
 
   // Used by PauseManager to flush a queued independent message
@@ -2044,8 +2553,21 @@ class CopilotInstance {
       }
       const model = this.model || 'gpt-5-mini';
       const perKey = localStorage.getItem(`examai.copilot.${this.id}.key`);
-      const body = { message: msg, messages, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
+  const body = { message: msg, messages, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
+  const webEnable = InternetHub.isLinked(this.id);
+  if (webEnable) {
+        const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10);
+        const perPage = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_per_page_chars`) || '3000', 10);
+        const totalCap = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_total_chars_cap`) || '9000', 10);
+        body.web = {
+          enable: true,
+          maxResults: (Number.isFinite(maxResults) && maxResults > 0) ? maxResults : 3,
+          perPageChars: (Number.isFinite(perPage) && perPage >= 500) ? perPage : 3000,
+          totalCharsCap: (Number.isFinite(totalCap) && totalCap >= 1000) ? totalCap : 9000
+        };
+      }
       body.max_tokens = maxTok;
+  if (webEnable) InternetHub.setActive(true);
       const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
@@ -2054,9 +2576,9 @@ class CopilotInstance {
       if ((this.renderMode||'raw') === 'md') this.addAssistant(reply); else this.#renderTyping(reply);
       this.history.push({ role: 'user', content: msg });
       if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
-    } catch {
+  } catch {
       this.addAssistant('Nätverksfel.');
-    }
+  } finally { InternetHub.setActive(false); }
   }
 
   async generateReply(messages) {
@@ -2079,18 +2601,27 @@ class CopilotInstance {
       if (myTopic) sys.push({ role: 'system', content: `Håll dig till ämnet: ${myTopic}.` });
       finalMsgs = [...sys, ...messages];
     }
-    const body = { message: finalMsgs[finalMsgs.length-1]?.content || '', messages: finalMsgs, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
-    const webEnable = (localStorage.getItem(`examai.copilot.${this.id}.web_enable`) || 'false') === 'true';
-    if (webEnable) {
+  const body = { message: finalMsgs[finalMsgs.length-1]?.content || '', messages: finalMsgs, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined) };
+  const webEnable = InternetHub.isLinked(this.id);
+  if (webEnable) {
       const maxResults = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_max_results`) || '3', 10);
-      body.web = { enable: true, maxResults: (Number.isFinite(maxResults) && maxResults > 0) ? maxResults : 3 };
+      const perPage = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_per_page_chars`) || '3000', 10);
+      const totalCap = parseInt(localStorage.getItem(`examai.copilot.${this.id}.web_total_chars_cap`) || '9000', 10);
+      body.web = {
+        enable: true,
+        maxResults: (Number.isFinite(maxResults) && maxResults > 0) ? maxResults : 3,
+        perPageChars: (Number.isFinite(perPage) && perPage >= 500) ? perPage : 3000,
+        totalCharsCap: (Number.isFinite(totalCap) && totalCap >= 1000) ? totalCap : 9000
+      };
     }
     const m = (model || '').toLowerCase();
   body.max_tokens = maxTok;
+  if (webEnable) InternetHub.setActive(true);
   const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   let data = null; let rawText = '';
   try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
-  if (!res.ok) throw new Error((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.');
+  if (!res.ok) { InternetHub.setActive(false); throw new Error((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); }
+  InternetHub.setActive(false);
   return (data && data.reply) || '(inget svar)';
   }
 }
@@ -2111,3 +2642,6 @@ const CopilotManager = (() => {
 document.getElementById('addCopilotBtn')?.addEventListener('click', () => {
   CopilotManager.add();
 });
+
+// Initialize Internet hub
+try { InternetHub.element(); } catch {}

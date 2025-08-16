@@ -27,6 +27,18 @@ except Exception:
     requests = None  # type: ignore
     BeautifulSoup = None  # type: ignore
 
+# Optional robust article extractor
+try:
+    import trafilatura  # type: ignore
+except Exception:
+    trafilatura = None  # type: ignore
+
+# Optional Playwright for realistic browsing (JS-rendered pages)
+try:
+    from playwright.sync_api import sync_playwright  # type: ignore
+except Exception:
+    sync_playwright = None  # type: ignore
+
 
 def create_app():
     app = Flask(
@@ -97,24 +109,108 @@ def create_app():
                     {"role": "user", "content": user_message},
                 ]
 
-            # Optional: lightweight web search and fetch context
+            # Optional: web search and fetch context (prefer Playwright if available)
             web_cfg = (data.get("web") or {}) if isinstance(data.get("web"), dict) else {}
             if web_cfg.get("enable"):
                 try:
-                    query_text = None
-                    # Find the latest user message for query
-                    for m in reversed(messages):
-                        if isinstance(m, dict) and m.get("role") == "user" and (m.get("content") or "").strip():
-                            query_text = (m.get("content") or "").strip()
-                            break
+                    # Inject capability guidance so model doesn't claim lack of internet when web is enabled
+                    try:
+                        messages = ([{"role": "system", "content": system_prompt + "\n\nANVISNING: Webbsökning är aktiv i denna session via servern. Säg inte att du saknar internet. Om inga källor hittas, säg kort att du inte fann relevanta källor just nu."}]
+                                    + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)])
+                    except Exception:
+                        pass
+
+                    # Derive a useful query from conversation history
+                    def _collect_domains(msgs):
+                        doms = []
+                        try:
+                            for m in reversed(msgs[-8:]):
+                                txt = (m.get("content") or "").lower()
+                                for k, d in {
+                                    'aftonbladet': 'aftonbladet.se',
+                                    'svt': 'svt.se',
+                                    'expressen': 'expressen.se',
+                                    'dn': 'dn.se',
+                                    'svd': 'svd.se',
+                                    'eurojackpot': 'eurojackpot.org',
+                                    'svenskaspel': 'svenskaspel.se',
+                                }.items():
+                                    if k in txt or d in txt:
+                                        if d not in doms:
+                                            doms.append(d)
+                        except Exception:
+                            pass
+                        return doms
+
+                    def _derive_query(msgs):
+                        GENERIC = {"berätta mer", "beratta mer", "fortsätt", "fortsatt", "mer", "more", "go on", "tell me more"}
+                        last_user = None
+                        prev_user = None
+                        for m in reversed(msgs):
+                            if isinstance(m, dict) and m.get("role") == "user":
+                                txt = (m.get("content") or "").strip()
+                                if not last_user:
+                                    last_user = txt
+                                else:
+                                    prev_user = txt
+                                    break
+                        q = (last_user or "").strip()
+                        ql = q.lower()
+                        if (len(q) < 12) or (ql in GENERIC):
+                            if prev_user and len(prev_user) > 0:
+                                q = prev_user
+                        # Append site filter when domains present
+                        doms = _collect_domains(msgs)
+                        if doms:
+                            # prefer first mentioned domain
+                            q = f"site:{doms[0]} {q or 'senaste nyheter'}"
+                        return (q or "").strip()
+
+                    query_text = _derive_query(messages)
                     if query_text:
+                        print(f"[DEBUG] /chat web enabled; query_text={query_text!r}; web_cfg={web_cfg}")
                         max_results = max(1, int(web_cfg.get("maxResults", 3)))
                         per_page_chars = int(web_cfg.get("perPageChars", 3000))
                         total_chars_cap = int(web_cfg.get("totalCharsCap", 9000))
-                        search_timeout = float(web_cfg.get("searchTimeoutSec", 5.0))
-                        fetch_timeout = float(web_cfg.get("fetchTimeoutSec", 6.0))
+                        search_timeout = float(web_cfg.get("searchTimeoutSec", 6.0))
+                        fetch_timeout = float(web_cfg.get("fetchTimeoutSec", 8.0))
 
-                        sources = _web_search_and_fetch(query_text, max_results=max_results, per_page_chars=per_page_chars, total_chars_cap=total_chars_cap, search_timeout=search_timeout, fetch_timeout=fetch_timeout)
+                        # Prefer Playwright for fetching (handles JS), fallback to requests
+                        if sync_playwright is not None:
+                            try:
+                                sources = _web_search_and_fetch_playwright(
+                                    query_text,
+                                    max_results=max_results,
+                                    per_page_chars=per_page_chars,
+                                    total_chars_cap=total_chars_cap,
+                                    search_timeout=search_timeout,
+                                    fetch_timeout=fetch_timeout,
+                                )
+                            except Exception:
+                                # Fallback to requests-based fetch
+                                sources = _web_search_and_fetch(
+                                    query_text,
+                                    max_results=max_results,
+                                    per_page_chars=per_page_chars,
+                                    total_chars_cap=total_chars_cap,
+                                    search_timeout=search_timeout,
+                                    fetch_timeout=fetch_timeout,
+                                )
+                        else:
+                            sources = _web_search_and_fetch(
+                                query_text,
+                                max_results=max_results,
+                                per_page_chars=per_page_chars,
+                                total_chars_cap=total_chars_cap,
+                                search_timeout=search_timeout,
+                                fetch_timeout=fetch_timeout,
+                            )
+                        # Debug: report number of sources and URLs
+                        try:
+                            src_urls = [s.get('url') for s in sources] if sources else []
+                        except Exception:
+                            src_urls = []
+                        print(f"[DEBUG] fetched sources count={len(src_urls)} urls={src_urls}")
                         if sources and isinstance(sources, list):
                             # Build a compact context block with citations
                             lines = [
@@ -129,16 +225,123 @@ def create_app():
                                 url = url.strip()
                                 lines.append(f"[{i}] {title} ({url})\n{snippet}")
                             web_block = "\n\n".join(lines)
-                            # Prepend as system context so model can ground the answer
-                            messages = [{"role": "system", "content": system_prompt + "\n\n" + web_block}] + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)]
+                            # Prepend as system context so model can ground the answer, with explicit guidance to use sources
+                            try:
+                                ts = time.strftime("%Y-%m-%d %H:%M")
+                            except Exception:
+                                ts = "idag"
+                            web_guidance = (
+                                "ANVISNING: Du har precis hämtat aktuella webbkällor (" + ts + ") nedan. "
+                                "Svara med hjälp av dessa källor, var konkret och inkludera hänvisningar som [n] där n matchar källistan. "
+                                "Påstå inte att du saknar realtidsåtkomst när källor finns. Om källorna inte täcker frågan, säg det kort."
+                            )
+                            combined_system = system_prompt + "\n\n" + web_guidance + "\n\n" + web_block
+                            messages = [{"role": "system", "content": combined_system}] + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)]
+
                         # Store citations to include in response
                         citations = [{"title": s.get("title"), "url": s.get("url")} for s in sources] if sources else []
-                    else:
-                        citations = []
+
+                        # If no sources found, attempt targeted site fetch when query mentions known outlets/services
+                        if not sources:
+                            try:
+                                ql = (query_text or "").lower()
+                                NEWS_DOMAINS = {
+                                    'aftonbladet': 'https://www.aftonbladet.se',
+                                    'svt': 'https://www.svt.se',
+                                    'expressen': 'https://www.expressen.se',
+                                    'dn': 'https://www.dn.se',
+                                    'svd': 'https://www.svd.se',
+                                }
+                                TARGETED_EXTRA = {
+                                    'eurojackpot': [
+                                        'https://www.eurojackpot.org/en/results',
+                                        'https://www.svenskaspel.se/eurojackpot/resultat',
+                                    ],
+                                }
+                                targeted = []
+                                for k, domain in NEWS_DOMAINS.items():
+                                    if k in ql:
+                                        targeted.append(domain)
+                                for k, urls in TARGETED_EXTRA.items():
+                                    if k in ql:
+                                        targeted.extend(urls)
+                                # If user asked generically for latest news, try a short list of popular outlets
+                                if not targeted and any(tok in ql for tok in ['senaste nyhet', 'senaste nyheterna', 'senaste nyheten']):
+                                    targeted = list(NEWS_DOMAINS.values())[:3]
+                                fetched = []
+                                for url in targeted:
+                                    try:
+                                        txt = _fetch_readable_text(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=fetch_timeout)
+                                        if txt:
+                                            fetched.append({'title': url, 'url': url, 'text': txt[:per_page_chars]})
+                                    except Exception:
+                                        continue
+                                if fetched:
+                                    sources = fetched
+                                    lines = [
+                                        "Webbkällor (sammanfattade, använd [n] som hänvisning i svaret om relevant):"
+                                    ]
+                                    for i, s in enumerate(sources, start=1):
+                                        title = s.get('title') or s.get('url') or f'Källa {i}'
+                                        url = s.get('url') or ''
+                                        snippet = (s.get('text') or '').strip()[:per_page_chars]
+                                        title = re.sub(r"\s+", " ", title).strip()
+                                        url = url.strip()
+                                        lines.append(f"[{i}] {title} ({url})\n{snippet}")
+                                    web_block = "\n\n".join(lines)
+                                    try:
+                                        ts = time.strftime("%Y-%m-%d %H:%M")
+                                    except Exception:
+                                        ts = "idag"
+                                    web_guidance = (
+                                        "ANVISNING: Du har precis hämtat aktuella webbkällor (" + ts + ") nedan. "
+                                        "Svara med hjälp av dessa källor, var konkret och inkludera hänvisningar som [n]. "
+                                        "Undvik generella friskrivningar om realtidsdata."
+                                    )
+                                    combined_system = system_prompt + "\n\n" + web_guidance + "\n\n" + web_block
+                                    messages = [{"role": "system", "content": combined_system}] + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)]
+                                    citations = [{"title": s.get("title"), "url": s.get("url")} for s in sources]
+                                else:
+                                    citations = []
+                            except Exception:
+                                citations = []
                 except Exception:
                     citations = []
             else:
                 citations = []
+                # Lightweight fallback: if user explicitly asks for link/source but web isn't enabled,
+                # provide a safe search URL so the UI can still render a clickable link.
+                try:
+                    wants_link = False
+                    um = (user_message or "").lower()
+                    for tok in ["länk", "lank", "länkar", "käll", "källa", "kall"]:
+                        if tok in um:
+                            wants_link = True
+                            break
+                    if wants_link:
+                        # Reuse a simplified query derivation: prefer previous user prompt if the latest is generic
+                        def _derive_simple_query(msgs):
+                            last_user = None; prev_user = None
+                            for m in reversed(msgs):
+                                if isinstance(m, dict) and m.get("role") == "user":
+                                    txt = (m.get("content") or "").strip()
+                                    if not last_user: last_user = txt
+                                    else: prev_user = txt; break
+                            q = (prev_user or last_user or "").strip()
+                            return q
+                        q = _derive_simple_query(incoming_messages if has_history else messages)
+                        q_safe = quote_plus(q) if q else ""
+                        lower_all = ("\n".join([(m.get("content") or "") for m in (incoming_messages if has_history else messages)])).lower()
+                        urls = []
+                        if "youtube" in lower_all:
+                            urls.append({"title": "Sökresultat (YouTube)", "url": f"https://www.youtube.com/results?search_query={q_safe}"})
+                        # Always include a general web search as fallback
+                        urls.append({"title": "Sökresultat (DuckDuckGo)", "url": f"https://duckduckgo.com/?q={q_safe}"})
+                        citations = urls
+                except Exception:
+                    pass
+
+    # debug fetch endpoint moved below after chat() completes
 
             # For chat.completions API, the correct parameter is always 'max_tokens'
             max_user = data.get("max_tokens") or data.get("max_completion_tokens") or 1000
@@ -292,28 +495,51 @@ def create_app():
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
+    @app.get("/debug/fetch")
+    def debug_fetch():
+        """Debug endpoint: fetch readable text for a URL without calling OpenAI.
+        Query param: url or JSON body {"url": "..."}. Returns {ok, url, text, len} or error.
+        """
+        try:
+            url = request.args.get('url') or (request.get_json(silent=True) or {}).get('url')
+            if not url:
+                return jsonify({"error": "url is required (query param or JSON body)"}), 400
+            if not url.lower().startswith(('http://', 'https://')):
+                return jsonify({"error": "url must start with http:// or https://"}), 400
+            # Use the same extractor as the web pipeline
+            try:
+                text = _fetch_readable_text(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=8.0)
+            except Exception as e:
+                return jsonify({"error": "fetch failed", "detail": str(e)}), 500
+            if not text:
+                return jsonify({"ok": True, "url": url, "text": "", "len": 0})
+            return jsonify({"ok": True, "url": url, "len": len(text), "text": text[:20000]})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     return app
 
 
-# -------------------- Lightweight web search helpers --------------------
-def _web_search_and_fetch(query: str, max_results: int = 3, per_page_chars: int = 3000, total_chars_cap: int = 9000, search_timeout: float = 5.0, fetch_timeout: float = 6.0):
-    """Perform a minimal web search (DuckDuckGo HTML) and fetch readable text from top results.
-    Returns a list of dicts: {title, url, text}. Fails gracefully on network errors.
-    """
+# -------------------- Web search helpers --------------------
+def _web_search_links(query: str, max_results: int = 3, search_timeout: float = 5.0):
+    """Search DuckDuckGo HTML and return a list of {title, url} links (no fetch)."""
     if not requests:
         return []
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36"
     }
-    results = []
     try:
         q = quote_plus(query)
-        resp = requests.get(f"https://duckduckgo.com/html/?q={q}&kl=se-sv&ia=web", headers=headers, timeout=search_timeout)
+        resp = requests.get(
+            f"https://duckduckgo.com/html/?q={q}&kl=se-sv&ia=web",
+            headers=headers,
+            timeout=search_timeout,
+        )
         html = resp.text
         links = []
         if BeautifulSoup is not None:
             soup = BeautifulSoup(html, "html.parser")
-            for a in soup.select("a.result__a, a.result__url, a.result__title"):  # various ddg layouts
+            for a in soup.select("a.result__a, a.result__url, a.result__title"):
                 href = a.get("href")
                 title = a.get_text(" ").strip() or href
                 if href and href.startswith("http"):
@@ -321,7 +547,6 @@ def _web_search_and_fetch(query: str, max_results: int = 3, per_page_chars: int 
                 if len(links) >= max_results:
                     break
         else:
-            # Fallback: regex naive extraction
             for m in re.finditer(r'<a[^>]+href="(http[^"]+)"[^>]*>(.*?)</a>', html, re.I | re.S):
                 url = m.group(1)
                 title = re.sub("<[^>]+>", " ", m.group(2))
@@ -330,10 +555,57 @@ def _web_search_and_fetch(query: str, max_results: int = 3, per_page_chars: int 
                     links.append({"title": title or url, "url": url})
                 if len(links) >= max_results:
                     break
+        # Prefer likely article URLs over home/category pages using a simple score
+        def score(u: str, title: str) -> int:
+            s = 0
+            pu = urlparse(u)
+            path = (pu.path or '').lower()
+            # boost article-like paths
+            if any(tok in path for tok in ["/a/", "/nyhet", "/sport/", "/kultur/", "/noje", "/debatt", "/artikel", "/202", "/20"]):
+                s += 5
+            # penalize root or very short paths
+            if path in {"", "/"}:
+                s -= 5
+            if path.count('/') <= 1:
+                s -= 1
+            # small boost if title contains query terms
+            qtoks = [w for w in re.split(r"\W+", query.lower()) if len(w) > 3]
+            if qtoks and any(w in (title or '').lower() for w in qtoks):
+                s += 1
+            return s
+        links_sorted = sorted(links, key=lambda it: score(it.get('url') or '', it.get('title') or ''), reverse=True)
+        dedup = []
+        seen = set()
+        for it in links_sorted:
+            u = it.get('url')
+            if not u or u in seen:
+                continue
+            seen.add(u)
+            dedup.append(it)
+            if len(dedup) >= max_results:
+                break
+        return dedup
     except Exception:
-        links = []
+        return []
 
-    # Fetch pages with cap
+
+def _web_search_and_fetch(
+    query: str,
+    max_results: int = 3,
+    per_page_chars: int = 3000,
+    total_chars_cap: int = 9000,
+    search_timeout: float = 5.0,
+    fetch_timeout: float = 6.0,
+):
+    """Perform a minimal web search (DuckDuckGo HTML) and fetch readable text via requests.
+    Returns a list of dicts: {title, url, text}. Fails gracefully on network errors.
+    """
+    links = _web_search_links(query, max_results=max_results, search_timeout=search_timeout)
+    if not links:
+        return []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36"
+    }
     out = []
     total = 0
     for it in links[:max_results]:
@@ -353,6 +625,103 @@ def _web_search_and_fetch(query: str, max_results: int = 3, per_page_chars: int 
     return out
 
 
+def _web_search_and_fetch_playwright(
+    query: str,
+    max_results: int = 3,
+    per_page_chars: int = 3000,
+    total_chars_cap: int = 9000,
+    search_timeout: float = 5.0,
+    fetch_timeout: float = 6.0,
+):
+    """Search links as usual, but fetch pages using Playwright for better JS support.
+    Returns a list of dicts: {title, url, text}.
+    """
+    if sync_playwright is None:
+        return _web_search_and_fetch(
+            query,
+            max_results=max_results,
+            per_page_chars=per_page_chars,
+            total_chars_cap=total_chars_cap,
+            search_timeout=search_timeout,
+            fetch_timeout=fetch_timeout,
+        )
+
+    links = _web_search_links(query, max_results=max_results, search_timeout=search_timeout)
+    if not links:
+        return []
+
+    out = []
+    total = 0
+    timeout_ms = int(max(1000, fetch_timeout * 1000))
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])  # safer in containers
+        context = browser.new_context(ignore_https_errors=True)
+        page = context.new_page()
+        page.set_default_timeout(timeout_ms)
+        for it in links[:max_results]:
+            url = it.get("url")
+            title = (it.get("title") or url or "").strip()
+            if not url:
+                continue
+            try:
+                page.goto(url, wait_until="domcontentloaded")
+                # Try to auto-accept common cookie/consent dialogs to reveal content
+                try:
+                    # Attempt buttons with common Swedish/English texts
+                    for label in [
+                        "Godkänn alla", "Acceptera alla", "Jag accepterar", "Jag godkänner", "Acceptera", "OK", "Godkänn",
+                        "Accept all", "Accept", "I agree", "Got it",
+                    ]:
+                        btn = page.get_by_role("button", name=re.compile(label, re.I))
+                        if btn and btn.count() > 0:
+                            try:
+                                btn.first.click(timeout=1000)
+                                page.wait_for_timeout(400)
+                                break
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+                text = ""
+                # Prefer robust extraction when available
+                if trafilatura is not None:
+                    try:
+                        html = page.content()
+                        extracted = trafilatura.extract(html, url=url, include_comments=False, include_formatting=False) or ""
+                        text = extracted.strip()
+                    except Exception:
+                        text = ""
+                # Fallback: readable inner_text from article/main/body
+                if not text:
+                    for sel in ["article", "main", "#content", "body"]:
+                        try:
+                            if page.locator(sel).count() > 0:
+                                text = page.locator(sel).inner_text()
+                                if text and len(text.strip()) > 80:
+                                    break
+                        except Exception:
+                            continue
+                    if not text:
+                        try:
+                            text = page.inner_text("body")
+                        except Exception:
+                            text = ""
+                text = (text or "").strip()[:per_page_chars]
+                if text:
+                    out.append({"title": title, "url": url, "text": text})
+                    total += len(text)
+                    if total >= total_chars_cap:
+                        break
+            except Exception:
+                continue
+        try:
+            context.close()
+            browser.close()
+        except Exception:
+            pass
+    return out
+
+
 def _fetch_readable_text(url: str, headers=None, timeout: float = 6.0) -> str:
     if not requests:
         return ""
@@ -364,6 +733,14 @@ def _fetch_readable_text(url: str, headers=None, timeout: float = 6.0) -> str:
     text = r.text
     if "text/plain" in ctype or url.lower().endswith((".txt", ".md", ".text")):
         return text
+    # Try trafilatura first for robust article extraction
+    if trafilatura is not None:
+        try:
+            extracted = trafilatura.extract(text, url=url, include_comments=False, include_formatting=False)
+            if extracted and len(extracted.strip()) > 80:
+                return extracted.strip()
+        except Exception:
+            pass
     if BeautifulSoup is None:
         # naive tag strip
         text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
@@ -382,6 +759,9 @@ def _fetch_readable_text(url: str, headers=None, timeout: float = 6.0) -> str:
     # collapse whitespace
     txt = re.sub(r"\n{3,}", "\n\n", txt)
     return txt.strip()
+
+
+
 
 
 if __name__ == "__main__":

@@ -1,15 +1,5 @@
-.layout{display:grid;grid-template-columns:240px 1fr;gap:14px;padding:16px 18px 96px}
-.sidebar{position:sticky;top:58px;align-self:start}
-.sidebar .section{border:1px solid #23232b;background:linear-gradient(180deg,#121219,#0e0e14);border-radius:12px;box-shadow:var(--shadow);padding:10px}
-.sidebar h3{margin:0 0 6px 0;font-size:13px;color:var(--subtle)}
-.toc{display:flex;flex-direction:column;gap:6px}
-.toc a{color:var(--subtle);text-decoration:none;padding:6px 8px;border-radius:8px;border:1px solid transparent}
-.toc a:hover{border-color:#2a2a35;color:var(--text);background:#121218}
+.layout{display:block;padding:16px 18px 96px}
 .content{padding:0}
-@media (max-width: 980px){
-  .layout{grid-template-columns:1fr}
-  .sidebar{position:relative;top:auto}
-}
 :root{
   --bg:#0b0b0d; --panel:#131317; --muted:#101016; --text:#e6e6ec; --subtle:#a6a6b3; --primary:#7c5cff; --accent:#00d4ff; --error:#ff5c7c;
   --glass: rgba(255,255,255,0.04);
@@ -109,10 +99,14 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 .fab *{pointer-events:none}
 .fab:active{cursor:grabbing}
 .panel-drawer.show.right ~ .fab.fab-right{bottom:76px}
-.fab-left{left:18px}
+/* .fab-left removed */
 .fab-right{right:18px}
 .fab .hex-mini{width:20px;height:20px;display:block;filter:drop-shadow(0 2px 8px rgba(124,92,255,0.25))}
 .fab .fab-text{vertical-align:middle}
+
+/* Label that appears above each FAB showing copilot name */
+.fab-label{position:absolute;left:50%;top:-28px;transform:translateX(-50%);white-space:nowrap;padding:4px 8px;border-radius:8px;background:linear-gradient(180deg, rgba(124,92,255,0.06), rgba(0,212,255,0.03));color:#eaf6ff;font-weight:600;font-size:12px;box-shadow:0 6px 20px rgba(0,212,255,0.06);text-shadow:0 2px 10px rgba(124,92,255,0.18);pointer-events:none}
+.fab-label::after{content:'';position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);width:10px;height:6px;background:linear-gradient(180deg, rgba(124,92,255,0.06), rgba(0,212,255,0.03));border-radius:2px}
 
 /* Center + button to add copilot instances */
 .copilot-plus{position:fixed;left:50%;top:58px;transform:translateX(-50%);z-index:7000;width:40px;height:40px;border-radius:999px;border:1px dashed #2a2a35;background:#0f0f14;color:#cfd3e3;box-shadow:var(--shadow);cursor:pointer}
@@ -126,10 +120,12 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 .panel-flyout .messages{padding:14px;overflow:auto;flex:1}
 .panel-flyout .composer{display:flex;gap:8px;padding:14px;background:linear-gradient(180deg,#0f0f13,#0c0c10);border-top:1px solid #23232b;border-bottom-left-radius:12px;border-bottom-right-radius:12px}
 .panel-flyout .author-label{padding:4px 14px 0 14px;font-size:12px;color:var(--subtle)}
-.panel-flyout .settings{display:grid;gap:8px;margin:10px;border-bottom:1px solid #23232b;background:linear-gradient(180deg,#131317,#0f0f13);padding:8px;border-radius:10px}
+.panel-flyout .settings{display:grid;gap:8px;margin:10px;border-bottom:1px solid #23232b;background:linear-gradient(180deg,#131317,#0f0f13);padding:8px;border-radius:10px;max-height:min(50vh, 420px);overflow:auto;overscroll-behavior:contain}
 .panel-flyout .settings.collapsed{display:none}
 .panel-flyout .settings label{display:grid;gap:6px;font-size:12px;color:var(--subtle)}
 .panel-flyout .settings input,.panel-flyout .settings select, .panel-flyout textarea{background:#0f0f14;border:1px solid #24242c;border-radius:8px;padding:8px;color:var(--text);outline:none}
+.panel-flyout .settings::-webkit-scrollbar{width:10px}
+.panel-flyout .settings::-webkit-scrollbar-thumb{background:#1b1b24;border-radius:10px}
 .flyout-resize{position:absolute;width:14px;height:14px}
 .flyout-resize.br{right:6px;bottom:6px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%, rgba(124,92,255,.4) 50%);clip-path:polygon(0 100%, 100% 0, 100% 100%);opacity:.6}
 .flyout-resize.br:hover{opacity:1}
@@ -141,9 +137,9 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 /* Drawers */
 .panel-drawer{position:fixed;top:0;bottom:0;width:360px;max-width:92vw;min-width:280px;background:linear-gradient(180deg,var(--panel),#0f0f13);border:1px solid #23232b;box-shadow:var(--shadow);z-index:40;display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.18,.7,.2,1.02), opacity .25s ease}
 .panel-drawer.right{right:0;transform:translateX(100%) scale(.85)}
-.panel-drawer.left{left:0;transform:translateX(-100%) scale(.85)}
+/* .panel-drawer.left removed */
 .panel-drawer.show.right{transform:translateX(0) scale(1)}
-.panel-drawer.show.left{transform:translateX(0) scale(1)}
+/* .panel-drawer.show.left removed */
 .panel-drawer .drawer-head{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid #23232b}
 .panel-drawer .menu-body{padding:12px;overflow:auto}
 /* Resize handle */
@@ -214,7 +210,22 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .panel-flyout .conn-point[data-side="l"]{top:50%;left:-2px}
 .panel-flyout .conn-point[data-side="r"]{top:50%;right:-2px;transform:translate(50%, -50%)}
 .panel-flyout .conn-point.hover{border-color:#00d4ff;box-shadow:0 0 10px rgba(0,212,255,0.6)}
+.fab .conn-point{position:absolute;width:10px;height:10px;border-radius:50%;background:radial-gradient(circle at 30% 30%, #fff, #cde, #79f);border:2px solid #4a79ff;box-shadow:0 0 6px rgba(74,121,255,0.35);transform:translate(-50%, -50%);cursor:crosshair}
+.fab .conn-point{pointer-events:auto}
+.fab .conn-point[data-side="t"]{left:50%;top:-2px}
+.fab .conn-point[data-side="b"]{left:50%;bottom:-2px;transform:translate(-50%, 50%)}
+.fab .conn-point[data-side="l"]{top:50%;left:-2px}
+.fab .conn-point[data-side="r"]{top:50%;right:-2px;transform:translate(50%, -50%)}
+.fab .conn-point.hover{border-color:#00d4ff;box-shadow:0 0 10px rgba(0,212,255,0.6)}
 .panel-flyout.active-speaking{box-shadow:0 0 0 2px rgba(0,212,255,0.8), 0 0 32px rgba(0,212,255,0.25)}
+
+/* FAB context menu */
+.fab-menu{position:fixed;z-index:9200;min-width:160px;max-width:280px;background:linear-gradient(180deg,#14141a,#0f0f13);border:1px solid #2a2a35;border-radius:10px;box-shadow:0 14px 44px rgba(0,0,0,0.6);padding:10px;display:none}
+.fab-menu.show{display:block}
+.fab-menu .fab-menu-row{display:flex;gap:8px}
+.fab-menu button{background:transparent;border:1px dashed #2a2a35;color:#cfd3e3;font-size:13px;padding:8px 10px;border-radius:8px;cursor:pointer}
+.fab-menu button:hover{border-color:#3a3a45}
+.fab-menu button.danger{color:#ffb3c2;border-color:rgba(255,92,124,0.16)}
 
 /* Connection hover menu */
 .conn-menu{position:absolute;z-index:7600;background:linear-gradient(180deg,#14141a,#0f0f13);border:1px solid #2a2a35;border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,0.55);padding:6px;display:none}
@@ -227,3 +238,8 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .assistant.cites .msg-author{font-weight:600;margin-bottom:4px}
 .assistant.cites .msg-text a{color:#9ecbff;text-decoration:none;margin-right:8px;border-bottom:1px dotted #2a2a35}
 .assistant.cites .msg-text a:hover{color:#cfeaff;border-bottom-color:#3a3a45}
+
+/* Internet hub (globe) */
+.internet-hub{width:48px;height:48px;border-radius:50%;display:grid;place-items:center}
+.internet-hub .globe{width:26px;height:26px;filter:drop-shadow(0 2px 10px rgba(124,92,255,0.35))}
+.internet-hub.active{box-shadow:0 0 0 2px rgba(0,212,255,0.8), 0 0 36px rgba(0,212,255,0.35)}
