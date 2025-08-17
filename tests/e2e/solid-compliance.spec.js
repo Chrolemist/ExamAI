@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 test.describe('SOLID Compliance Tests', () => {
   test('should pass all SOLID principle tests', async ({ page }) => {
     // Navigate to SOLID test page
-    await page.goto('/tests/test-solid.html');
+    await page.goto('/tests/integration/test-solid.html');
     
     // Wait for tests to load
     await page.waitForSelector('#testResults', { timeout: 10000 });

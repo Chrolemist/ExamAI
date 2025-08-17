@@ -53,7 +53,7 @@ jobs:
           cd tests/config && npx playwright install chromium
       - name: Run SOLID Compliance Tests
         run: |
-          cd tests && npx playwright test --config=config/playwright.config.js
+          cd tests/config && npx playwright test
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
