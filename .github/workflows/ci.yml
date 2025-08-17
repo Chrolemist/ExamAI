@@ -77,4 +77,4 @@ jobs:
           cd tests/config && npm install
       - name: Lint JavaScript files
         run: |
-          cd tests && npx eslint ../frontend/js/**/*.js --ext .js --format=compact --config=config/.eslintrc.json
+          cd tests/config && npx eslint ../../frontend/js/**/*.js --config=eslint.config.js
