@@ -2,6 +2,7 @@
 import { els } from './js/dom.js';
 import { toast, toggleDrawer, showModal, escapeHtml } from './js/ui.js';
 import { ConnectionLayer } from './js/graph/connection-layer.js';
+import { Link } from './js/graph/link.js';
 import { InternetHub } from './js/graph/internet-hub.js';
 import { GraphPersistence } from './js/graph/graph-persistence.js';
 import { BoardSections } from './js/graph/board-sections.js';
@@ -202,22 +203,12 @@ const UserNode = (() => {
           return;
         }
       }
-  // Allow this line to be drawn (guarded by ConnectionLayer)
-  try { ConnectionLayer.allow(lineId); } catch {}
-      const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
-      // Freeze anchor elements at creation to prevent snapping to other points later
-      const anchorStart = (startEl && startEl.getBoundingClientRect) ? startEl : inst.fab;
-      const anchorEnd = (endEl && endEl.getBoundingClientRect) ? endEl : this.fab;
+  // Freeze anchor elements at creation to prevent snapping to other points later
+  const anchorStart = (startEl && startEl.getBoundingClientRect) ? startEl : inst.fab;
+  const anchorEnd = (endEl && endEl.getBoundingClientRect) ? endEl : this.fab;
       // Ensure the user's end point is marked as Input for consistent UI semantics
       try { if (anchorEnd && anchorEnd.classList) { anchorEnd.classList.remove('io-out'); anchorEnd.classList.add('io-in'); anchorEnd.setAttribute('data-io','in'); anchorEnd.setAttribute('title','Input'); anchorEnd.setAttribute('aria-label','Input'); } } catch {}
-      const updateLine = () => {
-        ConnectionLayer.draw(lineId, getCenter(anchorStart), getCenter(anchorEnd));
-      };
-      window.addEventListener('resize', updateLine);
-      window.addEventListener('scroll', updateLine, { passive:true });
-      window.addEventListener('examai:fab:moved', updateLine);
-      setTimeout(updateLine, 0);
-  const rec = { lineId, updateLine, from: inst.id, to: 'user', startEl: anchorStart, endEl: anchorEnd };
+      const rec = Link.create({ lineId, startEl: anchorStart, endEl: anchorEnd, from: inst.id, to: 'user' });
       const existing = this._linkLines.get(inst.id);
       if (existing) {
         if (Array.isArray(existing)) existing.push(rec); else this._linkLines.set(inst.id, [existing, rec]);
@@ -232,12 +223,7 @@ const UserNode = (() => {
       const links = this._linkLines.get(copilotId);
       if (links) {
         const arr = Array.isArray(links) ? links : [links];
-        arr.forEach(({ lineId, updateLine }) => {
-          try { ConnectionLayer.remove(lineId); } catch {}
-          try { window.removeEventListener('resize', updateLine); } catch {}
-          try { window.removeEventListener('scroll', updateLine); } catch {}
-          try { window.removeEventListener('examai:fab:moved', updateLine); } catch {}
-        });
+        arr.forEach(rec => { try { rec.remove?.(); } catch {} });
         this._linkLines.delete(copilotId);
       }
   this._linked.delete(copilotId);
@@ -259,11 +245,8 @@ const UserNode = (() => {
         if (this._sectionLinkLines) {
           for (const [key, links] of this._sectionLinkLines.entries()) {
             const arr = Array.isArray(links) ? links : [links];
-            arr.forEach(({ lineId, updateLine }) => {
-              try { ConnectionLayer.remove(lineId); } catch {}
-              try { window.removeEventListener('resize', updateLine); } catch {}
-              try { window.removeEventListener('scroll', updateLine); } catch {}
-              try { window.removeEventListener('examai:fab:moved', updateLine); } catch {}
+            arr.forEach((rec) => {
+              try { rec.remove?.(); } catch {}
             });
           }
           this._sectionLinkLines.clear();
@@ -678,19 +661,12 @@ const UserNode = (() => {
       let startRole = startPointEl?.getAttribute('data-io');
       if (startRole !== 'out') { setPointRole(startPointEl, 'out', true); }
       try { endPt.classList.remove('io-out'); endPt.classList.add('io-in'); endPt.setAttribute('data-io','in'); endPt.setAttribute('title','Input'); } catch {}
-            const ss = (startPointEl.getAttribute && startPointEl.getAttribute('data-side')) || 'x';
-            const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+    const ss = (startPointEl.getAttribute && startPointEl.getAttribute('data-side')) || 'x';
             const fromIoId = (IORegistry.getByEl(startPointEl)?.ioId) || `user:0:${ss}:0`;
             const toIoId = `section:${secKey}:r:0`;
             const lineId = `link_${fromIoId}__${toIoId}`;
-            ConnectionLayer.allow(lineId);
-            const updateLine = () => ConnectionLayer.draw(lineId, getCenter(startPointEl), getCenter(endPt));
-            window.addEventListener('resize', updateLine);
-            window.addEventListener('scroll', updateLine, { passive: true });
-            window.addEventListener('examai:fab:moved', updateLine);
-            setTimeout(updateLine, 0);
-      // Track visuals and routing
-      const rec = { lineId, updateLine, startEl: startPointEl, endEl: endPt };
+  // Track visuals and routing
+  const rec = Link.create({ lineId, startEl: startPointEl, endEl: endPt, from: 'user', to: `section:${secKey}` });
       const existing = this._sectionLinkLines.get(secKey);
       if (existing) { if (Array.isArray(existing)) existing.push(rec); else this._sectionLinkLines.set(secKey, [existing, rec]); }
       else { this._sectionLinkLines.set(secKey, [rec]); }
@@ -728,17 +704,11 @@ const UserNode = (() => {
               return;
             }
           }
-          ConnectionLayer.allow(lineId);
           const anchorStart = startPointEl;
           const anchorEnd = endPt;
           // Ensure UI labels match roles
           try { endPt.setAttribute('title','Input'); endPt.setAttribute('aria-label','Input'); } catch {}
-          const updateLine = () => ConnectionLayer.draw(lineId, getCenter(anchorStart), getCenter(anchorEnd));
-          window.addEventListener('resize', updateLine);
-          window.addEventListener('scroll', updateLine, { passive: true });
-          window.addEventListener('examai:fab:moved', updateLine);
-          setTimeout(updateLine, 0);
-          const rec = { lineId, updateLine, from: 'user', to: targetInst.id, startEl: anchorStart, endEl: anchorEnd };
+          const rec = Link.create({ lineId, startEl: anchorStart, endEl: anchorEnd, from: 'user', to: targetInst.id });
           const existing = this._linkLines.get(targetInst.id);
           if (existing) {
             if (Array.isArray(existing)) existing.push(rec); else this._linkLines.set(targetInst.id, [existing, rec]);
@@ -1007,28 +977,21 @@ const UserNode = (() => {
   // Programmatic link helpers used by GraphPersistence
   function linkFromCopilotSides(inst, fromSide = 'x', toSide = 'x') {
     ensure();
-    const start = (inst && inst.fab) ? inst.fab.querySelector(`.conn-point[data-side="${fromSide}"]`) : null;
-    const end = instance.fab.querySelector(`.conn-point[data-side="${toSide}"]`);
-    instance._linkFromCopilot(inst, start, end);
+  const start = (inst && inst.fab) ? inst.fab.querySelector(`.conn-point[data-side="${fromSide}"]`) : null;
+  const end = instance.fab.querySelector(`.conn-point[data-side="${toSide}"]`);
+  instance._linkFromCopilot(inst, start, end);
   }
   function linkToCopilotSides(inst, fromSide = 'x', toSide = 'x') {
     ensure();
     const start = instance.fab.querySelector(`.conn-point[data-side="${fromSide}"]`);
     const end = (inst && inst.fab) ? inst.fab.querySelector(`.conn-point[data-side="${toSide}"]`) : null;
     // emulate the minimal part of onUp path to draw and record link
-    const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
     const ss = fromSide || 'x'; const es = toSide || 'x';
   const fromIoId = (IORegistry.getByEl(start)?.ioId) || `user:0:${ss}:0`;
   const toIoId = (IORegistry.getByEl(end)?.ioId) || `copilot:${inst.id}:${es}:0`;
   const lineId = `link_${fromIoId}__${toIoId}`;
-  ConnectionLayer.allow(lineId);
-    const anchorStart = start || instance.fab; const anchorEnd = end || inst.fab;
-    const updateLine = () => ConnectionLayer.draw(lineId, getCenter(anchorStart), getCenter(anchorEnd));
-    window.addEventListener('resize', updateLine);
-    window.addEventListener('scroll', updateLine, { passive: true });
-    window.addEventListener('examai:fab:moved', updateLine);
-    setTimeout(updateLine, 0);
-    const rec = { lineId, updateLine, from: 'user', to: inst.id, startEl: anchorStart, endEl: anchorEnd };
+  const anchorStart = start || instance.fab; const anchorEnd = end || inst.fab;
+  const rec = Link.create({ lineId, startEl: anchorStart, endEl: anchorEnd, from: 'user', to: inst.id });
     const existing = instance._linkLines.get(inst.id);
     if (existing) { if (Array.isArray(existing)) existing.push(rec); else instance._linkLines.set(inst.id, [existing, rec]); }
     else { instance._linkLines.set(inst.id, [rec]); }
@@ -1042,7 +1005,6 @@ const UserNode = (() => {
     const start = instance.fab.querySelector(`.conn-point[data-side="${fromSide}"]`);
     const end = BoardSections.getIoFor?.(secKey);
     if (!end || !start) return;
-    const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
     const ss = fromSide || 'x';
       const fromIoId = (IORegistry.getByEl(start)?.ioId) || `user:0:${ss}:0`;
       const toIoId = (IORegistry.getByEl(end)?.ioId) || `section:${secKey}:r:0`;
@@ -1057,13 +1019,7 @@ const UserNode = (() => {
           return;
         }
       }
-      ConnectionLayer.allow(lineId);
-    const updateLine = () => ConnectionLayer.draw(lineId, getCenter(start), getCenter(end));
-    window.addEventListener('resize', updateLine);
-    window.addEventListener('scroll', updateLine, { passive: true });
-    window.addEventListener('examai:fab:moved', updateLine);
-    setTimeout(updateLine, 0);
-  const rec = { lineId, updateLine, startEl: start, endEl: end };
+  const rec = Link.create({ lineId, startEl: start, endEl: end, from: 'user', to: `section:${secKey}` });
   const existing = instance._sectionLinkLines.get(secKey);
   if (existing) { if (Array.isArray(existing)) existing.push(rec); else instance._sectionLinkLines.set(secKey, [existing, rec]); }
   else { instance._sectionLinkLines.set(secKey, [rec]); }

@@ -1,6 +1,8 @@
 // Internet hub node that copilots can link to for web access
 import { ConnectionLayer } from './connection-layer.js';
 import { GraphPersistence } from './graph-persistence.js';
+import { IORegistry } from './io-registry.js';
+import { Link } from './link.js';
 
 export const InternetHub = (() => {
   let el = null;
@@ -78,7 +80,6 @@ export const InternetHub = (() => {
     return el;
   }
   function element() { return ensure(); }
-  function getCenter(el) { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; }
   function linkCopilot(inst, startElOrSide = null, endElOrSide = null) {
     // Prevent duplicate link creation; just pulse existing
     if (linked.has(inst.id)) {
@@ -102,15 +103,13 @@ export const InternetHub = (() => {
     else if (typeof endElOrSide === 'string') endEl = hub.querySelector(`.conn-point[data-side="${endElOrSide}"]`);
     if (!endEl) endEl = hub; // fallback to center
 
-    const lineId = `link_internet_${inst.id}`;
-    ConnectionLayer.allow(lineId);
-    const updateLine = () => ConnectionLayer.draw(lineId, getCenter(startEl), getCenter(endEl));
-    window.addEventListener('resize', updateLine);
-    window.addEventListener('scroll', updateLine, { passive:true });
-    window.addEventListener('examai:internet:moved', updateLine);
-    window.addEventListener('examai:fab:moved', updateLine);
-    // initial draw
-    updateLine();
+  // Build ioId-based lineId for dedup and consistency
+  const ss = (startEl?.getAttribute && startEl.getAttribute('data-side')) || 'x';
+  const es = (endEl?.getAttribute && endEl.getAttribute('data-side')) || 'x';
+  const fromIoId = (IORegistry.getByEl(startEl)?.ioId) || `copilot:${inst.id}:${ss}:0`;
+  const toIoId = (IORegistry.getByEl(endEl)?.ioId) || `internet:hub:${es}:0`;
+  const lineId = `link_${fromIoId}__${toIoId}`;
+  const rec = Link.create({ lineId, startEl, endEl, from: inst.id, to: 'internet' });
     linked.add(inst.id);
     // Persist sides if we can resolve them
     try {
@@ -118,21 +117,14 @@ export const InternetHub = (() => {
       const es = (endEl?.getAttribute && endEl.getAttribute('data-side')) || 'x';
       GraphPersistence.addLink({ fromType:'copilot', fromId:inst.id, fromSide:ss, toType:'internet', toId:'hub', toSide:es });
     } catch {}
-    inst.connections.set(LINK_KEY, { lineId, updateLine, ro: [] });
+  inst.connections.set(LINK_KEY, rec);
     window.dispatchEvent(new CustomEvent('examai:internet:linked', { detail: { copilotId: inst.id } }));
-    setTimeout(updateLine, 0);
+  setTimeout(() => rec.update?.(), 0);
   }
   function unlinkCopilot(inst) {
     if (!linked.has(inst.id)) return;
-    const item = inst.connections.get(LINK_KEY);
-    if (item) {
-  ConnectionLayer.remove(item.lineId);
-      window.removeEventListener('resize', item.updateLine);
-      window.removeEventListener('scroll', item.updateLine);
-      window.removeEventListener('examai:internet:moved', item.updateLine);
-      window.removeEventListener('examai:fab:moved', item.updateLine);
-      inst.connections.delete(LINK_KEY);
-    }
+  const item = inst.connections.get(LINK_KEY);
+  if (item) { try { item.remove?.(); } catch {} inst.connections.delete(LINK_KEY); }
     linked.delete(inst.id);
     try { GraphPersistence.removeWhere(l => l.fromType==='copilot' && l.fromId===inst.id && l.toType==='internet'); } catch {}
     window.dispatchEvent(new CustomEvent('examai:internet:unlinked', { detail: { copilotId: inst.id } }));
