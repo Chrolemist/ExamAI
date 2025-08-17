@@ -71,6 +71,8 @@ export class CopilotInstance {
     this.#wireFabContextMenu?.();
     this.#wireFabConnections?.();
     this.#wireDrops();
+  // Load and render any persisted chat history for this copilot
+  try { this.#loadAndRenderHistory(); } catch {}
   }
 
   #createFab() {
@@ -134,8 +136,9 @@ export class CopilotInstance {
         <div class="meta"><div class="name">${this.name}</div></div>
         <span class="badge" data-role="roleBadge" title="Roll (klicka för att toggla)">Roll</span>
         <span class="badge badge-error" data-role="keyStatus">Ingen nyckel</span>
-        <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
-        <button class="icon-btn" data-action="delete" title="Radera">🗑</button>
+  <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+  <button class="icon-btn" data-action="clear" title="Rensa chatt">🧹</button>
+  <button class="icon-btn" data-action="delete" title="Radera">🗑</button>
         <button class="icon-btn" data-action="close">✕</button>
       </header>
       <div class="settings collapsed" data-role="settings">
@@ -212,6 +215,15 @@ export class CopilotInstance {
     });
     const delBtn = sec.querySelector('[data-action="delete"]');
     if (delBtn) delBtn.addEventListener('click', () => this.destroy());
+    const clrBtn = sec.querySelector('[data-action="clear"]');
+    if (clrBtn) clrBtn.addEventListener('click', () => {
+      const ok = confirm('Rensa denna panels chatt? Det går inte att ångra.');
+      if (!ok) return;
+      try { this.history = []; this._saveHistory(); } catch {}
+      try { this.msgEl.innerHTML = ''; } catch {}
+      try { this._stagedFiles = []; this.#renderAttachments(); } catch {}
+      toast('Chatt rensad.');
+    });
     return sec;
   }
   #wireDrops() {
@@ -266,8 +278,34 @@ export class CopilotInstance {
     });
   }
 
+  #historyKey() { return `examai.copilot.${this.id}.history`; }
+  _saveHistory() {
+    try { localStorage.setItem(this.#historyKey(), JSON.stringify(this.history || [])); } catch {}
+  }
+  #loadAndRenderHistory() {
+    // Load
+    try {
+      const raw = localStorage.getItem(this.#historyKey());
+      const arr = JSON.parse(raw || '[]');
+      if (Array.isArray(arr)) this.history = arr;
+    } catch {}
+    // Render without mutating history again
+    try {
+      const authorUser = (window.getGlobalUserName || (() => 'Användare'))();
+      for (const m of (this.history || [])) {
+        if (!m || !m.role) continue;
+        if (m.role === 'user') this.addUser(m.content || '', authorUser);
+        else if (m.role === 'assistant') this.addAssistant(m.content || '', this.name);
+        else if (m.role === 'system') this.addAssistant(m.content || '', this.name);
+      }
+    } catch {}
+  }
+
   unlinkSelf() {
     if (!this._convId) { toast('Inte länkad.', 'warn'); return; }
+  // Also detach from Internet hub if linked, and clear persisted internet link
+  try { InternetHub.unlinkCopilot(this); } catch {}
+  try { GraphPersistence.removeWhere(l => l.fromType==='copilot' && l.fromId===this.id && l.toType==='internet'); } catch {}
     for (const [otherId, recs] of this.connections.entries()) {
       const arr = Array.isArray(recs) ? recs : [recs];
       arr.forEach(({ lineId, updateLine }) => {
@@ -331,121 +369,169 @@ export class CopilotInstance {
   }
   #wireFabConnections() {
     const points = Array.from(this.fab.querySelectorAll('.conn-point'));
-    let dragging = false; let start = null; let ghostId = null; let overPoint = null; let startPointEl = null;
-    const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
+    let dragging = false, start = null, ghostId = null, overPoint = null, startPointEl = null;
+    const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
     const where = 'fab';
-    const roleKey = (pt) => `io:${this.id}:${where}:${pt.getAttribute('data-side')||'x'}`;
-    const setPointRole = (el, role, persist=false) => {
-      el.classList.remove('io-in','io-out');
+    const roleKey = (pt) => `io:${this.id}:${where}:${pt.getAttribute('data-side') || 'x'}`;
+    const setPointRole = (el, role, persist = false) => {
+      el.classList.remove('io-in', 'io-out');
       if (role === 'in') el.classList.add('io-in');
       if (role === 'out') el.classList.add('io-out');
-      el.setAttribute('data-io', role||'');
+      el.setAttribute('data-io', role || '');
       const label = role === 'in' ? 'Input' : role === 'out' ? 'Output' : '';
       if (label) { el.setAttribute('title', label); el.setAttribute('aria-label', label); }
-      if (persist) { try { localStorage.setItem(roleKey(el), role||''); } catch {} }
+      if (persist) { try { localStorage.setItem(roleKey(el), role || ''); } catch {} }
     };
-    points.forEach(pt => { try { const r = localStorage.getItem(roleKey(pt)); setPointRole(pt, (r==='in'||r==='out')?r:'out', false); } catch { setPointRole(pt, 'out', false); } });
+    // Restore saved IO roles (default to 'out')
+    points.forEach(pt => { try { const r = localStorage.getItem(roleKey(pt)); setPointRole(pt, (r === 'in' || r === 'out') ? r : 'out', false); } catch { setPointRole(pt, 'out', false); } });
     const pickPointAt = (x, y) => {
-      const all = document.querySelectorAll('.panel-flyout .conn-point, .internet-hub .conn-point, .fab .conn-point');
-      for (const p of all) { const r = p.getBoundingClientRect(); if (x >= r.left-6 && x <= r.right+6 && y >= r.top-6 && y <= r.bottom+6) return p; }
+      // Allow linking to panel/fab points, Internet hub, and section IO targets
+      const all = document.querySelectorAll('.panel-flyout .conn-point, .internet-hub .conn-point, .fab .conn-point, .panel .head .section-io');
+      for (const p of all) { const r = p.getBoundingClientRect(); if (x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6) return p; }
       return null;
     };
     const onMove = (e) => {
-      if (!dragging) return; const p = e.touches ? e.touches[0] : e;
-      const b = { x: p.clientX, y: p.clientY };
+      if (!dragging) return; const p = e.touches ? e.touches[0] : e; const b = { x: p.clientX, y: p.clientY };
       ConnectionLayer.draw(ghostId, start, b);
       const hit = pickPointAt(b.x, b.y);
       if (overPoint && overPoint !== hit) overPoint.classList.remove('hover');
       overPoint = hit; if (overPoint) overPoint.classList.add('hover');
       e.preventDefault();
     };
-    const onUp = () => {
-      if (!dragging) return; dragging = false;
+    const finish = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.removeEventListener('touchmove', onMove);
       document.removeEventListener('touchend', onUp);
-      if (overPoint) overPoint.classList.remove('hover');
-      const endPt = overPoint; if (ghostId) ConnectionLayer.remove(ghostId); ghostId = null;
-      if (endPt) {
-        const hubEl = endPt.closest('.internet-hub');
-        if (hubEl) {
-          if (startPointEl?.getAttribute('data-io') !== 'out') {
-            setPointRole(startPointEl, 'out', true);
-            toast('Justerade startpunkt till Output för att koppla till Internet.', 'info');
-          }
-          InternetHub.linkCopilot(this, startPointEl, endPt);
-        }
-        else {
-          const panel = endPt.closest('.panel-flyout');
-          const fab = endPt.closest('.fab');
-          let other = null;
-          if (panel) {
-            if (panel.classList.contains('user-node-panel')) {
-              if (startPointEl?.getAttribute('data-io') !== 'out') { setPointRole(startPointEl, 'out', true); }
-              const endRoleUser = endPt.getAttribute('data-io');
-              if (endRoleUser !== 'in') { endPt.classList.remove('io-out'); endPt.classList.add('io-in'); endPt.setAttribute('data-io','in'); endPt.setAttribute('title','Input'); }
-              try { const UserNode = getUserApi(); if (UserNode) UserNode.linkFromCopilot(this, startPointEl, endPt); } catch {}
-              try { this.outNeighbors?.add('user'); } catch {}
-              return;
-            }
-            const id = parseInt(panel.getAttribute('data-copilot-id'), 10); other = CopilotManager.instances.get(id);
-          }
-          else if (fab && fab !== this.fab) {
-            if (fab.classList.contains('user-node')) { if (startPointEl?.getAttribute('data-io') !== 'out') { toast('Välj en Output-punkt först (Alt-klick).', 'warn'); return; } const endRoleUser = endPt.getAttribute('data-io'); if (endRoleUser !== 'in') { toast('Koppla Output → Input. Alt-klicka användarens punkt för att växla roll.', 'warn'); return; } try { const UserNode = getUserApi(); if (UserNode) UserNode.linkFromCopilot(this, startPointEl, endPt); } catch {} try { this.outNeighbors?.add('user'); } catch {} this.flowOutId='user'; return; }
-            const id = parseInt(fab.getAttribute('data-copilot-id'), 10); other = CopilotManager.instances.get(id);
-          }
-          if (other) {
-            let startRole = startPointEl?.getAttribute('data-io');
-            let endRole = endPt.getAttribute('data-io');
-            let adjusted = false;
-            if (startRole !== 'out') { setPointRole(startPointEl, 'out', true); startRole = 'out'; adjusted = true; }
-            if (endRole !== 'in') { endPt.classList.remove('io-out'); endPt.classList.add('io-in'); endPt.setAttribute('data-io','in'); endRole = 'in'; adjusted = true; }
-            if (adjusted) { toast('IO-roller justerades för att koppla Output → Input.', 'info'); }
-            ConversationManager.link(this, other);
-            try { this.outNeighbors?.add(other.id); other.inNeighbors?.add(this.id); } catch {}
-            const startEl = startPointEl;
-            const endEl = endPt;
-            const ss = (startEl.getAttribute && startEl.getAttribute('data-side')) || 'x';
-            const es = (endEl.getAttribute && endEl.getAttribute('data-side')) || 'x';
-            const lineId = `link_${this.id}_${ss}_${other.id}_${es}`;
-            const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(startEl), getCenter(endEl)); };
-            window.addEventListener('resize', updateLine);
-            window.addEventListener('scroll', updateLine, { passive:true });
-            window.addEventListener('examai:fab:moved', updateLine);
-            setTimeout(updateLine, 0);
-            const rec = { lineId, updateLine, from: this.id, to: other.id, startEl, endEl };
-            const mine = this.connections.get(other.id);
-            if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); }
-            else { this.connections.set(other.id, [rec]); }
-            const theirs = other.connections.get(this.id);
-            if (theirs) { if (Array.isArray(theirs)) theirs.push(rec); else other.connections.set(this.id, [theirs, rec]); }
-            else { other.connections.set(this.id, [rec]); }
-            try { GraphPersistence.addLink({ fromType:'copilot', fromId:this.id, fromSide:ss, toType:'copilot', toId:other.id, toSide:es }); } catch {}
+    };
+    const onUp = () => {
+      if (!dragging) return; dragging = false; if (overPoint) overPoint.classList.remove('hover');
+      finish();
+      const endPt = overPoint; if (ghostId) { try { ConnectionLayer.remove(ghostId); } catch {} ghostId = null; } if (!endPt) return;
+      // Ensure start is Output
+      if (startPointEl?.getAttribute('data-io') !== 'out') setPointRole(startPointEl, 'out', true);
+      // Section link
+      const head = endPt.closest('.head');
+      const secEl = head && head.closest('.board-section');
+      const secKey = secEl && (secEl.getAttribute('data-section-key') || secEl.id);
+      if (secKey) {
+        const ss = (startPointEl.getAttribute && startPointEl.getAttribute('data-side')) || 'x';
+        const lineId = `link_${this.id}_${ss}_section_${secKey}`;
+        // prevent duplicate identical copilot→section
+        {
+          const key = `section:${secKey}`;
+          const mine = this.connections.get(key);
+          const arr = Array.isArray(mine) ? mine : (mine ? [mine] : []);
+          if (arr.some(r => r && r.lineId === lineId)) {
+            try { ConnectionLayer.pulse(lineId, { duration: 700 }); } catch {}
+            try { toast('Den kopplingen finns redan.', 'info'); } catch {}
+            return;
           }
         }
+        ConnectionLayer.allow(lineId);
+        const updateLine = () => ConnectionLayer.draw(lineId, getCenter(startPointEl), getCenter(endPt));
+        window.addEventListener('resize', updateLine);
+        window.addEventListener('scroll', updateLine, { passive: true });
+        window.addEventListener('examai:fab:moved', updateLine);
+        setTimeout(updateLine, 0);
+        const rec = { lineId, updateLine, from: this.id, to: `section:${secKey}`, startEl: startPointEl, endEl: endPt };
+        const key = `section:${secKey}`;
+        const mine = this.connections.get(key);
+        if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(key, [mine, rec]); } else { this.connections.set(key, [rec]); }
+        try { this.outNeighbors?.add(key); } catch {}
+        try { GraphPersistence.addLink({ fromType: 'copilot', fromId: this.id, fromSide: ss, toType: 'section', toId: secKey, toSide: 'r' }); } catch {}
+        return;
+      }
+      // Internet hub
+      const hubEl = endPt.closest('.internet-hub');
+      if (hubEl) {
+        InternetHub.linkCopilot(this, startPointEl, endPt);
+        return;
+      }
+      // Other copilot or user
+      const panel = endPt.closest('.panel-flyout');
+      const fab = endPt.closest('.fab');
+      let other = null;
+      if (panel) {
+        if (panel.classList.contains('user-node-panel')) {
+          const endRoleUser = endPt.getAttribute('data-io');
+          if (endRoleUser !== 'in') { endPt.classList.remove('io-out'); endPt.classList.add('io-in'); endPt.setAttribute('data-io', 'in'); endPt.setAttribute('title', 'Input'); }
+          try { const UserNode = getUserApi(); if (UserNode) UserNode.linkFromCopilot(this, startPointEl, endPt); } catch {}
+          try { this.outNeighbors?.add('user'); } catch {}
+          return;
+        }
+        const id = parseInt(panel.getAttribute('data-copilot-id'), 10);
+        other = CopilotManager.instances.get(id);
+      } else if (fab && fab !== this.fab) {
+        if (fab.classList.contains('user-node')) {
+          // Auto-adjust user end to Input for Output→Input linking
+          const endRoleUser = endPt.getAttribute('data-io');
+          if (endRoleUser !== 'in') { endPt.classList.remove('io-out'); endPt.classList.add('io-in'); endPt.setAttribute('data-io','in'); endPt.setAttribute('title','Input'); }
+          try { const UserNode = getUserApi(); if (UserNode) UserNode.linkFromCopilot(this, startPointEl, endPt); } catch {}
+          try { this.outNeighbors?.add('user'); } catch {}
+          this.flowOutId = 'user';
+          return;
+        }
+        const id = parseInt(fab.getAttribute('data-copilot-id'), 10);
+        other = CopilotManager.instances.get(id);
+      }
+      if (other) {
+        let startRole = startPointEl?.getAttribute('data-io');
+        let endRole = endPt.getAttribute('data-io');
+        let adjusted = false;
+        if (startRole !== 'out') { setPointRole(startPointEl, 'out', true); startRole = 'out'; adjusted = true; }
+        if (endRole !== 'in') { endPt.classList.remove('io-out'); endPt.classList.add('io-in'); endPt.setAttribute('data-io', 'in'); endRole = 'in'; adjusted = true; }
+        if (adjusted) toast('IO-roller justerades för att koppla Output → Input.', 'info');
+        ConversationManager.link(this, other);
+        try { this.outNeighbors?.add(other.id); other.inNeighbors?.add(this.id); } catch {}
+        const startEl = startPointEl;
+        const endEl = endPt;
+        const ss = (startEl.getAttribute && startEl.getAttribute('data-side')) || 'x';
+        const es = (endEl.getAttribute && endEl.getAttribute('data-side')) || 'x';
+        const lineId = `link_${this.id}_${ss}_${other.id}_${es}`;
+        // prevent duplicate identical copilot→copilot
+        {
+          const mine = this.connections.get(other.id);
+          const arr = Array.isArray(mine) ? mine : (mine ? [mine] : []);
+          if (arr.some(r => r && r.lineId === lineId)) {
+            try { ConnectionLayer.pulse(lineId, { duration: 700 }); } catch {}
+            try { toast('Den kopplingen finns redan.', 'info'); } catch {}
+            return;
+          }
+        }
+        ConnectionLayer.allow(lineId);
+        const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(startEl), getCenter(endEl)); };
+        window.addEventListener('resize', updateLine);
+        window.addEventListener('scroll', updateLine, { passive: true });
+        window.addEventListener('examai:fab:moved', updateLine);
+        setTimeout(updateLine, 0);
+        const rec = { lineId, updateLine, from: this.id, to: other.id, startEl, endEl };
+        const mine = this.connections.get(other.id);
+        if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); } else { this.connections.set(other.id, [rec]); }
+        const theirs = other.connections.get(this.id);
+        if (theirs) { if (Array.isArray(theirs)) theirs.push(rec); else other.connections.set(this.id, [theirs, rec]); } else { other.connections.set(this.id, [rec]); }
+        try { GraphPersistence.addLink({ fromType: 'copilot', fromId: this.id, fromSide: ss, toType: 'copilot', toId: other.id, toSide: es }); } catch {}
       }
     };
-    points.forEach(pt => {
+    // Listeners
+  points.forEach(pt => {
       pt.addEventListener('click', (e) => {
-        if (!e.altKey) return;
-        e.preventDefault(); e.stopPropagation();
+        if (!e.altKey) return; e.preventDefault(); e.stopPropagation();
         const cur = pt.getAttribute('data-io') || 'out';
         const next = (cur === 'out') ? 'in' : 'out';
         setPointRole(pt, next, true);
       });
-      pt.addEventListener('mousedown', (e) => {
+      const startDrag = (e) => {
         dragging = true; overPoint = null; const c = getCenter(pt); start = c; startPointEl = pt; ghostId = `ghost_${this.id}_${Date.now()}`;
-        document.addEventListener('mousemove', onMove, { passive:false });
-        document.addEventListener('mouseup', onUp, { passive:false });
+        try { ConnectionLayer.allow(ghostId); } catch {}
+        document.addEventListener('mousemove', onMove, { passive: false });
+        document.addEventListener('mouseup', onUp, { passive: false });
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', onUp, { passive: false });
         e.preventDefault(); e.stopPropagation();
-      }, { passive:false });
-      pt.addEventListener('touchstart', (e) => {
-        dragging = true; overPoint = null; const c = getCenter(pt); start = c; startPointEl = pt; ghostId = `ghost_${this.id}_${Date.now()}`;
-        document.addEventListener('touchmove', onMove, { passive:false });
-        document.addEventListener('touchend', onUp, { passive:false });
-        e.preventDefault(); e.stopPropagation();
-      }, { passive:false });
+      };
+      pt.addEventListener('mousedown', startDrag, { passive: false });
+      pt.addEventListener('touchstart', startDrag, { passive: false });
     });
   }
   linkTo(other, fromSide = 'x', toSide = 'x', { persist = true } = {}) {
@@ -455,6 +541,16 @@ export class CopilotInstance {
     const endEl = other.fab.querySelector(`.conn-point[data-side="${toSide}"]`) || other.fab;
     const ss = fromSide || 'x'; const es = toSide || 'x';
     const lineId = `link_${this.id}_${ss}_${other.id}_${es}`;
+    // prevent duplicates on programmatic path
+    {
+      const mine = this.connections.get(other.id);
+      const arr = Array.isArray(mine) ? mine : (mine ? [mine] : []);
+      if (arr.some(r => r && r.lineId === lineId)) {
+        try { ConnectionLayer.pulse(lineId, { duration: 700 }); } catch {}
+        return;
+      }
+    }
+    ConnectionLayer.allow(lineId);
     const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(startEl), getCenter(endEl)); };
     window.addEventListener('resize', updateLine);
     window.addEventListener('scroll', updateLine, { passive:true });
@@ -583,18 +679,8 @@ export class CopilotInstance {
     } catch {}
   }
   #positionFabUnderPanel() {
-    try {
-      const pr = this.panel.getBoundingClientRect();
-      const fr = this.fab.getBoundingClientRect();
-      const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
-      const fx = clamp(pr.left + (pr.width - fr.width) / 2, 4, window.innerWidth - fr.width - 4);
-      const fy = clamp(pr.top + pr.height + 12, 4, window.innerHeight - fr.height - 4);
-      this.fab.style.left = fx + 'px';
-      this.fab.style.top = fy + 'px';
-      this.fab.style.right = 'auto';
-      this.fab.style.bottom = 'auto';
-      window.dispatchEvent(new CustomEvent('examai:fab:moved'));
-    } catch {}
+  // NO-OP: keep copilots' FAB fixed; panels should position centered over their FAB without moving it
+  return;
   }
   #wireToggle() {
     this.fab.addEventListener('click', (e) => {
@@ -889,10 +975,44 @@ export class CopilotInstance {
       moved = true;
       const w = this.panel.offsetWidth;
       const h = this.panel.offsetHeight;
-      const nl = clamp(sl + dx, 4, window.innerWidth - w - 4);
-      const nt = clamp(st + dy, 4, window.innerHeight - h - 4);
-      this.panel.style.left = nl + 'px';
-      this.panel.style.top = nt + 'px';
+  const topMin = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+  let nl = clamp(sl + dx, 4, window.innerWidth - w - 4);
+  let nt = clamp(st + dy, topMin, window.innerHeight - h - 4);
+      // Prevent overlap with other panels by simple collision stop and edge snapping
+      try {
+        const pads = 6; const snap = 10;
+        const myRect = { left: nl, top: nt, right: nl + w, bottom: nt + h };
+        const panels = Array.from(document.querySelectorAll('.panel-flyout.show')).filter(el => el !== this.panel);
+        for (const el of panels) {
+          const r = el.getBoundingClientRect();
+          const other = { left: r.left, top: r.top, right: r.left + r.width, bottom: r.top + r.height };
+          const inter = !(myRect.right < other.left + pads || myRect.left > other.right - pads || myRect.bottom < other.top + pads || myRect.top > other.bottom - pads);
+          if (inter) {
+            // push out to nearest side
+            const dxL = Math.abs(myRect.right - other.left);
+            const dxR = Math.abs(other.right - myRect.left);
+            const dyT = Math.abs(myRect.bottom - other.top);
+            const dyB = Math.abs(other.bottom - myRect.top);
+            const min = Math.min(dxL, dxR, dyT, dyB);
+            if (min === dxL) nl = other.left - w - pads;
+            else if (min === dxR) nl = other.right + pads;
+    else if (min === dyT) nt = other.top - h - pads;
+    else nt = other.bottom + pads;
+            myRect.left = nl; myRect.top = nt; myRect.right = nl + w; myRect.bottom = nt + h;
+          } else {
+            // edge snapping when close
+            if (Math.abs(myRect.left - other.right) <= snap) nl = other.right; // snap my left to their right
+            if (Math.abs(myRect.right - other.left) <= snap) nl = other.left - w; // snap my right to their left
+            if (Math.abs(myRect.top - other.bottom) <= snap) nt = other.bottom; // snap my top to their bottom
+            if (Math.abs(myRect.bottom - other.top) <= snap) nt = other.top - h; // snap my bottom to their top
+          }
+        }
+      } catch {}
+  // Final clamp to viewport and top app bar boundary
+  nl = clamp(nl, 4, window.innerWidth - w - 4);
+  nt = clamp(nt, topMin, window.innerHeight - h - 4);
+      this.panel.style.left = Math.round(nl) + 'px';
+      this.panel.style.top = Math.round(nt) + 'px';
       this.#positionFabUnderPanel();
     };
     const onUp = (e) => {
@@ -951,7 +1071,13 @@ export class CopilotInstance {
       if (dir === 'br' || dir === 'r') { newW = Math.max(MIN_W, Math.min(MAX_W, sw + dx)); }
       if (dir === 'br' || dir === 'b') { newH = Math.max(MIN_H, Math.min(MAX_H, sh + dy)); }
       if (dir === 'l') { const rawW = sw - dx; newW = Math.max(MIN_W, Math.min(MAX_W, rawW)); const maxDx = sw - newW; newL = sl + Math.min(Math.max(dx, -10000), maxDx); }
-      if (dir === 't') { const rawH = sh - dy; newH = Math.max(MIN_H, Math.min(MAX_H, rawH)); const maxDy = sh - newH; newT = st + Math.min(Math.max(dy, -10000), maxDy); }
+      if (dir === 't') {
+        const rawH = sh - dy; newH = Math.max(MIN_H, Math.min(MAX_H, rawH)); const maxDy = sh - newH; newT = st + Math.min(Math.max(dy, -10000), maxDy);
+        const topMin = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+        if (newT < topMin) {
+          const bottom = st + sh; newT = topMin; newH = Math.max(MIN_H, Math.min(MAX_H, bottom - newT));
+        }
+      }
       this.panel.style.width = newW + 'px'; this.panel.style.height = newH + 'px';
       if (dir === 'l' || dir === 't') { this.panel.style.left = newL + 'px'; this.panel.style.top = newT + 'px'; }
       this.#positionFabUnderPanel();
@@ -981,8 +1107,9 @@ export class CopilotInstance {
   #wireSubmit() { this.formEl.addEventListener('submit', (e) => { e.preventDefault(); this.sendFromInput(); }); }
   show() {
     const r = this.fab.getBoundingClientRect();
-    const px = Math.min(window.innerWidth - 20, r.left);
-    const py = Math.max(10, r.top - (this.panel.offsetHeight || 320) - 12);
+  const px = Math.min(window.innerWidth - 20, r.left);
+  const minTop = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+  const py = Math.max(minTop, r.top - (this.panel.offsetHeight || 320) - 12);
     this.panel.style.left = px + 'px';
     this.panel.style.top = py + 'px';
     this.panel.classList.remove('hidden');
@@ -1069,6 +1196,7 @@ export class CopilotInstance {
             const label = `Innehåll från ${it.name}${it.truncated ? ' (trunkerad)' : ''}`;
             this.history.push({ role: 'system', content: `${label}:\n\n${it.text || ''}` });
           }
+          try { this._saveHistory(); } catch {}
         }
       } catch (e) {
         console.error(e);
@@ -1118,6 +1246,7 @@ export class CopilotInstance {
       if (!this._convId) {
         this.history.push({ role: 'user', content: msg });
         if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
+  try { this._saveHistory(); } catch {}
       } else {
         if (data && data.reply) ConversationManager.recordAssistant(this._convId, data.reply);
         this.panel.classList.remove('active-speaking');
@@ -1151,7 +1280,8 @@ export class CopilotInstance {
       const reply = data.reply || '(inget svar)';
       this.renderAssistantReply(reply);
       this.history.push({ role: 'user', content: msg });
-      if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
+  if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
+  try { this._saveHistory(); } catch {}
     } catch { this.addAssistant('Nätverksfel.'); }
     finally { InternetHub.setActive(false); }
   }
@@ -1208,7 +1338,7 @@ export class CopilotInstance {
   async #routeReplyFanOut(text, userInst) {
     this.renderAssistantReply(text);
     try {
-      const outs = Array.from(this.outNeighbors || []);
+  const outs = Array.from(this.outNeighbors || []);
       for (const o of outs) {
         if (o === 'user') {
           try { const UserNode = getUserApi(); const lid = UserNode?.getLinkLineIdFor?.(this.id, 'in'); if (lid) ConnectionLayer.pulse(lid, { duration: 1200 }); } catch {}
@@ -1222,6 +1352,12 @@ export class CopilotInstance {
             try { const lid = this.#getLinkLineIdWith(dest.id, 'out'); if (lid) ConnectionLayer.pulse(lid, { duration: 1200 }); } catch {}
             await dest.receiveFromCopilot(text, this.id, 0, { passThrough: false, userInst });
           }
+        }
+        // Section fan-out: check synthetic connection entries stored in this.connections with keys like 'section:<key>'
+        if (typeof o === 'string' && o.startsWith('section:')) {
+          const key = o.split(':')[1];
+          try { const lid = this.#getLinkLineIdWith(`section:${key}`, 'out'); if (lid) ConnectionLayer.pulse(lid, { duration: 1200 }); } catch {}
+          try { const BoardSections = window?.BoardSections || (await import('../graph/board-sections.js')).BoardSections; BoardSections.append(key, text, { author: this.name, renderMode: this.renderMode }); } catch {}
         }
       }
     } catch {}
@@ -1256,9 +1392,10 @@ export class CopilotInstance {
       if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
       const reply = (data && data.reply) || '(inget svar)';
       this.setBusy(false);
-      this.#routeReplyFanOut(reply, userInst);
-      this.history.push({ role: 'user', content: text });
-      if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
+  this.#routeReplyFanOut(reply, userInst);
+  this.history.push({ role: 'user', content: text });
+  if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
+  try { this._saveHistory(); } catch {}
     } catch { this.addAssistant('Nätverksfel.'); }
     finally { this.setBusy(false); if (webEnable) InternetHub.setActive(false); }
   }
@@ -1290,8 +1427,9 @@ export class CopilotInstance {
       const reply = (data && data.reply) || '(inget svar)';
       this.setBusy(false);
       this.#routeReplyFanOut(reply, options.userInst);
-      this.history.push({ role: 'user', content: text });
-      if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
+  this.history.push({ role: 'user', content: text });
+  if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
+  try { this._saveHistory(); } catch {}
     } catch { this.addAssistant('Nätverksfel.'); }
     finally { this.setBusy(false); if (webEnable) InternetHub.setActive(false); }
   }

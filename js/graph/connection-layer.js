@@ -1,6 +1,7 @@
 // SVG connection rendering layer
 export const ConnectionLayer = (() => {
   let svg = null;
+  const allowed = new Set();
   function ensure() {
     if (svg) return svg;
     svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -20,7 +21,10 @@ export const ConnectionLayer = (() => {
     const sx = (b.x >= a.x) ? 1 : -1; // flip curve when going leftwards
     return `M ${a.x},${a.y} C ${a.x + (c * sx)},${a.y} ${b.x - (c * sx)},${b.y} ${b.x},${b.y}`;
   }
+  function allow(id) { allowed.add(String(id)); }
+  function disallow(id) { allowed.delete(String(id)); }
   function draw(id, a, b) {
+    if (!allowed.has(String(id))) return; // guard against stale listeners
     const root = ensure();
     let el = root.querySelector(`path[data-id="${id}"]`);
     if (!el) {
@@ -46,6 +50,7 @@ export const ConnectionLayer = (() => {
     el.setAttribute('d', pathFor(a, b));
   }
   function remove(id) {
+    disallow(id);
     if (!svg) return;
     const el = svg.querySelector(`path[data-id=\"${id}\"]`);
     if (el) el.remove();
@@ -72,5 +77,5 @@ export const ConnectionLayer = (() => {
     }, 30);
     setTimeout(() => { clearInterval(int); overlay.remove(); }, lifetime);
   }
-  return { draw, remove, pulse };
+  return { draw, remove, pulse, allow, disallow };
 })();

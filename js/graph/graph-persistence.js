@@ -1,5 +1,6 @@
 // GraphPersistence module: persists copilot ids and directional links with anchor sides.
 // Provides restore() that accepts dependencies to avoid circular imports.
+import { ConnectionLayer } from './connection-layer.js';
 
 export const GraphPersistence = (() => {
   const KEY_COPILOTS = 'examai.graph.copilots';
@@ -47,7 +48,7 @@ export const GraphPersistence = (() => {
   }
 
   async function restore(deps = {}) {
-    const { InternetHub, UserNode, CopilotManager } = deps;
+  const { InternetHub, UserNode, CopilotManager, BoardSections } = deps;
     try {
       // Ensure required singletons
       try { InternetHub?.element?.(); } catch {}
@@ -72,6 +73,32 @@ export const GraphPersistence = (() => {
             if (a && b && a.id !== b.id) { try { a.linkTo(b, l.fromSide || 'x', l.toSide || 'x', { persist: false }); } catch {} }
             continue;
           }
+          if (l.fromType === 'copilot' && l.toType === 'section') {
+            const a = CopilotManager?.instances?.get?.(l.fromId);
+            const io = BoardSections?.getIoFor?.(l.toId);
+            if (a && io) {
+              try {
+                const start = a.fab.querySelector(`.conn-point[data-side="${l.fromSide || 'x'}"]`) || a.fab;
+                const end = io;
+                // draw a line like in interactive path
+                const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
+                const lineId = `link_${a.id}_${l.fromSide || 'x'}_section_${l.toId}`;
+                ConnectionLayer.allow(lineId);
+                const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(start), getCenter(end)); };
+                window.addEventListener('resize', updateLine);
+                window.addEventListener('scroll', updateLine, { passive:true });
+                window.addEventListener('examai:fab:moved', updateLine);
+                setTimeout(updateLine, 0);
+                const rec = { lineId, updateLine, from: a.id, to: `section:${l.toId}`, startEl: start, endEl: end };
+                const key = `section:${l.toId}`;
+                const mine = a.connections.get(key);
+                if (mine) { if (Array.isArray(mine)) mine.push(rec); else a.connections.set(key, [mine, rec]); }
+                else { a.connections.set(key, [rec]); }
+                try { a.outNeighbors?.add(key); } catch {}
+              } catch {}
+            }
+            continue;
+          }
           if (l.toType === 'user' && user) {
             const a = CopilotManager?.instances?.get?.(l.fromId);
             if (a) { try { UserNode.linkFromCopilotSides(a, l.fromSide || 'x', l.toSide || 'x'); } catch {} }
@@ -79,7 +106,15 @@ export const GraphPersistence = (() => {
           }
           if (l.fromType === 'user' && l.toType === 'copilot' && user) {
             const b = CopilotManager?.instances?.get?.(l.toId);
-            if (b) { try { UserNode.linkToCopilotSides(b, l.fromSide || 'x', l.toSide || 'x'); } catch {} }
+            if (b) {
+              try { UserNode.linkToCopilotSides(b, l.fromSide || 'x', l.toSide || 'x'); } catch {}
+              // Ensure routing semantics restored
+              try { b.inNeighbors?.add('user'); } catch {}
+            }
+            continue;
+          }
+          if (l.fromType === 'user' && l.toType === 'section' && user) {
+            try { UserNode.linkToSectionByKey?.(l.toId, l.fromSide || 'x'); } catch {}
             continue;
           }
         } catch {}

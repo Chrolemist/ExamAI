@@ -4,6 +4,7 @@ import { toast, toggleDrawer, showModal, escapeHtml } from './js/ui.js';
 import { ConnectionLayer } from './js/graph/connection-layer.js';
 import { InternetHub } from './js/graph/internet-hub.js';
 import { GraphPersistence } from './js/graph/graph-persistence.js';
+import { BoardSections } from './js/graph/board-sections.js';
 import { ConversationManager } from './js/graph/conversation-manager.js';
 import { CopilotInstance, CopilotManager } from './js/nodes/copilot-instance.js';
 
@@ -28,7 +29,37 @@ const PauseManager = (() => {
       document.body.appendChild(banner);
     }
     const btn = document.getElementById('pauseFlowBtn');
-    if (btn) btn.textContent = paused ? 'Återuppta flöde' : 'Pausa flöde';
+    if (btn) {
+      // Large clear icons: Pause when running (red), Play when paused (resume)
+      if (paused) {
+        // Play icon (outline triangle)
+        btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 5 L19 12 L7 19 Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>`; // play (outline)
+        btn.title = 'Återuppta flöde';
+        btn.classList.add('paused');
+        btn.setAttribute('aria-label', 'Återuppta flöde');
+      } else {
+        // Pause icon: two thin bars (outline)
+        btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="8" y1="5" x2="8" y2="19" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="16" y1="5" x2="16" y2="19" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`; // pause (outline)
+        btn.title = 'Pausa flöde';
+        btn.classList.remove('paused');
+        btn.setAttribute('aria-label', 'Pausa flöde');
+      }
+      // Position the paused banner just below the pause button so it doesn't cover it
+      const positionBanner = () => {
+        try {
+          const r = btn.getBoundingClientRect();
+          if (!r || !Number.isFinite(r.left)) return;
+          banner.style.left = (r.left + r.width / 2) + 'px';
+          banner.style.top = (r.bottom + 8) + 'px';
+        } catch {}
+      };
+      positionBanner();
+      if (!banner._posBound) {
+        banner._posBound = true;
+        window.addEventListener('resize', positionBanner);
+        window.addEventListener('scroll', positionBanner, { passive: true });
+      }
+    }
     document.body.classList.toggle('flow-paused', !!paused);
   };
   async function flushQueue() {
@@ -73,6 +104,9 @@ document.getElementById('addCopilotBtn')?.addEventListener('click', () => Copilo
 
 // Initialize Internet hub on load
 try { InternetHub.element(); } catch {}
+// Initialize board sections (editable headers + IO points)
+try { BoardSections.init(); } catch {}
+try { window.BoardSections = BoardSections; } catch {}
 
 // Refresh server key status
 (async () => {
@@ -127,6 +161,9 @@ const UserNode = (() => {
   // Track linked copilots and last sent index in our user history
   this._linked = new Set(); // copilot ids
   this._linkLines = new Map(); // copilotId -> Array<{ lineId, updateLine, from:'user'|number, to:'user'|number, startEl, endEl }>
+  // Track section links (by key) for routing and unlink visuals
+  this._linkedSections = new Set(); // Set<string>
+  this._sectionLinkLines = new Map(); // key -> Array<{ lineId, updateLine, startEl, endEl }>
   this._lastSentIndex = -1; // index in this.history last sent to copilots
   // Round-robin index for exclusive dispatch across linked copilots
   this._rrIndex = 0;
@@ -141,20 +178,9 @@ const UserNode = (() => {
   this.#wireContextMenu();
     }
     #positionFabUnderPanel() {
-  // Only align FAB under the panel when the panel is visible
-  if (!this.panel || this.panel.classList.contains('hidden')) return;
-      try {
-        const pr = this.panel.getBoundingClientRect();
-        const fr = this.fab.getBoundingClientRect();
-        const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
-        const fx = clamp(pr.left + (pr.width - fr.width) / 2, 4, window.innerWidth - fr.width - 4);
-        const fy = clamp(pr.top + pr.height + 12, 4, window.innerHeight - fr.height - 4);
-        this.fab.style.left = fx + 'px';
-        this.fab.style.top = fy + 'px';
-        this.fab.style.right = 'auto';
-        this.fab.style.bottom = 'auto';
-        window.dispatchEvent(new CustomEvent('examai:fab:moved'));
-      } catch {}
+  // NO-OP: user requested panels should center over the FAB without moving the FAB.
+  // Kept as a defined private method so other code can call it safely.
+  return;
     }
     _linkFromCopilot(inst, startEl = null, endEl = null) {
       if (!inst || !inst.fab || typeof inst.id !== 'number') return;
@@ -172,6 +198,8 @@ const UserNode = (() => {
           return;
         }
       }
+  // Allow this line to be drawn (guarded by ConnectionLayer)
+  try { ConnectionLayer.allow(lineId); } catch {}
       const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
       // Freeze anchor elements at creation to prevent snapping to other points later
       const anchorStart = (startEl && startEl.getBoundingClientRect) ? startEl : inst.fab;
@@ -221,6 +249,23 @@ const UserNode = (() => {
       // Unlink all user-side connections to copilots
       try {
         Array.from(this._linkLines.keys()).forEach(id => this._unlinkCopilot(id));
+      } catch {}
+      // Also remove any user→section links
+      try {
+        if (this._sectionLinkLines) {
+          for (const [key, links] of this._sectionLinkLines.entries()) {
+            const arr = Array.isArray(links) ? links : [links];
+            arr.forEach(({ lineId, updateLine }) => {
+              try { ConnectionLayer.remove(lineId); } catch {}
+              try { window.removeEventListener('resize', updateLine); } catch {}
+              try { window.removeEventListener('scroll', updateLine); } catch {}
+              try { window.removeEventListener('examai:fab:moved', updateLine); } catch {}
+            });
+          }
+          this._sectionLinkLines.clear();
+        }
+        if (this._linkedSections) this._linkedSections.clear();
+        try { GraphPersistence.removeWhere(l => (l.fromType==='user' && l.toType==='section')); } catch {}
       } catch {}
     }
     #wireContextMenu() {
@@ -295,6 +340,7 @@ const UserNode = (() => {
           <div class="user-avatar small">👤</div>
           <div class="meta"><div class="name">${escapeHtml(getName())}</div></div>
           <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+          <button class="icon-btn" data-action="clear" title="Rensa chatt">🧹</button>
           <button class="icon-btn" data-action="close">✕</button>
         </header>
         <div class="settings collapsed" data-role="settings">
@@ -325,6 +371,16 @@ const UserNode = (() => {
   // (No connection points on the user panel; use only the user FAB for linking)
       document.body.appendChild(sec);
       sec.querySelector('[data-action="close"]').addEventListener('click', () => this.hide());
+      // Clear chat like copilot panels
+      const clearBtn = sec.querySelector('[data-action="clear"]');
+      clearBtn?.addEventListener('click', () => {
+        const box = sec.querySelector('[data-role="messages"]');
+        if (box) box.innerHTML = '';
+        this.history = [];
+        this._lastSentIndex = -1;
+        try { saveHistory(this.history); } catch {}
+        toast('Användarchatten rensad.');
+      });
       // Toggle settings like copilot panels
       const settingsEl = sec.querySelector('[data-role="settings"]');
       const settingsBtn = sec.querySelector('[data-action="settings"]');
@@ -421,7 +477,41 @@ const UserNode = (() => {
         t.addEventListener('dragleave', () => highlight(false));
         t.addEventListener('drop', onDrop);
       });
+      // Render any previously saved history into the panel now
+      try { this.#renderHistoryInto(sec); } catch {}
       return sec;
+    }
+    #renderHistoryInto(panelEl) {
+      if (!Array.isArray(this.history) || !panelEl) return;
+      const box = panelEl.querySelector('[data-role="messages"]');
+      if (!box) return;
+      box.innerHTML = '';
+      for (const m of this.history) {
+        if (!m || !m.role) continue;
+        if (m.role === 'user') {
+          const div = document.createElement('div');
+          div.className = 'bubble user user-bubble';
+          div.style.setProperty('--user-font', getFont());
+          div.style.setProperty('--user-bubble-bg', getColor());
+          div.innerHTML = `<div class="msg-author">${escapeHtml(getName())}</div><div class="msg-text"></div>`;
+          div.querySelector('.msg-text').textContent = m.content || '';
+          box.appendChild(div);
+        } else {
+          const div = document.createElement('div');
+          div.className = 'assistant';
+          const who = (m.role === 'system') ? 'System' : 'Copilot';
+          div.innerHTML = `<div class="msg-author">${who}</div><div class="msg-text"></div>`;
+          const msgEl = div.querySelector('.msg-text');
+          if ((localStorage.getItem('examai.render_mode') || 'raw') === 'md' && window.markdownit) {
+            const mdloc = window.markdownit({ html:false, linkify:true, breaks:true });
+            msgEl.innerHTML = mdloc.render(m.content || '');
+          } else {
+            msgEl.textContent = m.content || '';
+          }
+          box.appendChild(div);
+        }
+      }
+      box.scrollTop = box.scrollHeight;
     }
     addUserLocal(text) {
       const box = this.panel.querySelector('[data-role="messages"]');
@@ -465,15 +555,15 @@ const UserNode = (() => {
       try { return this.history.filter(m => m && m.role === 'system'); } catch { return []; }
     }
     async #dispatchUnsentToLinked() {
-      if (!this._linked || this._linked.size === 0) return;
+      if ((!this._linked || this._linked.size === 0) && (!this._linkedSections || this._linkedSections.size === 0)) return;
       const msgs = this.#unsentUserMessages();
-      if (!msgs.length) return;
+    if (!msgs.length) return; 
       const sysMsgs = this.#allSystemMessages();
       const ids = Array.from(this._linked).filter(id => {
         const inst = CopilotManager.instances.get(id);
         return !!(inst && inst.inNeighbors && inst.inNeighbors.has('user'));
       });
-      if (!ids.length) return;
+    if (!ids.length && !this._linkedSections.size) return;
       for (const m of msgs) {
         // Broadcast to all linked copilots (fan-out)
         for (const destId of ids) {
@@ -486,6 +576,17 @@ const UserNode = (() => {
             if (lid) ConnectionLayer.pulse(lid, { duration: 1200 });
           } catch {}
           try { await inst.receiveFromUser(m.content || '', this, { seed: sysMsgs }); } catch {}
+        }
+        // Also append to linked sections
+        if (this._linkedSections && this._linkedSections.size) {
+          for (const key of this._linkedSections) {
+            try {
+              const lines = this._sectionLinkLines?.get(key);
+              const rec = Array.isArray(lines) ? lines[0] : lines;
+              const lid = rec?.lineId; if (lid) ConnectionLayer.pulse(lid, { duration: 1200 });
+            } catch {}
+            try { BoardSections.append?.(key, m.content || '', { author: getName(), renderMode: localStorage.getItem('examai.render_mode') || 'raw' }); } catch {}
+          }
         }
       }
       this._lastSentIndex = this.history.length - 1;
@@ -523,8 +624,8 @@ const UserNode = (() => {
       });
       const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
       const pickPointAt = (x, y) => {
-        // Only copilot/user FAB points exist; panels have no points
-        const all = document.querySelectorAll('.fab .conn-point');
+        // Allow user to link to copilot FAB points and section IOs
+        const all = document.querySelectorAll('.fab .conn-point, .panel .head .section-io');
         for (const p of all) {
           const r = p.getBoundingClientRect();
           if (x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6) return p;
@@ -549,7 +650,7 @@ const UserNode = (() => {
       };
       const onUp = () => {
         if (!dragging) return; finish(); if (overPoint) overPoint.classList.remove('hover');
-        const endPt = overPoint; if (ghostId) ConnectionLayer.remove(ghostId); ghostId = null; if (!endPt) return;
+  const endPt = overPoint; if (ghostId) { try { ConnectionLayer.remove(ghostId); } catch {} ghostId = null; } if (!endPt) return;
         const otherPanel = endPt.closest('.panel-flyout'); const otherFab = endPt.closest('.fab');
         let targetInst = null;
         if (otherPanel && !otherPanel.classList.contains('user-node-panel')) {
@@ -558,6 +659,36 @@ const UserNode = (() => {
         } else if (otherFab && !otherFab.classList.contains('user-node')) {
           const id = parseInt(otherFab.getAttribute('data-copilot-id'), 10);
           targetInst = CopilotManager.instances.get(id);
+        }
+        // User -> Section link (no behavior yet other than visual)
+    if (!targetInst && endPt.classList.contains('section-io')) {
+          const head = endPt.closest('.head');
+          const secEl = head && head.closest('.board-section');
+          const secKey = secEl && (secEl.getAttribute('data-section-key') || secEl.id);
+          if (secKey) {
+      // Enforce Output (user) -> Input (section IO)
+      let startRole = startPointEl?.getAttribute('data-io');
+      if (startRole !== 'out') { setPointRole(startPointEl, 'out', true); }
+      try { endPt.classList.remove('io-out'); endPt.classList.add('io-in'); endPt.setAttribute('data-io','in'); endPt.setAttribute('title','Input'); } catch {}
+            const ss = (startPointEl.getAttribute && startPointEl.getAttribute('data-side')) || 'x';
+            const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+            const lineId = `link_user_${ss}_section_${secKey}`;
+            ConnectionLayer.allow(lineId);
+            const updateLine = () => ConnectionLayer.draw(lineId, getCenter(startPointEl), getCenter(endPt));
+            window.addEventListener('resize', updateLine);
+            window.addEventListener('scroll', updateLine, { passive: true });
+            window.addEventListener('examai:fab:moved', updateLine);
+            setTimeout(updateLine, 0);
+      // Track visuals and routing
+      const rec = { lineId, updateLine, startEl: startPointEl, endEl: endPt };
+      const existing = this._sectionLinkLines.get(secKey);
+      if (existing) { if (Array.isArray(existing)) existing.push(rec); else this._sectionLinkLines.set(secKey, [existing, rec]); }
+      else { this._sectionLinkLines.set(secKey, [rec]); }
+      this._linkedSections.add(secKey);
+      try { GraphPersistence.addLink({ fromType:'user', fromId:0, fromSide:ss, toType:'section', toId:secKey, toSide:'r' }); } catch {}
+      toast(`Kopplad: användare → sektion (${secKey}).`);
+          }
+          return;
         }
         if (targetInst) {
           // Robustly enforce Output (user) -> Input (copilot); auto-adjust IO roles when needed
@@ -575,15 +706,17 @@ const UserNode = (() => {
           const ss = (startPointEl.getAttribute && startPointEl.getAttribute('data-side')) || 'x';
           const es = (endPt.getAttribute && endPt.getAttribute('data-side')) || 'x';
           const lineId = `link_user_${ss}_${targetInst.id}_${es}`;
-          // If identical line already exists, just pulse it and exit
+          // If identical line already exists, just pulse it and inform
           {
             const maybe = this._linkLines.get(targetInst.id);
             const arr = Array.isArray(maybe) ? maybe : (maybe ? [maybe] : []);
             if (arr.some(r => r && r.lineId === lineId)) {
               try { ConnectionLayer.pulse(lineId, { duration: 700 }); } catch {}
+              try { toast('Den kopplingen finns redan.', 'info'); } catch {}
               return;
             }
           }
+          ConnectionLayer.allow(lineId);
           const anchorStart = startPointEl;
           const anchorEnd = endPt;
           // Ensure UI labels match roles
@@ -607,6 +740,7 @@ const UserNode = (() => {
       const startDrag = (pt) => (e) => {
         if (e.altKey) { e.preventDefault(); e.stopPropagation(); return; }
         dragging = true; const p = e.touches ? e.touches[0] : e; const c = getCenter(pt); start = c; startPointEl = pt; ghostId = `ghost_user_${Date.now()}`;
+        try { ConnectionLayer.allow(ghostId); } catch {}
         document.addEventListener('mousemove', onMove, { passive: false });
         document.addEventListener('mouseup', onUp, { passive: false });
         document.addEventListener('touchmove', onMove, { passive: false });
@@ -708,12 +842,43 @@ const UserNode = (() => {
         const dy = p.clientY - sy;
         if (!moved && Math.hypot(dx, dy) < 3) return;
         moved = true;
-        const w = this.panel.offsetWidth;
-        const h = this.panel.offsetHeight;
-        const nl = clamp(sl + dx, 4, window.innerWidth - w - 4);
-        const nt = clamp(st + dy, 4, window.innerHeight - h - 4);
-        this.panel.style.left = nl + 'px';
-        this.panel.style.top = nt + 'px';
+  const w = this.panel.offsetWidth; const h = this.panel.offsetHeight;
+  const topMin = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+  let nl = clamp(sl + dx, 4, window.innerWidth - w - 4);
+  let nt = clamp(st + dy, topMin, window.innerHeight - h - 4);
+        // Collision stop + edge snap against other floating panels
+        try {
+          const pads = 6; const snap = 10;
+          const myRect = { left: nl, top: nt, right: nl + w, bottom: nt + h };
+          const panels = Array.from(document.querySelectorAll('.panel-flyout.show')).filter(el => el !== this.panel);
+          for (const el of panels) {
+            const r = el.getBoundingClientRect();
+            const other = { left: r.left, top: r.top, right: r.left + r.width, bottom: r.top + r.height };
+            const inter = !(myRect.right < other.left + pads || myRect.left > other.right - pads || myRect.bottom < other.top + pads || myRect.top > other.bottom - pads);
+            if (inter) {
+              const dxL = Math.abs(myRect.right - other.left);
+              const dxR = Math.abs(other.right - myRect.left);
+              const dyT = Math.abs(myRect.bottom - other.top);
+              const dyB = Math.abs(other.bottom - myRect.top);
+              const min = Math.min(dxL, dxR, dyT, dyB);
+              if (min === dxL) nl = other.left - w - pads;
+              else if (min === dxR) nl = other.right + pads;
+              else if (min === dyT) nt = other.top - h - pads;
+              else nt = other.bottom + pads;
+              myRect.left = nl; myRect.top = nt; myRect.right = nl + w; myRect.bottom = nt + h;
+            } else {
+              if (Math.abs(myRect.left - other.right) <= snap) nl = other.right;
+              if (Math.abs(myRect.right - other.left) <= snap) nl = other.left - w;
+              if (Math.abs(myRect.top - other.bottom) <= snap) nt = other.bottom;
+              if (Math.abs(myRect.bottom - other.top) <= snap) nt = other.top - h;
+            }
+          }
+        } catch {}
+  // Final clamp to viewport and top app bar boundary
+  nl = clamp(nl, 4, window.innerWidth - w - 4);
+  nt = clamp(nt, topMin, window.innerHeight - h - 4);
+  this.panel.style.left = Math.round(nl) + 'px';
+  this.panel.style.top = Math.round(nt) + 'px';
         // keep FAB centered below the panel while dragging
         this.#positionFabUnderPanel();
       };
@@ -741,7 +906,7 @@ const UserNode = (() => {
       const handles = this.panel.querySelectorAll('[data-resize]');
       let dir=null,sx=0,sy=0,sw=0,sh=0,sl=0,st=0,resizing=false;
       const onDown=(e)=>{ const target=e.currentTarget; dir=target.getAttribute('data-resize'); const p=e.touches?e.touches[0]:e; const r=this.panel.getBoundingClientRect(); sx=p.clientX; sy=p.clientY; sw=r.width; sh=r.height; sl=r.left; st=r.top; resizing=true; document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); document.addEventListener('touchmove', onMove, {passive:false}); document.addEventListener('touchend', onUp); };
-      const onMove=(e)=>{ if(!resizing) return; const p=e.touches?e.touches[0]:e; const dx=p.clientX-sx; const dy=p.clientY-sy; let newW=sw,newH=sh,newL=sl,newT=st; if(dir==='br'||dir==='r'){ newW=Math.max(260, Math.min(900, sw+dx)); } if(dir==='br'||dir==='b'){ newH=Math.max(200, Math.min(800, sh+dy)); } if(dir==='l'){ newW=Math.max(260, Math.min(900, sw-dx)); newL=sl+dx; } if(dir==='t'){ newH=Math.max(200, Math.min(800, sh-dy)); newT=st+dy; } this.panel.style.width=newW+'px'; this.panel.style.height=newH+'px'; if(dir==='l'||dir==='t'){ this.panel.style.left=newL+'px'; this.panel.style.top=newT+'px'; } };
+  const onMove=(e)=>{ if(!resizing) return; const p=e.touches?e.touches[0]:e; const dx=p.clientX-sx; const dy=p.clientY-sy; let newW=sw,newH=sh,newL=sl,newT=st; if(dir==='br'||dir==='r'){ newW=Math.max(260, Math.min(900, sw+dx)); } if(dir==='br'||dir==='b'){ newH=Math.max(200, Math.min(800, sh+dy)); } if(dir==='l'){ newW=Math.max(260, Math.min(900, sw-dx)); newL=sl+dx; } if(dir==='t'){ newH=Math.max(200, Math.min(800, sh-dy)); newT=st+dy; const topMin=(document.querySelector('.appbar')?.getBoundingClientRect()?.bottom||0)+8; if(newT<topMin){ const bottom=st+sh; newT=topMin; newH=Math.max(200, Math.min(800, bottom-newT)); } } this.panel.style.width=newW+'px'; this.panel.style.height=newH+'px'; if(dir==='l'||dir==='t'){ this.panel.style.left=newL+'px'; this.panel.style.top=newT+'px'; } };
       const onUp=()=>{ if(!resizing) return; resizing=false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); const w=parseInt((this.panel.style.width||'0').replace('px',''),10)||0; const h=parseInt((this.panel.style.height||'0').replace('px',''),10)||0; localStorage.setItem('examai.user.panel.size', JSON.stringify({w,h})); };
       handles.forEach(h=>{ h.addEventListener('mousedown', onDown); h.addEventListener('touchstart', onDown, {passive:false}); });
       // While resizing, keep FAB centered under panel
@@ -796,8 +961,9 @@ const UserNode = (() => {
     }
     show() {
       const r = this.fab.getBoundingClientRect();
-      const px = Math.min(window.innerWidth - 20, r.left);
-      const py = Math.max(10, r.top - (this.panel.offsetHeight || 320) - 12);
+  const px = Math.min(window.innerWidth - 20, r.left);
+  const minTop = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+  const py = Math.max(minTop, r.top - (this.panel.offsetHeight || 320) - 12);
       this.panel.style.left = px + 'px';
       this.panel.style.top = py + 'px';
       this.panel.classList.remove('hidden');
@@ -832,7 +998,8 @@ const UserNode = (() => {
     // emulate the minimal part of onUp path to draw and record link
     const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
     const ss = fromSide || 'x'; const es = toSide || 'x';
-    const lineId = `link_user_${ss}_${inst.id}_${es}`;
+  const lineId = `link_user_${ss}_${inst.id}_${es}`;
+  ConnectionLayer.allow(lineId);
     const anchorStart = start || instance.fab; const anchorEnd = end || inst.fab;
     const updateLine = () => ConnectionLayer.draw(lineId, getCenter(anchorStart), getCenter(anchorEnd));
     window.addEventListener('resize', updateLine);
@@ -843,6 +1010,40 @@ const UserNode = (() => {
     const existing = instance._linkLines.get(inst.id);
     if (existing) { if (Array.isArray(existing)) existing.push(rec); else instance._linkLines.set(inst.id, [existing, rec]); }
     else { instance._linkLines.set(inst.id, [rec]); }
+  // Also restore routing semantics
+  try { instance._linked.add(inst.id); } catch {}
+  try { inst.inNeighbors?.add('user'); } catch {}
+  }
+  // Allow user to link directly to a section input point (for future features like manual notes)
+  function linkToSectionByKey(secKey, fromSide = 'x') {
+    ensure();
+    const start = instance.fab.querySelector(`.conn-point[data-side="${fromSide}"]`);
+    const end = BoardSections.getIoFor?.(secKey);
+    if (!end || !start) return;
+    const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+    const ss = fromSide || 'x';
+      const lineId = `link_user_${ss}_section_${secKey}`;
+      // Prevent duplicate user→section identical edge
+      {
+        const arr = this._sectionLinkLines.get(secKey);
+        const lines = Array.isArray(arr) ? arr : (arr ? [arr] : []);
+        if (lines.some(r => r && r.lineId === lineId)) {
+          try { ConnectionLayer.pulse(lineId, { duration: 700 }); } catch {}
+          try { toast('Den kopplingen finns redan.', 'info'); } catch {}
+          return;
+        }
+      }
+      ConnectionLayer.allow(lineId);
+    const updateLine = () => ConnectionLayer.draw(lineId, getCenter(start), getCenter(end));
+    window.addEventListener('resize', updateLine);
+    window.addEventListener('scroll', updateLine, { passive: true });
+    window.addEventListener('examai:fab:moved', updateLine);
+    setTimeout(updateLine, 0);
+  const rec = { lineId, updateLine, startEl: start, endEl: end };
+  const existing = instance._sectionLinkLines.get(secKey);
+  if (existing) { if (Array.isArray(existing)) existing.push(rec); else instance._sectionLinkLines.set(secKey, [existing, rec]); }
+  else { instance._sectionLinkLines.set(secKey, [rec]); }
+  instance._linkedSections.add(secKey);
   }
   function getLinkLineIdFor(copilotId, dir = 'out') {
     try {
@@ -857,7 +1058,7 @@ const UserNode = (() => {
     } catch { return null; }
   }
   function unlinkFor(copilotId) { try { ensure(); instance._unlinkCopilot(copilotId); } catch {} }
-  return { ensure, linkFromCopilot, getLinkLineIdFor, unlinkFor, linkFromCopilotSides, linkToCopilotSides };
+  return { ensure, linkFromCopilot, getLinkLineIdFor, unlinkFor, linkFromCopilotSides, linkToCopilotSides, linkToSectionByKey };
 })();
 
 // Expose UserNode bridge for Copilot module
@@ -866,4 +1067,26 @@ try { window.__ExamAI_UserNodeApi = UserNode; } catch {}
 // Create the user node on load
 try { UserNode.ensure(); } catch {}
 // Restore saved graph (copilots + links)
-try { GraphPersistence.restore({ InternetHub, UserNode, CopilotManager }); } catch {}
+try { GraphPersistence.restore({ InternetHub, UserNode, CopilotManager, BoardSections }); } catch {}
+
+// --- Grid snap helper (shared) ---------------------------------
+// Exposed as window.GridSnap for small UI helpers (show guides while dragging panels)
+const GridSnap = (() => {
+  const size = 24; // snap grid pixels
+  let guideV = null, guideH = null;
+  function ensureGuides() {
+    if (guideV && guideH) return;
+    guideV = document.createElement('div'); guideH = document.createElement('div');
+    guideV.className = 'grid-guide v'; guideH.className = 'grid-guide h';
+    document.body.appendChild(guideV); document.body.appendChild(guideH);
+  }
+  function showAt(x, y) {
+    ensureGuides();
+    guideV.style.display = 'block'; guideH.style.display = 'block';
+    guideV.style.left = Math.round(x) + 'px'; guideH.style.top = Math.round(y) + 'px';
+  }
+  function hide() { if (guideV) guideV.style.display = 'none'; if (guideH) guideH.style.display = 'none'; }
+  function snap(x, y) { return { x: Math.round(x / size) * size, y: Math.round(y / size) * size }; }
+  return { showAt, hide, snap, gridSize: size };
+})();
+try { window.GridSnap = GridSnap; } catch {}
