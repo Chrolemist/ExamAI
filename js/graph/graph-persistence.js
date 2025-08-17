@@ -1,6 +1,7 @@
 // GraphPersistence module: persists copilot ids and directional links with anchor sides.
 // Provides restore() that accepts dependencies to avoid circular imports.
 import { ConnectionLayer } from './connection-layer.js';
+import { IORegistry } from './io-registry.js';
 
 export const GraphPersistence = (() => {
   const KEY_COPILOTS = 'examai.graph.copilots';
@@ -82,7 +83,9 @@ export const GraphPersistence = (() => {
                 const end = io;
                 // draw a line like in interactive path
                 const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
-                const lineId = `link_${a.id}_${l.fromSide || 'x'}_section_${l.toId}`;
+                const fromIoId = (IORegistry.getByEl(start)?.ioId) || `copilot:${a.id}:${l.fromSide || 'x'}:0`;
+                const toIoId = (IORegistry.getByEl(end)?.ioId) || `section:${l.toId}:r:0`;
+                const lineId = `link_${fromIoId}__${toIoId}`;
                 ConnectionLayer.allow(lineId);
                 const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(start), getCenter(end)); };
                 window.addEventListener('resize', updateLine);
@@ -101,7 +104,11 @@ export const GraphPersistence = (() => {
           }
           if (l.toType === 'user' && user) {
             const a = CopilotManager?.instances?.get?.(l.fromId);
-            if (a) { try { UserNode.linkFromCopilotSides(a, l.fromSide || 'x', l.toSide || 'x'); } catch {} }
+            if (a) {
+              // Draw the visual link and restore routing semantics so replies fan out to the user
+              try { UserNode.linkFromCopilotSides(a, l.fromSide || 'x', l.toSide || 'x'); } catch {}
+              try { a.outNeighbors?.add('user'); } catch {}
+            }
             continue;
           }
           if (l.fromType === 'user' && l.toType === 'copilot' && user) {

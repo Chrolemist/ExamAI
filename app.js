@@ -5,6 +5,7 @@ import { ConnectionLayer } from './js/graph/connection-layer.js';
 import { InternetHub } from './js/graph/internet-hub.js';
 import { GraphPersistence } from './js/graph/graph-persistence.js';
 import { BoardSections } from './js/graph/board-sections.js';
+import { IORegistry } from './js/graph/io-registry.js';
 import { ConversationManager } from './js/graph/conversation-manager.js';
 import { CopilotInstance, CopilotManager } from './js/nodes/copilot-instance.js';
 
@@ -153,7 +154,8 @@ const UserNode = (() => {
       this.history = loadHistory();
       this.fab = this.#createFab();
       this.panel = this.#createPanel();
-      this.connPoints = Array.from(this.panel.querySelectorAll('.conn-point'));
+  this.connPoints = Array.from(this.panel.querySelectorAll('.conn-point'));
+  this._ioIds = new Map(); // el -> ioId
   // For keeping the FAB centered under the panel when open
   this._fabAlignOnResize = null;
   // Track recent drag to avoid accidental click toggling
@@ -182,13 +184,15 @@ const UserNode = (() => {
   // Kept as a defined private method so other code can call it safely.
   return;
     }
-    _linkFromCopilot(inst, startEl = null, endEl = null) {
+  _linkFromCopilot(inst, startEl = null, endEl = null) {
       if (!inst || !inst.fab || typeof inst.id !== 'number') return;
       // Only draw a visual link for copilot→user; do NOT add to user's outbound links
       // Draw/update line between exact selected points when provided, else fall back to FAB centers
       const ss = (startEl && startEl.getAttribute && startEl.getAttribute('data-side')) || 'x';
       const es = (endEl && endEl.getAttribute && endEl.getAttribute('data-side')) || 'x';
-      const lineId = `link_${inst.id}_${ss}_user_${es}`;
+  const fromIoId = (IORegistry.getByEl(startEl)?.ioId) || `copilot:${inst.id}:${ss}:0`;
+  const toIoId = (IORegistry.getByEl(endEl)?.ioId) || `user:0:${es}:0`;
+  const lineId = `link_${fromIoId}__${toIoId}`;
       // Deduplicate identical directional line
       const existingFor = this._linkLines.get(inst.id);
       if (existingFor) {
@@ -486,7 +490,7 @@ const UserNode = (() => {
       const box = panelEl.querySelector('[data-role="messages"]');
       if (!box) return;
       box.innerHTML = '';
-      for (const m of this.history) {
+    for (const m of this.history) {
         if (!m || !m.role) continue;
         if (m.role === 'user') {
           const div = document.createElement('div');
@@ -499,7 +503,9 @@ const UserNode = (() => {
         } else {
           const div = document.createElement('div');
           div.className = 'assistant';
-          const who = (m.role === 'system') ? 'System' : 'Copilot';
+      let who = 'Copilot';
+      if (m.role === 'system') who = 'System';
+      else if (m.author && String(m.author).trim()) who = String(m.author).trim();
           div.innerHTML = `<div class="msg-author">${who}</div><div class="msg-text"></div>`;
           const msgEl = div.querySelector('.msg-text');
           if ((localStorage.getItem('examai.render_mode') || 'raw') === 'md' && window.markdownit) {
@@ -542,7 +548,7 @@ const UserNode = (() => {
       }
       box.appendChild(div);
       box.scrollTop = box.scrollHeight;
-      this.history.push({ role: 'assistant', content: text || '' });
+      this.history.push({ role: 'assistant', content: text || '', author: who });
       saveHistory(this.history);
     }
     #unsentUserMessages() {
@@ -602,7 +608,8 @@ const UserNode = (() => {
       } catch {}
     }
     #wireConn() {
-      const points = Array.from(this.fab.querySelectorAll('.conn-point'));
+  const points = Array.from(this.fab.querySelectorAll('.conn-point'));
+  const ioIds = new Map();
       let dragging = false, start = null, ghostId = null, overPoint = null, startPointEl = null;
       // IO roles for user points with persistence and toggle
       const where = 'fab';
@@ -617,8 +624,9 @@ const UserNode = (() => {
         if (persist) { try { localStorage.setItem(roleKey(el), role || ''); } catch {}
         }
       };
-      // restore saved roles (default to 'out')
-      points.forEach(pt => {
+      // register + restore saved roles (default to 'out')
+      points.forEach((pt, idx) => {
+        try { const id = IORegistry.register(pt, { nodeType: 'user', nodeId: '0', side: pt.getAttribute('data-side') || 'x', index: idx }, { attachToggle: true }); ioIds.set(pt, id); } catch {}
         try { const r = localStorage.getItem(roleKey(pt)); setPointRole(pt, (r === 'in' || r === 'out') ? r : 'out', false); }
         catch { setPointRole(pt, 'out', false); }
       });
@@ -672,7 +680,9 @@ const UserNode = (() => {
       try { endPt.classList.remove('io-out'); endPt.classList.add('io-in'); endPt.setAttribute('data-io','in'); endPt.setAttribute('title','Input'); } catch {}
             const ss = (startPointEl.getAttribute && startPointEl.getAttribute('data-side')) || 'x';
             const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
-            const lineId = `link_user_${ss}_section_${secKey}`;
+            const fromIoId = (IORegistry.getByEl(startPointEl)?.ioId) || `user:0:${ss}:0`;
+            const toIoId = `section:${secKey}:r:0`;
+            const lineId = `link_${fromIoId}__${toIoId}`;
             ConnectionLayer.allow(lineId);
             const updateLine = () => ConnectionLayer.draw(lineId, getCenter(startPointEl), getCenter(endPt));
             window.addEventListener('resize', updateLine);
@@ -705,7 +715,9 @@ const UserNode = (() => {
           // Draw a connection line from user FAB to copilot FAB and keep it updated, anchored to selected points (frozen)
           const ss = (startPointEl.getAttribute && startPointEl.getAttribute('data-side')) || 'x';
           const es = (endPt.getAttribute && endPt.getAttribute('data-side')) || 'x';
-          const lineId = `link_user_${ss}_${targetInst.id}_${es}`;
+          const fromIoId = (IORegistry.getByEl(startPointEl)?.ioId) || `user:0:${ss}:0`;
+          const toIoId = (IORegistry.getByEl(endPt)?.ioId) || `copilot:${targetInst.id}:${es}:0`;
+          const lineId = `link_${fromIoId}__${toIoId}`;
           // If identical line already exists, just pulse it and inform
           {
             const maybe = this._linkLines.get(targetInst.id);
@@ -748,13 +760,6 @@ const UserNode = (() => {
         e.preventDefault(); e.stopPropagation();
       };
       points.forEach(pt => {
-        // Alt-click toggles IO role
-        pt.addEventListener('click', (e) => {
-          if (!e.altKey) return; e.preventDefault(); e.stopPropagation();
-          const cur = pt.getAttribute('data-io') || 'out';
-          const next = (cur === 'out') ? 'in' : 'out';
-          setPointRole(pt, next, true);
-        });
         pt.addEventListener('mousedown', startDrag(pt), { passive: false });
         pt.addEventListener('touchstart', startDrag(pt), { passive: false });
       });
@@ -918,7 +923,20 @@ const UserNode = (() => {
         h.addEventListener('touchstart', onDownResize, {passive:false});
       });
       // restore size/pos
-      try { const s=localStorage.getItem('examai.user.panel.size'); if(s){ const {w,h}=JSON.parse(s); if(w) this.panel.style.width=w+'px'; if(h) this.panel.style.height=h+'px'; } const p=localStorage.getItem('examai.user.panel.pos'); if(p){ const {x,y}=JSON.parse(p); if(Number.isFinite(x)) this.panel.style.left=x+'px'; if(Number.isFinite(y)) this.panel.style.top=y+'px'; } } catch {}
+      try {
+        const s=localStorage.getItem('examai.user.panel.size');
+        if(s){ const {w,h}=JSON.parse(s); if(w) this.panel.style.width=w+'px'; if(h) this.panel.style.height=h+'px'; }
+        const p=localStorage.getItem('examai.user.panel.pos');
+        if(p){
+          const {x,y}=JSON.parse(p);
+          const r=this.panel.getBoundingClientRect();
+          const w=r.width||parseInt(this.panel.style.width||'420',10)||420;
+          const h=r.height||parseInt(this.panel.style.height||'320',10)||320;
+          const topMin=(document.querySelector('.appbar')?.getBoundingClientRect()?.bottom||0)+8;
+          if(Number.isFinite(x)) this.panel.style.left=Math.max(4, Math.min(window.innerWidth-w-4, x))+'px';
+          if(Number.isFinite(y)) this.panel.style.top=Math.max(topMin, Math.min(window.innerHeight-h-4, y))+'px';
+        }
+      } catch {}
     }
     #initSettings() {
       const nameEl = this.panel.querySelector('[data-role="name"]');
@@ -961,9 +979,11 @@ const UserNode = (() => {
     }
     show() {
       const r = this.fab.getBoundingClientRect();
-  const px = Math.min(window.innerWidth - 20, r.left);
-  const minTop = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
-  const py = Math.max(minTop, r.top - (this.panel.offsetHeight || 320) - 12);
+      const w = this.panel.offsetWidth || 420;
+      const h = this.panel.offsetHeight || 320;
+      const px = Math.max(4, Math.min(window.innerWidth - w - 4, r.left));
+      const minTop = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+      const py = Math.max(minTop, Math.min(window.innerHeight - h - 4, r.top - h - 12));
       this.panel.style.left = px + 'px';
       this.panel.style.top = py + 'px';
       this.panel.classList.remove('hidden');
@@ -998,7 +1018,9 @@ const UserNode = (() => {
     // emulate the minimal part of onUp path to draw and record link
     const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
     const ss = fromSide || 'x'; const es = toSide || 'x';
-  const lineId = `link_user_${ss}_${inst.id}_${es}`;
+  const fromIoId = (IORegistry.getByEl(start)?.ioId) || `user:0:${ss}:0`;
+  const toIoId = (IORegistry.getByEl(end)?.ioId) || `copilot:${inst.id}:${es}:0`;
+  const lineId = `link_${fromIoId}__${toIoId}`;
   ConnectionLayer.allow(lineId);
     const anchorStart = start || instance.fab; const anchorEnd = end || inst.fab;
     const updateLine = () => ConnectionLayer.draw(lineId, getCenter(anchorStart), getCenter(anchorEnd));
@@ -1022,10 +1044,12 @@ const UserNode = (() => {
     if (!end || !start) return;
     const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
     const ss = fromSide || 'x';
-      const lineId = `link_user_${ss}_section_${secKey}`;
+      const fromIoId = (IORegistry.getByEl(start)?.ioId) || `user:0:${ss}:0`;
+      const toIoId = (IORegistry.getByEl(end)?.ioId) || `section:${secKey}:r:0`;
+      const lineId = `link_${fromIoId}__${toIoId}`;
       // Prevent duplicate user→section identical edge
       {
-        const arr = this._sectionLinkLines.get(secKey);
+        const arr = instance._sectionLinkLines.get(secKey);
         const lines = Array.isArray(arr) ? arr : (arr ? [arr] : []);
         if (lines.some(r => r && r.lineId === lineId)) {
           try { ConnectionLayer.pulse(lineId, { duration: 700 }); } catch {}

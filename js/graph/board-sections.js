@@ -1,6 +1,7 @@
 // BoardSections: editable section headers with IO points you can link Output->Input into.
 import { ConnectionLayer } from './connection-layer.js';
 import { GraphPersistence } from './graph-persistence.js';
+import { IORegistry } from './io-registry.js';
 
 export const BoardSections = (() => {
   const KEY_TITLES = 'examai.sections.titles';
@@ -39,8 +40,8 @@ export const BoardSections = (() => {
         body.addEventListener('input', () => { if (t) clearTimeout(t); t = setTimeout(saveNow, 400); });
         body.addEventListener('blur', saveNow);
       }
-      // add an IO point to the right side of header
-      let io = document.createElement('span');
+  // add an IO point to the right side of header
+  let io = document.createElement('span');
       io.className = 'conn-point io-in section-io';
       io.setAttribute('title', 'Input');
       io.setAttribute('data-io', 'in');
@@ -48,6 +49,8 @@ export const BoardSections = (() => {
       // position inline in header
       const headContainer = sec.querySelector('.head');
       headContainer && headContainer.appendChild(io);
+  // Register IO point for stable identity
+  try { IORegistry.register(io, { nodeType: 'section', nodeId: key, side: 'r', index: 0, defaultRole: 'in' }); } catch {}
       // record
       sections.set(key, { el: sec, titleEl: head, ioPoint: io });
     });

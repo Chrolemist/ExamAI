@@ -3,6 +3,7 @@
 import { toast, escapeHtml } from '../ui.js';
 import { ConnectionLayer } from '../graph/connection-layer.js';
 import { ConversationManager } from '../graph/conversation-manager.js';
+import { IORegistry } from '../graph/io-registry.js';
 import { InternetHub } from '../graph/internet-hub.js';
 import { GraphPersistence } from '../graph/graph-persistence.js';
 
@@ -368,8 +369,9 @@ export class CopilotInstance {
     this.flowOutId = target;
   }
   #wireFabConnections() {
-    const points = Array.from(this.fab.querySelectorAll('.conn-point'));
-    let dragging = false, start = null, ghostId = null, overPoint = null, startPointEl = null;
+  const points = Array.from(this.fab.querySelectorAll('.conn-point'));
+  let dragging = false, start = null, ghostId = null, overPoint = null, startPointEl = null;
+  const ioIds = new Map(); // el -> ioId
     const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
     const where = 'fab';
     const roleKey = (pt) => `io:${this.id}:${where}:${pt.getAttribute('data-side') || 'x'}`;
@@ -382,8 +384,11 @@ export class CopilotInstance {
       if (label) { el.setAttribute('title', label); el.setAttribute('aria-label', label); }
       if (persist) { try { localStorage.setItem(roleKey(el), role || ''); } catch {} }
     };
-    // Restore saved IO roles (default to 'out')
-    points.forEach(pt => { try { const r = localStorage.getItem(roleKey(pt)); setPointRole(pt, (r === 'in' || r === 'out') ? r : 'out', false); } catch { setPointRole(pt, 'out', false); } });
+    // Register points in IORegistry and restore saved IO roles (default to 'out')
+    points.forEach((pt, idx) => {
+      try { const id = IORegistry.register(pt, { nodeType: 'copilot', nodeId: String(this.id), side: pt.getAttribute('data-side') || 'x', index: idx }, { attachToggle: true }); ioIds.set(pt, id); } catch {}
+      try { const r = localStorage.getItem(roleKey(pt)); setPointRole(pt, (r === 'in' || r === 'out') ? r : 'out', false); } catch { setPointRole(pt, 'out', false); }
+    });
     const pickPointAt = (x, y) => {
       // Allow linking to panel/fab points, Internet hub, and section IO targets
       const all = document.querySelectorAll('.panel-flyout .conn-point, .internet-hub .conn-point, .fab .conn-point, .panel .head .section-io');
@@ -416,7 +421,9 @@ export class CopilotInstance {
       const secKey = secEl && (secEl.getAttribute('data-section-key') || secEl.id);
       if (secKey) {
         const ss = (startPointEl.getAttribute && startPointEl.getAttribute('data-side')) || 'x';
-        const lineId = `link_${this.id}_${ss}_section_${secKey}`;
+        const fromIoId = (IORegistry.getByEl(startPointEl)?.ioId) || `copilot:${this.id}:${ss}:0`;
+        const toIoId = `section:${secKey}:r:0`;
+        const lineId = `link_${fromIoId}__${toIoId}`;
         // prevent duplicate identical copilot→section
         {
           const key = `section:${secKey}`;
@@ -486,9 +493,9 @@ export class CopilotInstance {
         try { this.outNeighbors?.add(other.id); other.inNeighbors?.add(this.id); } catch {}
         const startEl = startPointEl;
         const endEl = endPt;
-        const ss = (startEl.getAttribute && startEl.getAttribute('data-side')) || 'x';
-        const es = (endEl.getAttribute && endEl.getAttribute('data-side')) || 'x';
-        const lineId = `link_${this.id}_${ss}_${other.id}_${es}`;
+  const fromIoId = ioIds.get(startEl) || `copilot:${this.id}:${(startEl.getAttribute && startEl.getAttribute('data-side')) || 'x'}:0`;
+  const toIoId = `copilot:${other.id}:${(endEl.getAttribute && endEl.getAttribute('data-side')) || 'x'}:0`;
+  const lineId = `link_${fromIoId}__${toIoId}`;
         // prevent duplicate identical copilot→copilot
         {
           const mine = this.connections.get(other.id);
@@ -510,17 +517,15 @@ export class CopilotInstance {
         if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); } else { this.connections.set(other.id, [rec]); }
         const theirs = other.connections.get(this.id);
         if (theirs) { if (Array.isArray(theirs)) theirs.push(rec); else other.connections.set(this.id, [theirs, rec]); } else { other.connections.set(this.id, [rec]); }
-        try { GraphPersistence.addLink({ fromType: 'copilot', fromId: this.id, fromSide: ss, toType: 'copilot', toId: other.id, toSide: es }); } catch {}
+        try {
+          const ss = (startEl.getAttribute && startEl.getAttribute('data-side')) || 'x';
+          const es = (endEl.getAttribute && endEl.getAttribute('data-side')) || 'x';
+          GraphPersistence.addLink({ fromType: 'copilot', fromId: this.id, fromSide: ss, toType: 'copilot', toId: other.id, toSide: es });
+        } catch {}
       }
     };
     // Listeners
   points.forEach(pt => {
-      pt.addEventListener('click', (e) => {
-        if (!e.altKey) return; e.preventDefault(); e.stopPropagation();
-        const cur = pt.getAttribute('data-io') || 'out';
-        const next = (cur === 'out') ? 'in' : 'out';
-        setPointRole(pt, next, true);
-      });
       const startDrag = (e) => {
         dragging = true; overPoint = null; const c = getCenter(pt); start = c; startPointEl = pt; ghostId = `ghost_${this.id}_${Date.now()}`;
         try { ConnectionLayer.allow(ghostId); } catch {}
@@ -539,8 +544,10 @@ export class CopilotInstance {
     const getCenter = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
     const startEl = this.fab.querySelector(`.conn-point[data-side="${fromSide}"]`) || this.fab;
     const endEl = other.fab.querySelector(`.conn-point[data-side="${toSide}"]`) || other.fab;
-    const ss = fromSide || 'x'; const es = toSide || 'x';
-    const lineId = `link_${this.id}_${ss}_${other.id}_${es}`;
+  const ss = fromSide || 'x'; const es = toSide || 'x';
+  const fromIoId = (IORegistry.getByEl(startEl)?.ioId) || `copilot:${this.id}:${ss}:0`;
+  const toIoId = (IORegistry.getByEl(endEl)?.ioId) || `copilot:${other.id}:${es}:0`;
+  const lineId = `link_${fromIoId}__${toIoId}`;
     // prevent duplicates on programmatic path
     {
       const mine = this.connections.get(other.id);
@@ -1099,19 +1106,40 @@ export class CopilotInstance {
     handles.forEach(h => { h.addEventListener('mousedown', onDown); h.addEventListener('touchstart', onDown, { passive:false }); });
     try {
       const s = localStorage.getItem(`examai.copilot.${this.id}.size`);
-      if (s) { const { w, h } = JSON.parse(s); if (w) this.panel.style.width = w + 'px'; if (h) this.panel.style.height = h + 'px'; }
+      if (s) {
+        const { w, h } = JSON.parse(s);
+        if (w) this.panel.style.width = w + 'px';
+        if (h) this.panel.style.height = h + 'px';
+      }
       const p = localStorage.getItem(`examai.copilot.${this.id}.pos`);
-      if (p) { const { x, y } = JSON.parse(p); if (Number.isFinite(x)) this.panel.style.left = x + 'px'; if (Number.isFinite(y)) this.panel.style.top = y + 'px'; }
+      if (p) {
+        const { x, y } = JSON.parse(p);
+        // Clamp to viewport and keep below sticky app bar to avoid getting stuck under it
+        const r = this.panel.getBoundingClientRect();
+        const w = r.width || parseInt(this.panel.style.width || '420', 10) || 420;
+        const h = r.height || parseInt(this.panel.style.height || '320', 10) || 320;
+        const topMin = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+        if (Number.isFinite(x)) {
+          const clampedX = Math.max(4, Math.min(window.innerWidth - w - 4, x));
+          this.panel.style.left = clampedX + 'px';
+        }
+        if (Number.isFinite(y)) {
+          const clampedY = Math.max(topMin, Math.min(window.innerHeight - h - 4, y));
+          this.panel.style.top = clampedY + 'px';
+        }
+      }
     } catch {}
   }
   #wireSubmit() { this.formEl.addEventListener('submit', (e) => { e.preventDefault(); this.sendFromInput(); }); }
   show() {
     const r = this.fab.getBoundingClientRect();
-  const px = Math.min(window.innerWidth - 20, r.left);
+  const w = this.panel.offsetWidth || 420;
+  const h = this.panel.offsetHeight || 320;
+  const px = Math.max(4, Math.min(window.innerWidth - w - 4, r.left));
   const minTop = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
-  const py = Math.max(minTop, r.top - (this.panel.offsetHeight || 320) - 12);
-    this.panel.style.left = px + 'px';
-    this.panel.style.top = py + 'px';
+  const py = Math.max(minTop, Math.min(window.innerHeight - h - 4, r.top - h - 12));
+  this.panel.style.left = px + 'px';
+  this.panel.style.top = py + 'px';
     this.panel.classList.remove('hidden');
     requestAnimationFrame(() => {
       this.panel.classList.add('show');
@@ -1228,8 +1256,8 @@ export class CopilotInstance {
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
       if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
-      const reply = data.reply || '(inget svar)';
-      this.renderAssistantReply(reply);
+  const reply = data.reply || '(inget svar)';
+  this.renderAssistantReply(reply);
       if (data && Array.isArray(data.citations) && data.citations.length) {
         const cites = document.createElement('div');
         cites.className = 'assistant cites';
@@ -1243,7 +1271,9 @@ export class CopilotInstance {
           if (!linked) toast('Inga källor returnerades. Koppla denna copilot till Internet-noden för att få klickbara länkar.', 'warn');
         }
       }
-      if (!this._convId) {
+  // Fan-out this copilot's reply to linked outputs (user, other copilots, sections)
+  try { await this.#routeReplyFanOut(reply, undefined, { omitSelf: true }); } catch {}
+  if (!this._convId) {
         this.history.push({ role: 'user', content: msg });
         if (data && data.reply) this.history.push({ role: 'assistant', content: data.reply });
   try { this._saveHistory(); } catch {}
@@ -1335,8 +1365,8 @@ export class CopilotInstance {
       return conn.lineId || null;
     } catch { return null; }
   }
-  async #routeReplyFanOut(text, userInst) {
-    this.renderAssistantReply(text);
+  async #routeReplyFanOut(text, userInst, options = {}) {
+    if (!options || !options.omitSelf) this.renderAssistantReply(text);
     try {
   const outs = Array.from(this.outNeighbors || []);
       for (const o of outs) {
@@ -1389,7 +1419,7 @@ export class CopilotInstance {
       const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
-      if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
+    if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
       const reply = (data && data.reply) || '(inget svar)';
       this.setBusy(false);
   this.#routeReplyFanOut(reply, userInst);
@@ -1405,7 +1435,17 @@ export class CopilotInstance {
     this.addUser(text, author);
     const instTok = parseInt(localStorage.getItem(`examai.copilot.${this.id}.max_tokens`) || '', 10);
     const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '1000', 10) || 1000)));
+    // Build message list with this copilot's own system role/topic so chains respect per-node persona
     let messages = [...this.history, { role: 'user', content: text }];
+    const sysMsgs = [];
+    if (this.useRole && (this.role || '').trim()) {
+      sysMsgs.push({ role: 'system', content: `Ignorera tidigare rollinstruktioner. Ny roll: ${this.role.trim()}` });
+    } else if (!this.useRole && (this.role || '').trim()) {
+      sysMsgs.push({ role: 'system', content: 'Ignorera tidigare rollinstruktioner. Använd neutral roll.' });
+    }
+    const myTopic = (this.topic || '').trim();
+    if (myTopic) sysMsgs.push({ role: 'system', content: `Håll dig till ämnet: ${myTopic}.` });
+    if (sysMsgs.length) messages = [...sysMsgs, ...messages];
     const model = this.model || 'gpt-5-mini';
     const perKey = localStorage.getItem(`examai.copilot.${this.id}.key`);
     const body = { message: text, messages, model, apiKey: (perKey || localStorage.getItem('examai.openai.key') || undefined), max_tokens: maxTok };
@@ -1423,7 +1463,7 @@ export class CopilotInstance {
       const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
-      if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
+  if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
       const reply = (data && data.reply) || '(inget svar)';
       this.setBusy(false);
       this.#routeReplyFanOut(reply, options.userInst);
