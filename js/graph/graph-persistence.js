@@ -86,13 +86,8 @@ export const GraphPersistence = (() => {
                 const fromIoId = (IORegistry.getByEl(start)?.ioId) || `copilot:${a.id}:${l.fromSide || 'x'}:0`;
                 const toIoId = (IORegistry.getByEl(end)?.ioId) || `section:${l.toId}:r:0`;
                 const lineId = `link_${fromIoId}__${toIoId}`;
-                ConnectionLayer.allow(lineId);
-                const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(start), getCenter(end)); };
-                window.addEventListener('resize', updateLine);
-                window.addEventListener('scroll', updateLine, { passive:true });
-                window.addEventListener('examai:fab:moved', updateLine);
-                setTimeout(updateLine, 0);
-                const rec = { lineId, updateLine, from: a.id, to: `section:${l.toId}`, startEl: start, endEl: end };
+                const { Link } = await import('./link.js');
+                const rec = Link.create({ lineId, startEl: start, endEl: end, from: a.id, to: `section:${l.toId}` });
                 const key = `section:${l.toId}`;
                 const mine = a.connections.get(key);
                 if (mine) { if (Array.isArray(mine)) mine.push(rec); else a.connections.set(key, [mine, rec]); }

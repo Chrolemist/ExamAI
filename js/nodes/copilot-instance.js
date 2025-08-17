@@ -2,6 +2,7 @@
 // Dependencies
 import { toast, escapeHtml } from '../ui.js';
 import { ConnectionLayer } from '../graph/connection-layer.js';
+import { Link } from '../graph/link.js';
 import { ConversationManager } from '../graph/conversation-manager.js';
 import { IORegistry } from '../graph/io-registry.js';
 import { InternetHub } from '../graph/internet-hub.js';
@@ -435,13 +436,7 @@ export class CopilotInstance {
             return;
           }
         }
-        ConnectionLayer.allow(lineId);
-        const updateLine = () => ConnectionLayer.draw(lineId, getCenter(startPointEl), getCenter(endPt));
-        window.addEventListener('resize', updateLine);
-        window.addEventListener('scroll', updateLine, { passive: true });
-        window.addEventListener('examai:fab:moved', updateLine);
-        setTimeout(updateLine, 0);
-        const rec = { lineId, updateLine, from: this.id, to: `section:${secKey}`, startEl: startPointEl, endEl: endPt };
+  const rec = Link.create({ lineId, startEl: startPointEl, endEl: endPt, from: this.id, to: `section:${secKey}` });
         const key = `section:${secKey}`;
         const mine = this.connections.get(key);
         if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(key, [mine, rec]); } else { this.connections.set(key, [rec]); }
@@ -506,13 +501,7 @@ export class CopilotInstance {
             return;
           }
         }
-        ConnectionLayer.allow(lineId);
-        const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(startEl), getCenter(endEl)); };
-        window.addEventListener('resize', updateLine);
-        window.addEventListener('scroll', updateLine, { passive: true });
-        window.addEventListener('examai:fab:moved', updateLine);
-        setTimeout(updateLine, 0);
-        const rec = { lineId, updateLine, from: this.id, to: other.id, startEl, endEl };
+  const rec = Link.create({ lineId, startEl, endEl, from: this.id, to: other.id });
         const mine = this.connections.get(other.id);
         if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); } else { this.connections.set(other.id, [rec]); }
         const theirs = other.connections.get(this.id);
@@ -557,13 +546,7 @@ export class CopilotInstance {
         return;
       }
     }
-    ConnectionLayer.allow(lineId);
-    const updateLine = () => { ConnectionLayer.draw(lineId, getCenter(startEl), getCenter(endEl)); };
-    window.addEventListener('resize', updateLine);
-    window.addEventListener('scroll', updateLine, { passive:true });
-    window.addEventListener('examai:fab:moved', updateLine);
-    setTimeout(updateLine, 0);
-    const rec = { lineId, updateLine, from: this.id, to: other.id, startEl, endEl };
+  const rec = Link.create({ lineId, startEl, endEl, from: this.id, to: other.id });
     const mine = this.connections.get(other.id);
     if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); }
     else { this.connections.set(other.id, [rec]); }
