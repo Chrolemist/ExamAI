@@ -3,12 +3,12 @@ import { ConnectionLayer } from './connection-layer.js';
 import { GraphPersistence } from './graph-persistence.js';
 import { IORegistry } from './io-registry.js';
 import { Link } from './link.js';
+import { NodeBoard } from './node-board.js';
 
 export const InternetHub = (() => {
   let el = null;
   const LINK_KEY = 'internet-noden';
   const linked = new Set(); // copilot ids
-  let dragging = false, sx=0, sy=0, ox=0, oy=0;
   function ensure() {
     if (el) return el;
     const d = document.createElement('div');
@@ -18,9 +18,8 @@ export const InternetHub = (() => {
     d.innerHTML = `
       <svg class="globe" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="url(#gradHub)" stroke-width="1.6"><defs><linearGradient id="gradHub" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7c5cff"/><stop offset="100%" stop-color="#00d4ff"/></linearGradient></defs><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></g></svg>
     `;
-    const vh = Math.max(240, window.innerHeight || 240);
-    d.style.left = '18px';
-    d.style.top = (vh - 110) + 'px';
+    d.style.left = '2px'; // Relative to Node Board padding
+    d.style.top = '40px'; // Relative to Node Board
     d.style.right = 'auto';
     d.style.bottom = 'auto';
     // connection points
@@ -30,52 +29,15 @@ export const InternetHub = (() => {
       p.setAttribute('data-side', side);
       d.appendChild(p);
     });
-    document.body.appendChild(d);
-    const onDown = (e) => {
-      dragging = true;
-      const p = e.touches ? e.touches[0] : e;
-      sx = p.clientX; sy = p.clientY;
-      const r = d.getBoundingClientRect();
-      ox = r.left; oy = r.top;
-      document.addEventListener('mousemove', onMove, { passive:false });
-      document.addEventListener('mouseup', onUp, { passive:false });
-      document.addEventListener('touchmove', onMove, { passive:false });
-      document.addEventListener('touchend', onUp, { passive:false });
-      e.preventDefault();
-    };
-    const onMove = (e) => {
-      if (!dragging) return;
-      const p = e.touches ? e.touches[0] : e;
-      const nx = ox + (p.clientX - sx);
-      const ny = oy + (p.clientY - sy);
-      d.style.left = nx + 'px';
-      d.style.top = ny + 'px';
-      d.style.right = 'auto'; d.style.bottom = 'auto';
-      window.dispatchEvent(new CustomEvent('examai:internet:moved'));
-      e.preventDefault();
-    };
-    const onUp = () => {
-      if (!dragging) return;
-      dragging = false;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.removeEventListener('touchmove', onMove);
-      document.removeEventListener('touchend', onUp);
-      try {
-        const r = d.getBoundingClientRect();
-        localStorage.setItem('examai.internetHub.pos', JSON.stringify({ x: r.left, y: r.top }));
-      } catch {}
-    };
-    d.addEventListener('mousedown', onDown, { passive:false });
-    d.addEventListener('touchstart', onDown, { passive:false });
-    try {
-      const saved = localStorage.getItem('examai.internetHub.pos');
-      if (saved) {
-        const { x, y } = JSON.parse(saved);
-        if (Number.isFinite(x)) d.style.left = x + 'px';
-        if (Number.isFinite(y)) d.style.top = y + 'px';
-      }
-    } catch {}
+    const nodeBoard = document.getElementById('nodeBoard');
+    if (nodeBoard) {
+      nodeBoard.appendChild(d);
+    } else {
+      document.body.appendChild(d);
+    }
+    try { NodeBoard.bind?.(d); } catch {}
+    // No drag functionality - FABs are now statically positioned
+    try { NodeBoard.onMoved?.(d); } catch {}
     el = d;
     return el;
   }

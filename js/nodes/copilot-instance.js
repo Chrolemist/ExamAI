@@ -7,6 +7,7 @@ import { ConversationManager } from '../graph/conversation-manager.js';
 import { IORegistry } from '../graph/io-registry.js';
 import { InternetHub } from '../graph/internet-hub.js';
 import { GraphPersistence } from '../graph/graph-persistence.js';
+import { NodeBoard } from '../graph/node-board.js';
 
 function getUserApi() {
   try { return window.__ExamAI_UserNodeApi || null; } catch { return null; }
@@ -15,7 +16,7 @@ function getUserApi() {
 export class CopilotInstance {
   constructor(id, opts = {}) {
     this.id = id;
-    this.name = opts.name || `Copilot ${id}`;
+  this.name = opts.name || `CoWorker`;
     this.model = opts.model || (document.getElementById('modelSelect')?.value || 'gpt-5-mini');
     try {
       const storedName = localStorage.getItem(`examai.copilot.${id}.name`);
@@ -25,7 +26,7 @@ export class CopilotInstance {
     } catch {}
     this.history = [];
     this.renderMode = (localStorage.getItem(`examai.copilot.${id}.render_mode`) || localStorage.getItem('examai.render_mode') || 'raw');
-    this.maxTokens = parseInt(localStorage.getItem(`examai.copilot.${id}.max_tokens`) || localStorage.getItem('examai.max_tokens') || '1000', 10) || 1000;
+  this.maxTokens = parseInt(localStorage.getItem(`examai.copilot.${id}.max_tokens`) || localStorage.getItem('examai.max_tokens') || '3000', 10) || 3000;
     this.typingSpeed = parseInt(localStorage.getItem(`examai.copilot.${id}.typing_speed`) || localStorage.getItem('examai.typing_speed') || '10', 10) || 10;
     this.topic = localStorage.getItem(`examai.copilot.${id}.topic`) || '';
     this.role = localStorage.getItem(`examai.copilot.${id}.role`) || '';
@@ -98,17 +99,14 @@ export class CopilotInstance {
     const vh = Math.max(240, window.innerHeight || 240);
     const margin = 18;
     const fabSize = 56;
-    const minY = margin + 60;
-    const maxX = Math.max(margin, vw - fabSize - margin);
-    const maxY = Math.max(minY, vh - fabSize - margin);
-    const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-    const rx = rand(margin, maxX);
-    const ry = rand(minY, maxY);
-    b.style.left = rx + 'px';
-    b.style.top = ry + 'px';
-    b.style.right = 'auto';
-    b.style.bottom = 'auto';
-    b.style.position = 'fixed';
+    // Static position within Node Board area instead of random
+    const staticX = 140 + (this.id * 80); // Spread horizontally based on ID
+    const staticY = 40 + ((this.id % 2) * 80); // Alternate between two rows
+    b.style.left = staticX + 'px';
+    b.style.top = staticY + 'px';
+  b.style.right = 'auto';
+  b.style.bottom = 'auto';
+  b.style.position = 'absolute';
     ['t','b','l','r'].forEach(side => {
       const p = document.createElement('div');
       p.className = 'conn-point';
@@ -119,7 +117,13 @@ export class CopilotInstance {
     lbl.className = 'fab-label';
     lbl.textContent = this.name || '';
     b.appendChild(lbl);
-    document.body.appendChild(b);
+    const nodeBoard = document.getElementById('nodeBoard');
+    if (nodeBoard) {
+      nodeBoard.appendChild(b);
+    } else {
+      document.body.appendChild(b);
+    }
+  try { NodeBoard.bind?.(b); } catch {}
     return b;
   }
   #createFlyout() {
@@ -489,7 +493,7 @@ export class CopilotInstance {
         const startEl = startPointEl;
         const endEl = endPt;
   const fromIoId = ioIds.get(startEl) || `copilot:${this.id}:${(startEl.getAttribute && startEl.getAttribute('data-side')) || 'x'}:0`;
-  const toIoId = `copilot:${other.id}:${(endEl.getAttribute && endEl.getAttribute('data-side')) || 'x'}:0`;
+  const toIoId = (IORegistry.getByEl(endEl)?.ioId) || `copilot:${other.id}:${(endEl.getAttribute && endEl.getAttribute('data-side')) || 'x'}:0`;
   const lineId = `link_${fromIoId}__${toIoId}`;
         // prevent duplicate identical copilot→copilot
         {
@@ -502,10 +506,12 @@ export class CopilotInstance {
           }
         }
   const rec = Link.create({ lineId, startEl, endEl, from: this.id, to: other.id });
-        const mine = this.connections.get(other.id);
-        if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); } else { this.connections.set(other.id, [rec]); }
-        const theirs = other.connections.get(this.id);
-        if (theirs) { if (Array.isArray(theirs)) theirs.push(rec); else other.connections.set(this.id, [theirs, rec]); } else { other.connections.set(this.id, [rec]); }
+        if (rec) {
+          const mine = this.connections.get(other.id);
+          if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); } else { this.connections.set(other.id, [rec]); }
+          const theirs = other.connections.get(this.id);
+          if (theirs) { if (Array.isArray(theirs)) theirs.push(rec); else other.connections.set(this.id, [theirs, rec]); } else { other.connections.set(this.id, [rec]); }
+        }
         try {
           const ss = (startEl.getAttribute && startEl.getAttribute('data-side')) || 'x';
           const es = (endEl.getAttribute && endEl.getAttribute('data-side')) || 'x';
@@ -547,12 +553,14 @@ export class CopilotInstance {
       }
     }
   const rec = Link.create({ lineId, startEl, endEl, from: this.id, to: other.id });
-    const mine = this.connections.get(other.id);
-    if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); }
-    else { this.connections.set(other.id, [rec]); }
-    const theirs = other.connections.get(this.id);
-    if (theirs) { if (Array.isArray(theirs)) theirs.push(rec); else other.connections.set(this.id, [theirs, rec]); }
-    else { other.connections.set(this.id, [rec]); }
+    if (rec) {
+      const mine = this.connections.get(other.id);
+      if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); }
+      else { this.connections.set(other.id, [rec]); }
+      const theirs = other.connections.get(this.id);
+      if (theirs) { if (Array.isArray(theirs)) theirs.push(rec); else other.connections.set(this.id, [theirs, rec]); }
+      else { other.connections.set(this.id, [rec]); }
+    }
     try { this.outNeighbors?.add(other.id); other.inNeighbors?.add(this.id); } catch {}
     if (persist) try { GraphPersistence.addLink({ fromType:'copilot', fromId:this.id, fromSide:ss, toType:'copilot', toId:other.id, toSide:es }); } catch {}
   }
@@ -619,54 +627,7 @@ export class CopilotInstance {
     fab.addEventListener('touchcancel', clearLongPress);
   }
   #wireDrag() {
-    const fab = this.fab;
-    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0, moved = false;
-    const onDown = (e) => {
-      if (!this.panel.classList.contains('hidden')) return;
-      dragging = true; moved = false;
-      const p = e.touches ? e.touches[0] : e;
-      sx = p.clientX; sy = p.clientY;
-      const r = fab.getBoundingClientRect();
-      ox = r.left; oy = r.top;
-      document.addEventListener('mousemove', onMove, { passive: false });
-      document.addEventListener('mouseup', onUp, { passive: false });
-      document.addEventListener('touchmove', onMove, { passive: false });
-      document.addEventListener('touchend', onUp, { passive: false });
-      e.preventDefault();
-    };
-    const onMove = (e) => {
-      if (!dragging) return;
-      const p = e.touches ? e.touches[0] : e;
-      const dx = p.clientX - sx;
-      const dy = p.clientY - sy;
-      if (!moved && Math.hypot(dx, dy) < 3) return;
-      moved = true;
-      const nx = ox + dx;
-      const ny = oy + dy;
-      fab.style.left = nx + 'px';
-      fab.style.top = ny + 'px';
-      fab.style.right = 'auto';
-      fab.style.bottom = 'auto';
-      window.dispatchEvent(new CustomEvent('examai:fab:moved'));
-    };
-    const onUp = () => {
-      if (!dragging) return;
-      dragging = false;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.removeEventListener('touchmove', onMove);
-      document.removeEventListener('touchend', onUp);
-      if (moved) this._lastDragAt = Date.now();
-      const r = fab.getBoundingClientRect();
-      localStorage.setItem(`examai.fab.${this.id}.pos`, JSON.stringify({ x: r.left, y: r.top }));
-    };
-    const dragStartIfSelf = (handler) => (ev) => { const target = ev.target; if (target && target.closest('.conn-point')) return; handler(ev); };
-    fab.addEventListener('mousedown', dragStartIfSelf(onDown), { passive: false });
-    fab.addEventListener('touchstart', dragStartIfSelf(onDown), { passive: false });
-    try {
-      const saved = localStorage.getItem(`examai.fab.${this.id}.pos`);
-      if (saved) { const { x, y } = JSON.parse(saved); if (typeof x === 'number' && typeof y === 'number') { fab.style.left = x + 'px'; fab.style.top = y + 'px'; fab.style.right = 'auto'; fab.style.bottom = 'auto'; } }
-    } catch {}
+    // Drag functionality disabled - FABs are now statically positioned
   }
   #positionFabUnderPanel() {
   // NO-OP: keep copilots' FAB fixed; panels should position centered over their FAB without moving it
@@ -675,7 +636,9 @@ export class CopilotInstance {
   #wireToggle() {
     this.fab.addEventListener('click', (e) => {
       const now = Date.now();
-      if (now - (this._lastDragAt || 0) < 300) { e.preventDefault(); e.stopPropagation(); return; }
+      // Check both old and new drag timestamp properties
+      const lastDrag = Math.max(this._lastDragAt || 0, this.fab._lastDragTime || 0);
+      if (now - lastDrag < 300) { e.preventDefault(); e.stopPropagation(); return; }
       if (this.panel.classList.contains('hidden')) this.show(); else this.hide();
     });
   }
@@ -1123,7 +1086,11 @@ export class CopilotInstance {
   const py = Math.max(minTop, Math.min(window.innerHeight - h - 4, r.top - h - 12));
   this.panel.style.left = px + 'px';
   this.panel.style.top = py + 'px';
-    this.panel.classList.remove('hidden');
+  
+  // Update aria-hidden BEFORE removing hidden class to prevent focus conflicts
+  this.panel.setAttribute('aria-hidden', 'false');
+  this.panel.classList.remove('hidden');
+  
     requestAnimationFrame(() => {
       this.panel.classList.add('show');
       try { this.updateKeyStatusBadge(); } catch {}
@@ -1132,10 +1099,22 @@ export class CopilotInstance {
       window.addEventListener('resize', this._fabAlignOnResize);
     });
   }
-  hide() { this.panel.classList.remove('show'); setTimeout(() => { this.panel.classList.add('hidden'); if (this._fabAlignOnResize) window.removeEventListener('resize', this._fabAlignOnResize); }, 180); }
+  hide() { 
+    // Move focus back to the FAB button before hiding
+    if (document.activeElement && this.panel.contains(document.activeElement)) {
+      this.fab.focus();
+    }
+    
+    this.panel.classList.remove('show'); 
+    this.panel.setAttribute('aria-hidden', 'true');
+    setTimeout(() => { 
+      this.panel.classList.add('hidden'); 
+      if (this._fabAlignOnResize) window.removeEventListener('resize', this._fabAlignOnResize); 
+    }, 180); 
+  }
   addUser(text, author) {
     const div = document.createElement('div');
-    div.className = 'bubble user';
+  div.className = 'bubble user user-bubble';
     const name = (author && author.trim()) ? author : 'Användare';
     div.innerHTML = `<div class="msg-author">${escapeHtml(name)}</div><div class="msg-text"></div>`;
     const msgEl = div.querySelector('.msg-text');
@@ -1182,13 +1161,15 @@ export class CopilotInstance {
     const msg = (this.inputEl.value || '').trim();
     if (!msg) return;
     if (window.PauseManager && window.PauseManager.isPaused && window.PauseManager.isPaused()) {
-      this.addUser(msg);
+      try { const nm = (window.getGlobalUserName || (() => 'Du'))(); this.addUser(msg, nm); }
+      catch { this.addUser(msg); }
       this.inputEl.value = '';
       if (this._convId) { ConversationManager.enqueueUser(this, msg); } else { window.PauseManager.queueIndependent?.(this.id, msg); }
       toast('Flöde pausat – meddelandet köades.', 'warn');
       return;
     }
-    this.addUser(msg);
+    try { const nm = (window.getGlobalUserName || (() => 'Du'))(); this.addUser(msg, nm); }
+    catch { this.addUser(msg); }
     this.inputEl.value = '';
     if (this._stagedFiles && this._stagedFiles.length) {
       const form = new FormData();
@@ -1218,7 +1199,7 @@ export class CopilotInstance {
       }
     }
     const instTok = parseInt(localStorage.getItem(`examai.copilot.${this.id}.max_tokens`) || '', 10);
-    const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '1000', 10) || 1000)));
+  const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '3000', 10) || 3000)));
     try {
       let messages = [...this.history, { role: 'user', content: msg }];
       if (this.useRole && (this.role || '').trim()) { messages = [{ role: 'system', content: `Ignorera tidigare rollinstruktioner. Ny roll: ${this.role.trim()}` }, ...messages]; }
@@ -1269,7 +1250,7 @@ export class CopilotInstance {
   }
   async sendQueued(msg) {
     const instTok = parseInt(localStorage.getItem(`examai.copilot.${this.id}.max_tokens`) || '', 10);
-    const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '1000', 10) || 1000)));
+  const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '3000', 10) || 3000)));
     try {
       let messages = [...this.history, { role: 'user', content: msg }];
       if (this.useRole && (this.role || '').trim()) { messages = [{ role: 'system', content: `Ignorera tidigare rollinstruktioner. Ny roll: ${this.role.trim()}` }, ...messages]; }
@@ -1300,7 +1281,7 @@ export class CopilotInstance {
   }
   async generateReply(messages) {
     const instTok = parseInt(localStorage.getItem(`examai.copilot.${this.id}.max_tokens`) || '', 10);
-    const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '1000', 10) || 1000)));
+  const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '3000', 10) || 3000)));
     const model = this.model || 'gpt-5-mini';
     const perKey = localStorage.getItem(`examai.copilot.${this.id}.key`);
     let finalMsgs = messages;
@@ -1379,9 +1360,10 @@ export class CopilotInstance {
     const sysSeed = Array.isArray(opts.seed) ? opts.seed : [];
     if (!this._seededFromUser) this._seededFromUser = true;
     if (sysSeed.length) { try { this.history.push(...sysSeed); } catch {} }
-    this.addUser(text, 'Användare');
+  try { const nm = (window.getGlobalUserName || (() => 'Du'))(); this.addUser(text, nm); }
+  catch { this.addUser(text, 'Användare'); }
     const instTok = parseInt(localStorage.getItem(`examai.copilot.${this.id}.max_tokens`) || '', 10);
-    const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '1000', 10) || 1000)));
+  const maxTok = Math.max(1000, Math.min(30000, (Number.isFinite(instTok) && instTok) ? instTok : (parseInt(localStorage.getItem('examai.max_tokens') || '3000', 10) || 3000)));
     let messages = [...this.history, { role: 'user', content: text }];
     if (this.useRole && (this.role || '').trim()) messages = [{ role: 'system', content: `Ignorera tidigare rollinstruktioner. Ny roll: ${this.role.trim()}` }, ...messages];
     else if (!this.useRole && (this.role || '').trim()) messages = [{ role: 'system', content: 'Ignorera tidigare rollinstruktioner. Använd neutral roll.' }, ...messages];
@@ -1463,7 +1445,19 @@ export const CopilotManager = (() => {
   const instances = new Map();
   function add(forceId) {
     const id = Number.isInteger(forceId) ? forceId : nextId++;
-    const cp = new CopilotInstance(id, {});
+    // Compute next default name: CoWorker N (avoid duplicates among existing CoWorkers)
+    const base = 'CoWorker';
+    const used = new Set();
+    try {
+      instances.forEach(inst => {
+        const n = (inst && inst.name) ? String(inst.name) : '';
+        const m = n.match(/^CoWorker\s+(\d+)$/i);
+        if (m) used.add(parseInt(m[1], 10));
+      });
+    } catch {}
+    let n = 1; while (used.has(n)) n++;
+    const defaultName = `${base} ${n}`;
+    const cp = new CopilotInstance(id, { name: defaultName });
     instances.set(id, cp);
     try { GraphPersistence.registerCopilot(id); } catch {}
     return cp;

@@ -1,5 +1,47 @@
-.layout{display:block;padding:16px 18px 96px}
-.content{padding:0}
+/* Node Board */
+#nodeBoard {
+  position: relative;
+  width: 100%;
+  z-index: 20;
+  padding: 14px 16px 6px 16px;
+  backdrop-filter: blur(2px);
+  height: var(--nodeboard-height, 240px); /* fixed band height so it can scroll independently */
+  overflow: auto;
+  overscroll-behavior: contain; /* don't bubble scroll to body */
+}
+#nodeBoard .nb-sections {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
+  gap: 12px;
+  padding-right: 6px; /* small breathing room against scrollbar */
+}
+#nodeBoard .nb-sec {
+  position: relative;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 8px 8px 12px;
+  background: rgba(0,0,0,0.25);
+}
+#nodeBoard .nb-title {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  margin: 2px 0 8px 4px;
+}
+#nodeBoard .nb-grid {
+  position: relative;
+  height: 200px; /* more room for parking spots inside the band */
+  background-image: linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 24px 100%, 100% 24px;
+  border-radius: 8px;
+}
+
+/* Make FABs sit above the board but constrained by our JS clamp */
+.fab { z-index: 30; }
+/* Main content follows after Node Board in normal document flow */
+.layout{overflow:auto;padding:0 18px 96px}
+/* Normal page scrolling restored */
+html, body { height:100%; }
 :root{
   --bg:#0b0b0d; --panel:#131317; --muted:#101016; --text:#e6e6ec; --subtle:#a6a6b3; --primary:#7c5cff; --accent:#00d4ff; --error:#ff5c7c;
   --glass: rgba(255,255,255,0.04);
@@ -11,17 +53,7 @@ html,body,#app{height:100%}
 body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,255,.15),transparent),linear-gradient(180deg,#0b0b0d 0%, #0b0b0d 100%);color:var(--text);font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;}
 
 /* Global flow-paused visuals: remove full overlay; just show a subtle banner under the button */
-#pausedBanner{
-  position:fixed; left:0; top:0; transform:translate(-50%, 0);
-  z-index:10050; opacity:0; transition:opacity .18s ease;
-  padding:6px 10px; border-radius:8px;
-  background:linear-gradient(180deg, rgba(124,92,255,0.10), rgba(0,212,255,0.06));
-  border:1px solid rgba(124,92,255,0.22);
-  color:#eaf6ff; font-weight:600; font-size:12px;
-  box-shadow:0 10px 28px rgba(0,0,0,0.45);
-  pointer-events:none;
-  transform:translateX(-50%);
-}
+#pausedBanner{ position:fixed; right:18px; bottom:72px; z-index:10050; opacity:0; transition:opacity .18s ease; padding:6px 10px; border-radius:8px; background:linear-gradient(180deg, rgba(124,92,255,0.10), rgba(0,212,255,0.06)); border:1px solid rgba(124,92,255,0.22); color:#eaf6ff; font-weight:600; font-size:12px; box-shadow:0 10px 28px rgba(0,0,0,0.45); pointer-events:none; }
 body.flow-paused #pausedBanner{ opacity:1; }
 
 /* Layout */
@@ -62,16 +94,10 @@ body.flow-paused #pausedBanner{ opacity:1; }
 .chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;border:1px solid #2a2a35;background:#141419;color:var(--subtle);font-size:11px;margin:4px 0}
 
 /* Main board */
-/* App bar */
-.appbar{position:sticky;top:0;z-index:10050;background:linear-gradient(180deg,#101015,#0c0c10);border-bottom:1px solid #23232b;box-shadow:var(--shadow)}
-.appbar-inner{display:flex;align-items:center;gap:12px;justify-content:space-between;padding:10px 14px}
-.brand{display:flex;align-items:center;gap:8px}
-.logo{width:18px;height:18px;border:1.8px solid var(--accent);clip-path:polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%)}
-.search{display:flex;align-items:center;gap:8px;background:#0f0f14;border:1px solid #24242c;border-radius:999px;padding:6px 10px;min-width:260px}
-.search input{background:transparent;border:0;outline:0;color:var(--text);width:100%}
+/* App bar removed */
 
 /* Content panels */
-.content{padding:16px 18px 96px}
+.content{padding:16px 0 96px}
 .panel{border:1px solid #23232b;background:linear-gradient(180deg,#121219,#0e0e14);border-radius:12px;box-shadow:var(--shadow);margin-bottom:12px}
 .panel .head{display:flex;align-items:baseline;gap:10px;padding:10px 12px;border-bottom:1px solid #23232b}
 .panel .head{position:relative}
@@ -126,7 +152,7 @@ body.flow-paused #pausedBanner{ opacity:1; }
 .text-input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.2)}
 
 /* Floating action buttons */
-.fab{position:fixed;bottom:18px;z-index:9000;border-radius:999px;padding:10px 12px;min-width:40px;min-height:40px;background:linear-gradient(135deg,#14141a,#111116);color:var(--text);border:1px solid #23232b;box-shadow:var(--shadow);cursor:grab;display:inline-flex;align-items:center;justify-content:center;user-select:none;touch-action:none;-webkit-user-drag:none}
+.fab{position:absolute;z-index:9000;border-radius:999px;padding:10px 12px;min-width:40px;min-height:40px;background:linear-gradient(135deg,#14141a,#111116);color:var(--text);border:1px solid #23232b;box-shadow:var(--shadow);cursor:grab;display:inline-flex;align-items:center;justify-content:center;user-select:none;touch-action:none;-webkit-user-drag:none}
 .fab *{pointer-events:none}
 .fab:active{cursor:grabbing}
 .panel-drawer.show.right ~ .fab.fab-right{bottom:76px}
@@ -140,7 +166,7 @@ body.flow-paused #pausedBanner{ opacity:1; }
 .fab-label::after{content:'';position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);width:10px;height:6px;background:linear-gradient(180deg, rgba(124,92,255,0.06), rgba(0,212,255,0.03));border-radius:2px}
 
 /* Pause button large icons */
-#pauseFlowBtn{display:inline-flex;align-items:center;justify-content:center;width:44px;height:36px;padding:6px;border-radius:8px;border:1px solid rgba(100,16,24,0.6);box-shadow:0 6px 16px rgba(0,0,0,0.35);color:rgb(150,40,50)}
+#pauseFlowBtn{position:fixed;right:18px;bottom:18px;display:inline-flex;align-items:center;justify-content:center;width:52px;height:44px;padding:6px;border-radius:10px;border:1px solid rgba(100,16,24,0.6);box-shadow:0 6px 16px rgba(0,0,0,0.35);color:rgb(150,40,50);z-index:10060}
 #pauseFlowBtn svg{width:18px;height:18px}
 /* Paused state (play icon) — pure white icon, remove background box */
 #pauseFlowBtn.paused{color:#fff;background:transparent;border-color:transparent;box-shadow:none}
@@ -155,7 +181,7 @@ body.flow-paused #pausedBanner{ opacity:1; }
 .grid-guide.h{height:2px;width:100vw;background:linear-gradient(90deg, rgba(124,92,255,0.18), rgba(0,212,255,0.08));left:0;top:0}
 
 /* Center + button to add copilot instances */
-.copilot-plus{position:fixed;left:50%;top:58px;transform:translateX(-50%);z-index:7000;width:40px;height:40px;border-radius:999px;border:1px dashed #2a2a35;background:#0f0f14;color:#cfd3e3;box-shadow:var(--shadow);cursor:pointer}
+.copilot-plus{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:7000;width:40px;height:40px;border-radius:999px;border:1px dashed #2a2a35;background:#0f0f14;color:#cfd3e3;box-shadow:var(--shadow);cursor:pointer}
 .copilot-plus:hover{border-color:#3a3a45}
 
 /* Floating Copilot flyout for instances */
@@ -350,5 +376,10 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .user-node-panel .conn-point[data-side="b"]{left:50%;bottom:-2px;transform:translate(-50%, 50%)}
 .user-node-panel .conn-point[data-side="l"]{top:50%;left:-2px}
 .user-node-panel .conn-point[data-side="r"]{top:50%;right:-2px;transform:translate(50%, -50%)}
-.user-bubble{--user-bubble-bg:#0ea5e918;--user-bubble-fg:var(--text);font-family:var(--user-font,inherit)}
-.user-bubble .msg-text{background:var(--user-bubble-bg);color:var(--user-bubble-fg);border-radius:10px;padding:8px 10px;display:inline-block}
+/* Global user bubble theming via CSS variables */
+:root{ --user-font: inherit; --user-bubble-bg: rgba(14,165,233,0.10); --user-bubble-fg: var(--text); }
+.user-bubble{font-family:var(--user-font, inherit)}
+/* Apply the adjustable background to the bubble container, not the text */
+.bubble.user.user-bubble{ background: var(--user-bubble-bg, rgba(14,165,233,0.10)); }
+/* Text stays normal without extra background */
+.user-bubble .msg-text{ color:var(--user-bubble-fg); }

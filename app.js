@@ -6,6 +6,7 @@ import { Link } from './js/graph/link.js';
 import { InternetHub } from './js/graph/internet-hub.js';
 import { GraphPersistence } from './js/graph/graph-persistence.js';
 import { BoardSections } from './js/graph/board-sections.js';
+import { NodeBoard } from './js/graph/node-board.js';
 import { IORegistry } from './js/graph/io-registry.js';
 import { ConversationManager } from './js/graph/conversation-manager.js';
 import { CopilotInstance, CopilotManager } from './js/nodes/copilot-instance.js';
@@ -59,7 +60,7 @@ const PauseManager = (() => {
       if (!banner._posBound) {
         banner._posBound = true;
         window.addEventListener('resize', positionBanner);
-        window.addEventListener('scroll', positionBanner, { passive: true });
+        // NO scroll listener - pause button is fixed, banner position doesn't need scroll updates
       }
     }
     document.body.classList.toggle('flow-paused', !!paused);
@@ -108,7 +109,16 @@ document.getElementById('addCopilotBtn')?.addEventListener('click', () => Copilo
 try { InternetHub.element(); } catch {}
 // Initialize board sections (editable headers + IO points)
 try { BoardSections.init(); } catch {}
+try { NodeBoard.init(); } catch {}
 try { window.BoardSections = BoardSections; } catch {}
+
+// No app bar anymore: ensure Node Board offset is based on the board band height 
+(function maintainBoard(){
+  const update = () => { try { NodeBoard.updateOffset?.(); window.dispatchEvent(new CustomEvent('examai:fab:moved')); } catch {} };
+  update();
+  window.addEventListener('resize', update, { passive: true });
+  // NO scroll listener - with fixed scroll areas, FABs don't need to move on scroll
+})();
 
 // Refresh server key status
 (async () => {
@@ -128,6 +138,8 @@ const UserNode = (() => {
   const KEY_NAME = 'examai.user.name';
   const KEY_FONT = 'examai.user.font';
   const KEY_COLOR = 'examai.user.bubbleColor';
+  const KEY_ALPHA = 'examai.user.bubbleAlpha'; // 0..1
+  const KEY_BG_VISIBLE = 'examai.user.bubbleBgVisible'; // '1' or '0'
   const KEY_HISTORY = 'examai.user.history';
   let instance = null;
 
@@ -143,6 +155,34 @@ const UserNode = (() => {
   function setFont(v) { try { localStorage.setItem(KEY_FONT, v || 'system-ui, sans-serif'); } catch {} }
   function getColor() { return localStorage.getItem(KEY_COLOR) || '#1e293b'; }
   function setColor(v) { try { localStorage.setItem(KEY_COLOR, v || '#1e293b'); } catch {} }
+  function getAlpha(){
+    try { const v = parseFloat(localStorage.getItem(KEY_ALPHA)); if (Number.isFinite(v)) return Math.max(0, Math.min(1, v)); } catch {}
+    return 0.10; // default 10%
+  }
+  function setAlpha(v){
+    const n = Math.max(0, Math.min(1, Number(v)||0));
+    try { localStorage.setItem(KEY_ALPHA, String(n)); } catch {}
+  }
+  function getBgVisible(){
+    try { const v = localStorage.getItem(KEY_BG_VISIBLE); if (v===null) return true; return v==='1'; } catch { return true; }
+  }
+  function setBgVisible(vis){
+    try { localStorage.setItem(KEY_BG_VISIBLE, vis ? '1':'0'); } catch {}
+  }
+  function hexToRgba(hex, a){
+    // Accept #rrggbb or rrggbb
+    let h = (hex||'').trim();
+    if (h.startsWith('#')) h = h.slice(1);
+    if (h.length===3){ // expand #rgb
+      h = h.split('').map(ch=>ch+ch).join('');
+    }
+    if (h.length!==6){ return `rgba(30,41,59,${Math.max(0,Math.min(1,a||0.10))})`; }
+    const r = parseInt(h.slice(0,2),16);
+    const g = parseInt(h.slice(2,4),16);
+    const b = parseInt(h.slice(4,6),16);
+    const al = Math.max(0, Math.min(1, a||0.10));
+    return `rgba(${r},${g},${b},${al})`;
+  }
   function loadHistory() {
     try { const raw = localStorage.getItem(KEY_HISTORY); const arr = JSON.parse(raw || '[]'); return Array.isArray(arr) ? arr : []; } catch { return []; }
   }
@@ -174,7 +214,7 @@ const UserNode = (() => {
   this._seededConvs = new Set(); // convId set
   this._seededSingles = new Set(); // copilotId set
       this.#wireConn();
-      this.#wireDrag();
+      // Drag functionality now handled by NodeBoardFabController
       this.#wirePanelDrag();
       this.#wireResize();
       this.#initSettings();
@@ -295,13 +335,9 @@ const UserNode = (() => {
       b.innerHTML = '<div class="user-avatar">👤</div>';
   // Align with copilot: fixed positioning
   b.style.position = 'fixed';
-      // default position (bottom-left offset from Internet)
-      const saved = localStorage.getItem('examai.user.fab.pos');
-      if (saved) {
-        try { const { x, y } = JSON.parse(saved); b.style.left = x + 'px'; b.style.top = y + 'px'; } catch {}
-      } else {
-        b.style.left = '90px'; b.style.top = (Math.max(240, window.innerHeight || 240) - 110) + 'px';
-      }
+      // Static position within Node Board area instead of viewport
+      b.style.left = '74px'; // Relative to Node Board 
+      b.style.top = '40px'; // Relative to Node Board
       // Add connection points on FAB
   ;['t','b','l','r'].forEach(side => { const p = document.createElement('div'); p.className = 'conn-point'; p.setAttribute('data-side', side); b.appendChild(p); });
   // Add a floating label above the FAB showing the user name (same style as copilot)
@@ -309,11 +345,22 @@ const UserNode = (() => {
   lbl.className = 'fab-label';
   lbl.textContent = getName();
   b.appendChild(lbl);
-      document.body.appendChild(b);
+  b.style.position = 'absolute';
+  b.style.right = 'auto';
+  b.style.bottom = 'auto';
+  const nodeBoard = document.getElementById('nodeBoard');
+  if (nodeBoard) {
+    nodeBoard.appendChild(b);
+  } else {
+    document.body.appendChild(b);
+  }
+  try { NodeBoard.bind?.(b); } catch {}
       // toggle panel (ignore clicks immediately after a drag)
       b.addEventListener('click', () => {
         const now = Date.now();
-        if (now - (this._recentDragTs || 0) < 300) return;
+        // Check both old and new drag timestamp properties
+        const lastDrag = Math.max(this._recentDragTs || 0, b._lastDragTime || 0);
+        if (now - lastDrag < 300) return;
         if (this.panel.classList.contains('hidden')) this.show(); else this.hide();
       });
       return b;
@@ -340,6 +387,14 @@ const UserNode = (() => {
           <label>Bubbelfärg
             <input type="color" data-role="color" />
           </label>
+          <label>Transparens
+            <input type="range" min="0" max="100" step="1" data-role="alpha" />
+            <span data-role="alphaVal">10%</span>
+          </label>
+          <div style="margin:8px 0; display:flex; align-items:center; gap:8px">
+            <button type="button" class="icon-btn" data-action="toggleBubbleBg" title="Visa/Dölj bubbelfond" aria-pressed="true">👁️</button>
+            <small style="opacity:.8">Visa bakgrund</small>
+          </div>
           <div style="margin-top:10px;display:flex;justify-content:flex-end">
             <button type="button" class="btn danger" data-action="resetAll" title="Rensa alla inställningar och chattar">Nollställ allt</button>
           </div>
@@ -478,15 +533,13 @@ const UserNode = (() => {
         if (m.role === 'user') {
           const div = document.createElement('div');
           div.className = 'bubble user user-bubble';
-          div.style.setProperty('--user-font', getFont());
-          div.style.setProperty('--user-bubble-bg', getColor());
           div.innerHTML = `<div class="msg-author">${escapeHtml(getName())}</div><div class="msg-text"></div>`;
           div.querySelector('.msg-text').textContent = m.content || '';
           box.appendChild(div);
         } else {
           const div = document.createElement('div');
           div.className = 'assistant';
-      let who = 'Copilot';
+  let who = 'COworker';
       if (m.role === 'system') who = 'System';
       else if (m.author && String(m.author).trim()) who = String(m.author).trim();
           div.innerHTML = `<div class="msg-author">${who}</div><div class="msg-text"></div>`;
@@ -505,9 +558,7 @@ const UserNode = (() => {
     addUserLocal(text) {
       const box = this.panel.querySelector('[data-role="messages"]');
       const div = document.createElement('div');
-      div.className = 'bubble user user-bubble';
-  div.style.setProperty('--user-font', getFont());
-  div.style.setProperty('--user-bubble-bg', getColor());
+  div.className = 'bubble user user-bubble';
       div.innerHTML = `<div class="msg-author">${escapeHtml(getName())}</div><div class="msg-text"></div>`;
       div.querySelector('.msg-text').textContent = text;
       box.appendChild(div);
@@ -520,7 +571,7 @@ const UserNode = (() => {
       const box = this.panel.querySelector('[data-role="messages"]');
       const div = document.createElement('div');
       div.className = 'assistant';
-      const who = (authorName && authorName.trim()) ? authorName : 'Copilot';
+  const who = (authorName && authorName.trim()) ? authorName : 'COworker';
       div.innerHTML = `<div class="msg-author">${escapeHtml(who)}</div><div class="msg-text"></div>`;
       const msgEl = div.querySelector('.msg-text');
       if ((localStorage.getItem('examai.render_mode') || 'raw') === 'md' && window.markdownit) {
@@ -734,62 +785,6 @@ const UserNode = (() => {
         pt.addEventListener('touchstart', startDrag(pt), { passive: false });
       });
     }
-    #wireDrag() {
-      const fab = this.fab; let dragging=false, moved=false, sx=0, sy=0, ox=0, oy=0;
-      const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
-      const onDown = (e) => {
-          // If panel is open, FAB follows panel and shouldn't be dragged directly
-          if (!this.panel.classList.contains('hidden')) return;
-          const p = e.touches ? e.touches[0] : e;
-          // Only start dragging if the press is within the FAB's own rect
-          const hit = fab.getBoundingClientRect();
-          if (!(p.clientX >= hit.left && p.clientX <= hit.right && p.clientY >= hit.top && p.clientY <= hit.bottom)) {
-            return;
-          }
-          dragging = true; moved = false;
-        sx = p.clientX; sy = p.clientY;
-        const r = fab.getBoundingClientRect(); ox = r.left; oy = r.top;
-        document.addEventListener('mousemove', onMove, { passive:false });
-        document.addEventListener('mouseup', onUp, { passive:false });
-        document.addEventListener('touchmove', onMove, { passive:false });
-        document.addEventListener('touchend', onUp, { passive:false });
-        e.preventDefault();
-      };
-      const onMove = (e) => {
-        if (!dragging) return;
-        const p = e.touches ? e.touches[0] : e;
-        const dx = p.clientX - sx; const dy = p.clientY - sy;
-        if (!moved && Math.hypot(dx, dy) < 3) return;
-        moved = true;
-        const fr = fab.getBoundingClientRect();
-        const nx = clamp(ox + dx, 4, window.innerWidth - fr.width - 4);
-        const ny = clamp(oy + dy, 4, window.innerHeight - fr.height - 4);
-        fab.style.left = nx + 'px';
-        fab.style.top = ny + 'px';
-        window.dispatchEvent(new CustomEvent('examai:fab:moved'));
-        e.preventDefault();
-      };
-      const onUp = () => {
-        if (!dragging) return;
-        dragging = false;
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        document.removeEventListener('touchmove', onMove);
-        document.removeEventListener('touchend', onUp);
-        if (moved) {
-          this._recentDragTs = Date.now();
-        }
-        const r = fab.getBoundingClientRect();
-        localStorage.setItem('examai.user.fab.pos', JSON.stringify({ x: r.left, y: r.top }));
-      };
-      const dragStartIfSelf = (handler) => (ev) => {
-        const target = ev.target;
-        if (target && target.closest('.conn-point')) return;
-        handler(ev);
-      };
-      fab.addEventListener('mousedown', dragStartIfSelf(onDown), { passive:false });
-      fab.addEventListener('touchstart', dragStartIfSelf(onDown), { passive:false });
-    }
     #wirePanelDrag() {
       const handle = this.panel.querySelector('[data-role="dragHandle"]');
       if (!handle) return;
@@ -818,7 +813,8 @@ const UserNode = (() => {
         if (!moved && Math.hypot(dx, dy) < 3) return;
         moved = true;
   const w = this.panel.offsetWidth; const h = this.panel.offsetHeight;
-  const topMin = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+  const nb = document.getElementById('nodeBoard');
+  const topMin = ((nb?.getBoundingClientRect()?.bottom) || 0) + 8;
   let nl = clamp(sl + dx, 4, window.innerWidth - w - 4);
   let nt = clamp(st + dy, topMin, window.innerHeight - h - 4);
         // Collision stop + edge snap against other floating panels
@@ -881,7 +877,7 @@ const UserNode = (() => {
       const handles = this.panel.querySelectorAll('[data-resize]');
       let dir=null,sx=0,sy=0,sw=0,sh=0,sl=0,st=0,resizing=false;
       const onDown=(e)=>{ const target=e.currentTarget; dir=target.getAttribute('data-resize'); const p=e.touches?e.touches[0]:e; const r=this.panel.getBoundingClientRect(); sx=p.clientX; sy=p.clientY; sw=r.width; sh=r.height; sl=r.left; st=r.top; resizing=true; document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); document.addEventListener('touchmove', onMove, {passive:false}); document.addEventListener('touchend', onUp); };
-  const onMove=(e)=>{ if(!resizing) return; const p=e.touches?e.touches[0]:e; const dx=p.clientX-sx; const dy=p.clientY-sy; let newW=sw,newH=sh,newL=sl,newT=st; if(dir==='br'||dir==='r'){ newW=Math.max(260, Math.min(900, sw+dx)); } if(dir==='br'||dir==='b'){ newH=Math.max(200, Math.min(800, sh+dy)); } if(dir==='l'){ newW=Math.max(260, Math.min(900, sw-dx)); newL=sl+dx; } if(dir==='t'){ newH=Math.max(200, Math.min(800, sh-dy)); newT=st+dy; const topMin=(document.querySelector('.appbar')?.getBoundingClientRect()?.bottom||0)+8; if(newT<topMin){ const bottom=st+sh; newT=topMin; newH=Math.max(200, Math.min(800, bottom-newT)); } } this.panel.style.width=newW+'px'; this.panel.style.height=newH+'px'; if(dir==='l'||dir==='t'){ this.panel.style.left=newL+'px'; this.panel.style.top=newT+'px'; } };
+  const onMove=(e)=>{ if(!resizing) return; const p=e.touches?e.touches[0]:e; const dx=p.clientX-sx; const dy=p.clientY-sy; let newW=sw,newH=sh,newL=sl,newT=st; if(dir==='br'||dir==='r'){ newW=Math.max(260, Math.min(900, sw+dx)); } if(dir==='br'||dir==='b'){ newH=Math.max(200, Math.min(800, sh+dy)); } if(dir==='l'){ newW=Math.max(260, Math.min(900, sw-dx)); newL=sl+dx; } if(dir==='t'){ newH=Math.max(200, Math.min(800, sh-dy)); newT=st+dy; const nb=document.getElementById('nodeBoard'); const topMin=(nb?.getBoundingClientRect()?.bottom||0)+8; if(newT<topMin){ const bottom=st+sh; newT=topMin; newH=Math.max(200, Math.min(800, bottom-newT)); } } this.panel.style.width=newW+'px'; this.panel.style.height=newH+'px'; if(dir==='l'||dir==='t'){ this.panel.style.left=newL+'px'; this.panel.style.top=newT+'px'; } };
       const onUp=()=>{ if(!resizing) return; resizing=false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onUp); const w=parseInt((this.panel.style.width||'0').replace('px',''),10)||0; const h=parseInt((this.panel.style.height||'0').replace('px',''),10)||0; localStorage.setItem('examai.user.panel.size', JSON.stringify({w,h})); };
       handles.forEach(h=>{ h.addEventListener('mousedown', onDown); h.addEventListener('touchstart', onDown, {passive:false}); });
       // While resizing, keep FAB centered under panel
@@ -912,22 +908,42 @@ const UserNode = (() => {
       const nameEl = this.panel.querySelector('[data-role="name"]');
       const fontEl = this.panel.querySelector('[data-role="font"]');
       const colorEl = this.panel.querySelector('[data-role="color"]');
+      const alphaEl = this.panel.querySelector('[data-role="alpha"]');
+      const alphaVal = this.panel.querySelector('[data-role="alphaVal"]');
+      const toggleBgBtn = this.panel.querySelector('[data-action="toggleBubbleBg"]');
   const resetBtn = this.panel.querySelector('[data-action="resetAll"]');
       const nm = getName();
       nameEl.value = nm;
       fontEl.value = getFont();
       colorEl.value = getColor();
+      if (alphaEl) alphaEl.value = Math.round(getAlpha()*100);
+      if (alphaVal) alphaVal.textContent = `${Math.round(getAlpha()*100)}%`;
+      if (toggleBgBtn){ const vis=getBgVisible(); toggleBgBtn.setAttribute('aria-pressed', String(!!vis)); toggleBgBtn.textContent = vis ? '👁️' : '🙈'; toggleBgBtn.title = vis ? 'Dölj bubbelfond' : 'Visa bubbelfond'; }
       const metaName = this.panel.querySelector('.meta .name');
       const applyPreview = () => {
         document.documentElement.style.setProperty('--user-font', getFont());
-        document.documentElement.style.setProperty('--user-bubble-bg', getColor());
+        const vis = getBgVisible();
+        const col = getColor();
+        const a = getAlpha();
+        const bg = vis ? hexToRgba(col, a) : 'transparent';
+        document.documentElement.style.setProperty('--user-bubble-bg', bg);
+        // Ensure existing bubbles in both user panel and copilot panels repaint instantly
+        try {
+          document.querySelectorAll('.user-bubble').forEach(el => {
+            // Force a minimal style change to trigger repaint if needed
+            el.style.outline = '1px solid transparent';
+            setTimeout(() => { el.style.outline = ''; }, 0);
+          });
+        } catch {}
       };
       applyPreview();
   let t=null; const saveName=()=>{ setName(nameEl.value||''); if(metaName) metaName.textContent = escapeHtml(getName()); try { const lbl=this.fab.querySelector('.fab-label'); if (lbl) lbl.textContent = getName(); this.fab.title = getName(); } catch {} toast('Namn sparat.'); };
       nameEl.addEventListener('input', ()=>{ if(t) clearTimeout(t); t=setTimeout(saveName, 350); });
       nameEl.addEventListener('blur', saveName);
-      fontEl.addEventListener('input', ()=>{ setFont(fontEl.value||''); applyPreview(); });
+  fontEl.addEventListener('input', ()=>{ setFont(fontEl.value||''); applyPreview(); });
       colorEl.addEventListener('input', ()=>{ setColor(colorEl.value||''); applyPreview(); });
+      if (alphaEl) alphaEl.addEventListener('input', ()=>{ const pct = Math.max(0, Math.min(100, parseInt(alphaEl.value||'0',10)||0)); setAlpha(pct/100); if(alphaVal) alphaVal.textContent = `${pct}%`; applyPreview(); });
+      if (toggleBgBtn) toggleBgBtn.addEventListener('click', ()=>{ const cur=getBgVisible(); const next=!cur; setBgVisible(next); toggleBgBtn.setAttribute('aria-pressed', String(!!next)); toggleBgBtn.textContent = next ? '👁️' : '🙈'; toggleBgBtn.title = next ? 'Dölj bubbelfond' : 'Visa bubbelfond'; applyPreview(); });
       if (resetBtn) {
         resetBtn.addEventListener('click', () => {
           const ok = confirm('Detta rensar alla ExamAI-inställningar, chattar och sparade positioner. Fortsätt?');
@@ -956,7 +972,11 @@ const UserNode = (() => {
       const py = Math.max(minTop, Math.min(window.innerHeight - h - 4, r.top - h - 12));
       this.panel.style.left = px + 'px';
       this.panel.style.top = py + 'px';
+      
+      // Update aria-hidden BEFORE removing hidden class to prevent focus conflicts
+      this.panel.setAttribute('aria-hidden', 'false');
       this.panel.classList.remove('hidden');
+      
       requestAnimationFrame(()=> {
         this.panel.classList.add('show');
         // Once visible, snap FAB under the panel and keep aligned on window resizes
@@ -969,7 +989,19 @@ const UserNode = (() => {
         window.addEventListener('resize', this._fabAlignOnResize);
       });
     }
-    hide() { this.panel.classList.remove('show'); setTimeout(()=> { this.panel.classList.add('hidden'); if (this._fabAlignOnResize) window.removeEventListener('resize', this._fabAlignOnResize); }, 180); }
+    hide() { 
+      // Move focus back to the FAB button before hiding
+      if (document.activeElement && this.panel.contains(document.activeElement)) {
+        this.fab.focus();
+      }
+      
+      this.panel.classList.remove('show'); 
+      this.panel.setAttribute('aria-hidden', 'true');
+      setTimeout(()=> { 
+        this.panel.classList.add('hidden'); 
+        if (this._fabAlignOnResize) window.removeEventListener('resize', this._fabAlignOnResize); 
+      }, 180); 
+    }
   }
 
   function ensure() { if (instance) return instance; instance = new UserInst(); return instance; }

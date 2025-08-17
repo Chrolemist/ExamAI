@@ -11,23 +11,26 @@
   </head>
   <body>
     <div id="app">
-      <!-- Top app bar -->
-      <header class="appbar">
-        
-      <!-- Center add-copilot button and global user name field -->
-      <div style="display:flex;align-items:center;gap:10px;justify-content:center">
-        <button id="addCopilotBtn" class="copilot-plus" title="Lägg till Copilot">+</button>
-        <button id="pauseFlowBtn" class="btn" title="Pausa/återuppta konversationsflödet">Pausa flöde</button>
-      </div>
-          <div class="brand">
-            <div class="logo" aria-hidden="true"></div>
-            <span>Min lärbok</span>
+  <!-- Floating controls (no app bar) -->
+  <button id="addCopilotBtn" class="copilot-plus" title="Lägg till Copilot">+</button>
+  <button id="pauseFlowBtn" class="btn" title="Pausa/återuppta konversationsflödet">Pausa flöde</button>
+      <!-- Node Board: area to organize and park nodes -->
+      <section id="nodeBoard" class="node-board" aria-label="Node Board">
+        <div class="nb-sections">
+          <div class="nb-sec" data-nb-id="analys">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Analys</div>
+            <div class="nb-grid" aria-hidden="true"></div>
           </div>
-          <div class="search" role="search">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" stroke="var(--subtle)" stroke-width="1.8" stroke-linecap="round"/></svg>
-            <input id="q" type="search" placeholder="Sök i teori, exempel och övningar…" autocomplete="off" />
+          <div class="nb-sec" data-nb-id="idéer">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Idéer</div>
+            <div class="nb-grid" aria-hidden="true"></div>
           </div>
-      </header>
+          <div class="nb-sec" data-nb-id="produktion">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Produktion</div>
+            <div class="nb-grid" aria-hidden="true"></div>
+          </div>
+        </div>
+      </section>
       <!-- Main content area -->
       <div class="layout">
         <main class="content">
@@ -35,21 +38,21 @@
           <div class="head"><h2>Teori</h2></div>
           <div class="body">
             <div id="theoryGrid" class="grid"></div>
-            <div class="note" id="theoryEmpty">Ingen teori ännu. Skapa eller ladda en exempeltenta.</div>
+            <div class="note" id="theoryEmpty">Skriv något här eller koppla en AI-nod för att skapa text…</div>
           </div>
         </section>
   <section id="exempel" class="panel board-section" data-section-key="exempel" aria-label="Exempel">
           <div class="head"><h2>Exempel</h2></div>
           <div class="body">
             <div id="examplesGrid" class="grid"></div>
-            <div class="note" id="examplesEmpty">Inga exempel ännu. Skapa eller ladda en exempeltenta.</div>
+            <div class="note" id="examplesEmpty">Skriv något här eller koppla en AI-nod för att skapa text…</div>
           </div>
         </section>
   <section id="ovningar" class="panel board-section" data-section-key="ovningar" aria-label="Övningsuppgifter">
           <div class="head"><h2>Övningsuppgifter</h2></div>
           <div class="body">
             <div id="exerciseGrid" class="grid"></div>
-            <div class="note" id="exerciseEmpty">Inga övningar ännu. Skapa eller ladda en exempeltenta.</div>
+            <div class="note" id="exerciseEmpty">Skriv något här eller koppla en AI-nod för att skapa text…</div>
           </div>
         </section>
         </main>
@@ -95,18 +98,17 @@
         </div>
       </section>
 
-      <!-- Modal: Ladda sparad tenta -->
-      <section id="savedExamsModal" class="modal hidden">
-        <div class="modal-content">
-          <header class="drawer-head"><div class="brand">Sparade tentor</div><button id="savedExamsClose" class="icon-btn">✕</button></header>
-          <div class="exam" style="padding:14px">
-            <div id="savedExamsList" class="list"></div>
-          </div>
-        </div>
-      </section>
+      
     </div>
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.2/dist/markdown-it.min.js"></script>
+  
+  <!-- FAB Management System -->
+  <script src="./js/graph/fab-drag-manager.js"></script>
+  <script src="./js/graph/fab-position-manager.js"></script>
+  <script src="./js/graph/node-board-fab-controller.js"></script>
+  <script src="./js/graph/fab-utils.js"></script>
+  
   <script src="./app.js?v=20250815-11" type="module"></script>
   </body>
 </html>
