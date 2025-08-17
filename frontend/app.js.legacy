@@ -1,0 +1,240 @@
+// Frontend orchestrator imports
+import { els } from './js/dom.js';
+import { toast, toggleDrawer, showModal, escapeHtml } from './js/ui.js';
+
+// Make toast available globally for connection disconnect buttons
+try { window.toast = toast; } catch {}
+import { ConnectionLayer } from './js/graph/connection-layer.js';
+import { Link } from './js/graph/link.js';
+import { InternetHub } from './js/graph/internet-hub.js';
+import { GraphPersistence } from './js/graph/graph-persistence.js';
+import { BoardSections } from './js/graph/board-sections.js';
+import { NodeBoard } from './js/graph/node-board.js';
+import { IORegistry } from './js/graph/io-registry.js';
+import { ConversationManager } from './js/graph/conversation-manager.js';
+import { CopilotInstance, CopilotManager } from './js/nodes/copilot-instance.js';
+import { getConnectionManager } from './js/core/connection-manager.js';
+// Import modular UserNode implementation
+import { UserNodeManager } from './js/nodes/user-node-refactored.js';
+
+// API Configuration
+const API_BASE_URL = 'http://localhost:8000';
+window.API_BASE_URL = API_BASE_URL; // Make available globally for other modules
+
+// Server key status (from backend /key-status)
+let hasServerKey = false;
+
+// Global Pause/Resume manager (centralized and simple)
+const PauseManager = (() => {
+  const KEY = 'examai.flow.paused';
+  const independentQueue = new Map(); // copilotId -> [msg]
+  const isPaused = () => {
+    try { return localStorage.getItem(KEY) === 'true'; } catch { return false; }
+  };
+  const updateUi = () => {
+    const paused = isPaused();
+    // Ensure paused banner exists once
+    let banner = document.getElementById('pausedBanner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'pausedBanner';
+      banner.textContent = 'Flödet är pausat';
+      document.body.appendChild(banner);
+    }
+    const btn = document.getElementById('pauseFlowBtn');
+    if (btn) {
+      // Large clear icons: Pause when running (red), Play when paused (resume)
+      if (paused) {
+        // Play icon (outline triangle)
+        btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 5 L19 12 L7 19 Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/></svg>`; // play (outline)
+        btn.title = 'Återuppta flöde';
+        btn.classList.add('paused');
+        btn.setAttribute('aria-label', 'Återuppta flöde');
+      } else {
+        // Pause icon: two thin bars (outline)
+        btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="8" y1="5" x2="8" y2="19" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="16" y1="5" x2="16" y2="19" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`; // pause (outline)
+        btn.title = 'Pausa flöde';
+        btn.classList.remove('paused');
+        btn.setAttribute('aria-label', 'Pausa flöde');
+      }
+      // Position the paused banner just below the pause button so it doesn't cover it
+      const positionBanner = () => {
+        try {
+          const r = btn.getBoundingClientRect();
+          if (!r || !Number.isFinite(r.left)) return;
+          banner.style.left = (r.left + r.width / 2) + 'px';
+          banner.style.top = (r.bottom + 8) + 'px';
+        } catch {}
+      };
+      positionBanner();
+      if (!banner._posBound) {
+        banner._posBound = true;
+        window.addEventListener('resize', positionBanner);
+        // NO scroll listener - pause button is fixed, banner position doesn't need scroll updates
+      }
+    }
+    document.body.classList.toggle('flow-paused', !!paused);
+  };
+  async function flushQueue() {
+    for (const [id, list] of independentQueue.entries()) {
+      const inst = CopilotManager?.instances?.get(id);
+      if (!inst) continue;
+      for (const msg of list) {
+        try { await inst.sendQueued?.(msg); } catch {}
+      }
+    }
+    independentQueue.clear();
+  }
+  async function setPaused(v) {
+    try { localStorage.setItem(KEY, v ? 'true' : 'false'); } catch {}
+    updateUi();
+    if (!v) await flushQueue();
+  }
+  function toggle() { setPaused(!isPaused()); }
+  function queueIndependent(id, msg) {
+    const arr = independentQueue.get(id) || [];
+    arr.push(msg);
+    independentQueue.set(id, arr);
+  }
+  function resumeAll() { setPaused(false); }
+  // Initialize UI once
+  updateUi();
+  return { isPaused, setPaused, toggle, queueIndependent, flushQueue, resumeAll, _queue: independentQueue };
+})();
+
+// Expose globals for modules that consult window.* bridges
+try { window.PauseManager = PauseManager; } catch {}
+try { window.__ExamAI_hasServerKey = hasServerKey; } catch {}
+try { window.CopilotManager = CopilotManager; } catch {}
+// Small global for ConversationManager to label user messages
+try { window.getGlobalUserName = () => { try { return localStorage.getItem('examai.user.name') || 'Du'; } catch { return 'Du'; } }; } catch {}
+
+// Wire pause button
+document.getElementById('pauseFlowBtn')?.addEventListener('click', () => PauseManager.toggle());
+
+// Add copilot button
+document.getElementById('addCopilotBtn')?.addEventListener('click', () => CopilotManager.add());
+
+// Initialize Internet hub on load
+try { InternetHub.element(); } catch {}
+// Initialize board sections (editable headers + IO points)
+try { BoardSections.init(); } catch {}
+try { NodeBoard.init(); } catch {}
+try { window.BoardSections = BoardSections; } catch {}
+
+// Initialize global connection manager
+try { 
+  const connectionManager = getConnectionManager();
+  window.connectionManager = connectionManager; // Make available globally
+  console.log('Connection manager initialized');
+} catch (error) {
+  console.error('Failed to initialize connection manager:', error);
+}
+
+// No app bar anymore: ensure Node Board offset is based on the board band height 
+(function maintainBoard(){
+  const update = () => { try { NodeBoard.updateOffset?.(); window.dispatchEvent(new CustomEvent('examai:fab:moved')); } catch {} };
+  update();
+  window.addEventListener('resize', update, { passive: true });
+  // NO scroll listener - with fixed scroll areas, FABs don't need to move on scroll
+})();
+
+// Refresh server key status
+(async () => {
+  try {
+    const res = await fetch(`${API_BASE_URL}/key-status`);
+    const data = await res.json();
+    hasServerKey = !!(data && data.hasKey);
+    window.__ExamAI_hasServerKey = hasServerKey;
+    window.dispatchEvent(new CustomEvent('examai:serverKeyStatusChanged'));
+  } catch {}
+})();
+// Internet hub already initialized above
+
+// ===================== User Node (human) - Modular Implementation =====================
+// Now using SOLID architecture with modular UserNode class
+const UserNode = (() => {
+  let instance = null;
+  
+  function ensure() {
+    if (!instance) {
+      instance = UserNodeManager.getInstance();
+    }
+    return instance;
+  }
+  
+  function linkFromCopilot(inst, startEl = null, endEl = null) {
+    try { 
+      ensure(); 
+      instance.linkFromCopilot(inst, startEl, endEl); 
+    } catch {} 
+  }
+  
+  function getLinkLineIdFor(copilotId) {
+    try { 
+      ensure(); 
+      return instance._linkLines?.get(copilotId)?.lineId || null; 
+    } catch { 
+      return null; 
+    }
+  }
+  
+  function unlinkFor(copilotId) {
+    try { 
+      ensure(); 
+      instance.unlinkCopilot?.(copilotId); 
+    } catch {} 
+  }
+  
+  function linkFromCopilotSides(inst, fromSide, toSide) {
+    linkFromCopilot(inst);
+  }
+  
+  function linkToCopilotSides(inst, fromSide, toSide) {
+    linkFromCopilot(inst);
+  }
+  
+  function linkToSectionByKey(key) {
+    // Section linking would be handled in the new architecture
+  }
+  
+  return { 
+    ensure, 
+    linkFromCopilot, 
+    getLinkLineIdFor, 
+    unlinkFor, 
+    linkFromCopilotSides, 
+    linkToCopilotSides, 
+    linkToSectionByKey 
+  };
+})();
+
+// Expose UserNode bridge for Copilot module
+try { window.__ExamAI_UserNodeApi = UserNode; } catch {}
+
+// Create the user node on load
+try { UserNode.ensure(); } catch {}
+// Restore saved graph (copilots + links)
+try { GraphPersistence.restore({ InternetHub, UserNode, CopilotManager, BoardSections }); } catch {}
+
+// --- Grid snap helper (shared) ---------------------------------
+// Exposed as window.GridSnap for small UI helpers (show guides while dragging panels)
+const GridSnap = (() => {
+  const size = 24; // snap grid pixels
+  let guideV = null, guideH = null;
+  function ensureGuides() {
+    if (guideV && guideH) return;
+    guideV = document.createElement('div'); guideH = document.createElement('div');
+    guideV.className = 'grid-guide v'; guideH.className = 'grid-guide h';
+    document.body.appendChild(guideV); document.body.appendChild(guideH);
+  }
+  function showAt(x, y) {
+    ensureGuides();
+    guideV.style.display = 'block'; guideH.style.display = 'block';
+    guideV.style.left = Math.round(x) + 'px'; guideH.style.top = Math.round(y) + 'px';
+  }
+  function hide() { if (guideV) guideV.style.display = 'none'; if (guideH) guideH.style.display = 'none'; }
+  function snap(x, y) { return { x: Math.round(x / size) * size, y: Math.round(y / size) * size }; }
+  return { showAt, hide, snap, gridSize: size };
+})();
+try { window.GridSnap = GridSnap; } catch {}

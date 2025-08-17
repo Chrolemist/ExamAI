@@ -60,12 +60,20 @@ export const GraphPersistence = (() => {
         ids.forEach(id => { try { CopilotManager?.add?.(id); } catch {} });
       }
       // Restore links
-      const links = _readLinks();
+      // De-duplicate on read to avoid reintroducing removed links
+      const rawLinks = _readLinks();
+      const seen = new Set();
+      const links = [];
+      for (const l of rawLinks) {
+        const sig = `${l.fromType}:${l.fromId}:${l.fromSide||'x'}->${l.toType}:${l.toId}:${l.toSide||'x'}`;
+        if (!seen.has(sig)) { seen.add(sig); links.push(l); }
+      }
       for (const l of links) {
         try {
           if (l.fromType === 'copilot' && l.toType === 'internet') {
             const inst = CopilotManager?.instances?.get?.(l.fromId);
-            if (inst && InternetHub?.linkCopilot) InternetHub.linkCopilot(inst);
+            // Only restore if not already linked
+            if (inst && InternetHub?.linkCopilot && !InternetHub.isLinked?.(inst.id)) InternetHub.linkCopilot(inst);
             continue;
           }
           if (l.fromType === 'copilot' && l.toType === 'copilot') {

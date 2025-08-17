@@ -1,3 +1,11 @@
+/* Z-index hierarchy:
+   - Node Board grid background: 20
+   - Connection lines: 1000  
+   - FABs: 9000
+   - Panel flyouts: 10020
+   - Controls/notifications: 10000+
+*/
+
 /* Node Board */
 #nodeBoard {
   position: relative;
@@ -5,9 +13,9 @@
   z-index: 20;
   padding: 14px 16px 6px 16px;
   backdrop-filter: blur(2px);
-  height: var(--nodeboard-height, 240px); /* fixed band height so it can scroll independently */
-  overflow: auto;
-  overscroll-behavior: contain; /* don't bubble scroll to body */
+  /* Let Node Board grow naturally without its own scrollbar */
+  height: auto;
+  overflow: visible;
 }
 #nodeBoard .nb-sections {
   display: grid;
@@ -29,11 +37,23 @@
 }
 #nodeBoard .nb-grid {
   position: relative;
-  height: 200px; /* more room for parking spots inside the band */
+  /* fixed comfortable height for grid area; page scrolls the whole document */
+  height: 320px;
+  min-height: 320px;
   background-image: linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
                     linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px);
   background-size: 24px 100%, 100% 24px;
   border-radius: 8px;
+}
+/* Elegant bottom line to visually end the grid */
+#nodeBoard .nb-grid::after{
+  content:"";
+  position:absolute;
+  left:0; right:0; bottom:0;
+  height:2px;
+  background:linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.12) 15%, rgba(255,255,255,0.12) 85%, transparent 100%);
+  border-bottom-left-radius:8px; border-bottom-right-radius:8px;
+  pointer-events:none;
 }
 
 /* Make FABs sit above the board but constrained by our JS clamp */
@@ -43,6 +63,7 @@
 /* Normal page scrolling restored */
 html, body { height:100%; }
 :root{
+  /* Node Board grows with content; no separate height variable needed */
   --bg:#0b0b0d; --panel:#131317; --muted:#101016; --text:#e6e6ec; --subtle:#a6a6b3; --primary:#7c5cff; --accent:#00d4ff; --error:#ff5c7c;
   --glass: rgba(255,255,255,0.04);
   --glass-border: rgba(255,255,255,0.08);
@@ -185,7 +206,23 @@ body.flow-paused #pausedBanner{ opacity:1; }
 .copilot-plus:hover{border-color:#3a3a45}
 
 /* Floating Copilot flyout for instances */
-.panel-flyout{position:fixed;z-index:10020;width:min(92vw, 420px);max-width:92vw;max-height:85vh;display:flex;flex-direction:column;background:linear-gradient(180deg,var(--panel),#0f0f13);border:1px solid #23232b;border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,0.6);opacity:0;transform:scale(.85);transition:opacity .22s ease, transform .22s cubic-bezier(.18,.7,.2,1.02);pointer-events:none}
+.panel-flyout{
+  position:fixed;
+  z-index:10020;
+  width:min(92vw, 420px);
+  max-width:92vw;
+  max-height:85vh;
+  display:flex;
+  flex-direction:column;
+  background:linear-gradient(180deg,var(--panel),#0f0f13);
+  border:1px solid #23232b;
+  border-radius:12px;
+  box-shadow:0 18px 48px rgba(0,0,0,0.6);
+  opacity:0;
+  transform:scale(.85);
+  transition:opacity .22s ease, transform .22s cubic-bezier(.18,.7,.2,1.02);
+  pointer-events:none;
+}
 .panel-flyout.show{opacity:1;transform:scale(1);pointer-events:auto}
 .panel-flyout.hidden{display:none}
 .panel-flyout .drawer-head{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid #23232b}
@@ -278,7 +315,26 @@ body.flow-paused #pausedBanner{ opacity:1; }
 .messages::-webkit-scrollbar-thumb{background:#1b1b24;border-radius:10px}
 
 /* Connection overlay and points */
-svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:9050}
+svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:1000} /* Above grid (20) but below FABs (9000) and panels (10020) */
+
+/* SVG disconnect buttons */
+svg#connLayer .disconnect-btn {
+  pointer-events: all;
+  transition: opacity 0.2s ease;
+}
+
+svg#connLayer .disconnect-btn:hover {
+  opacity: 1;
+}
+
+svg#connLayer .disconnect-btn circle {
+  transition: all 0.2s ease;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3));
+}
+
+svg#connLayer .disconnect-btn:hover circle {
+  filter: drop-shadow(0 4px 12px rgba(255,68,68,0.4));
+}
 .panel-flyout .conn-point{position:absolute;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 30% 30%, #fff, #cde, #79f);border:2px solid #4a79ff;box-shadow:0 0 6px rgba(74,121,255,0.35);transform:translate(-50%, -50%);cursor:crosshair}
 .panel-flyout .conn-point.io-in{border-color:#22c55e;box-shadow:0 0 8px rgba(34,197,94,0.6)}
 .panel-flyout .conn-point.io-out{border-color:#8b5cf6;box-shadow:0 0 8px rgba(139,92,246,0.6)}
@@ -365,7 +421,7 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .user-node.fab{width:56px;height:56px;position:fixed;border-radius:50%;background:var(--panel);box-shadow:0 6px 18px rgba(0,0,0,0.25);display:inline-flex;align-items:center;justify-content:center;color:var(--text);z-index:9000}
 .user-node .user-dot{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#0ea5e9,#34d399)}
 .user-node .fab-label{top:-20px}
-.user-node-panel{position:fixed;min-width:280px;min-height:200px;background:var(--panel);border:1px solid var(--border, #23232b);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,0.35);z-index:10015;opacity:0;transform:scale(.85);transition:opacity .18s ease, transform .18s ease;pointer-events:none}
+.user-node-panel{min-width:280px;min-height:200px;z-index:10015}
 .user-node-panel.show{opacity:1;transform:scale(1);pointer-events:auto}
 .user-node-panel.hidden{display:none}
 .user-node-panel .settings{padding:10px 12px;max-height:60vh;overflow:auto}

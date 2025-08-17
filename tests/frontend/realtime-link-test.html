@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Link Update Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+        
+        #node-board {
+            width: 800px;
+            height: 600px;
+            background: #fff;
+            border: 2px solid #333;
+            position: relative;
+            margin: 20px auto;
+        }
+        
+        .fab {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #7c5cff, #00d4ff);
+            border-radius: 50%;
+            position: absolute;
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            user-select: none;
+        }
+        
+        .fab:active {
+            cursor: grabbing;
+        }
+        
+        .status {
+            text-align: center;
+            margin: 20px;
+            padding: 10px;
+            background: #e8f4fd;
+            border-radius: 8px;
+        }
+        
+        .instructions {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px auto;
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body>
+    <div class="instructions">
+        <h2>Real-time Link Update Test</h2>
+        <p><strong>Instructions:</strong></p>
+        <ul>
+            <li>Drag the FAB nodes around the board</li>
+            <li>Watch the connection lines update in real-time as you drag</li>
+            <li>Links should smoothly follow the nodes without lag</li>
+        </ul>
+        <p><strong>Expected behavior:</strong> The purple-to-blue gradient line should move smoothly with the nodes during dragging, not just when you release.</p>
+    </div>
+    
+    <div class="status" id="status">
+        Initializing...
+    </div>
+    
+    <div id="node-board">
+        <div class="fab" id="fab1" style="left: 150px; top: 100px;">
+            A
+        </div>
+        <div class="fab" id="fab2" style="left: 500px; top: 300px;">
+            B
+        </div>
+    </div>
+
+    <!-- Import the modules -->
+    <script type="module">
+        import { ConnectionLayer } from '/frontend/js/graph/connection-layer.js';
+        import { Link } from '/frontend/js/graph/link.js';
+        
+        class FabDragManager {
+            constructor(container, eventBus) {
+                this.container = container;
+                this.eventBus = eventBus;
+                this.currentDrag = null;
+                this.registeredElements = new Map();
+                
+                this.onDragMove = this.onDragMove.bind(this);
+                this.onDragEnd = this.onDragEnd.bind(this);
+            }
+            
+            registerFab(element, config = {}) {
+                this.registeredElements.set(element, config);
+                element.addEventListener('mousedown', (e) => this.onDragStart(e, element));
+                element.addEventListener('touchstart', (e) => this.onDragStart(e, element));
+            }
+            
+            onDragStart(event, element) {
+                event.preventDefault();
+                
+                const clientX = event.clientX || (event.touches && event.touches[0]?.clientX) || 0;
+                const clientY = event.clientY || (event.touches && event.touches[0]?.clientY) || 0;
+                
+                const rect = element.getBoundingClientRect();
+                const containerRect = this.container.getBoundingClientRect();
+                
+                this.currentDrag = {
+                    element,
+                    startX: clientX,
+                    startY: clientY,
+                    offsetX: clientX - rect.left,
+                    offsetY: clientY - rect.top,
+                    containerRect
+                };
+                
+                document.addEventListener('mousemove', this.onDragMove);
+                document.addEventListener('touchmove', this.onDragMove);
+                document.addEventListener('mouseup', this.onDragEnd);
+                document.addEventListener('touchend', this.onDragEnd);
+            }
+            
+            onDragMove(event) {
+                if (!this.currentDrag) return;
+                event.preventDefault();
+                
+                const clientX = event.clientX || (event.touches && event.touches[0]?.clientX) || 0;
+                const clientY = event.clientY || (event.touches && event.touches[0]?.clientY) || 0;
+                
+                const newX = clientX - this.currentDrag.containerRect.left - this.currentDrag.offsetX;
+                const newY = clientY - this.currentDrag.containerRect.top - this.currentDrag.offsetY;
+                
+                // Update element position
+                this.currentDrag.element.style.left = newX + 'px';
+                this.currentDrag.element.style.top = newY + 'px';
+                
+                // Emit drag-move event for real-time link updates
+                this.eventBus.emit('drag-move', {
+                    element: this.currentDrag.element,
+                    position: { x: newX, y: newY },
+                    delta: { 
+                        x: clientX - this.currentDrag.startX, 
+                        y: clientY - this.currentDrag.startY 
+                    }
+                });
+            }
+            
+            onDragEnd() {
+                if (!this.currentDrag) return;
+                
+                document.removeEventListener('mousemove', this.onDragMove);
+                document.removeEventListener('touchmove', this.onDragMove);
+                document.removeEventListener('mouseup', this.onDragEnd);
+                document.removeEventListener('touchend', this.onDragEnd);
+                
+                this.currentDrag = null;
+            }
+        }
+        
+        class SimpleEventBus {
+            constructor() {
+                this.listeners = new Map();
+            }
+            
+            emit(event, data) {
+                const eventListeners = this.listeners.get(event) || [];
+                eventListeners.forEach(callback => {
+                    try {
+                        callback(data);
+                    } catch (error) {
+                        console.error(`Error in event listener for '${event}':`, error);
+                    }
+                });
+            }
+            
+            on(event, callback) {
+                if (!this.listeners.has(event)) {
+                    this.listeners.set(event, []);
+                }
+                this.listeners.get(event).push(callback);
+            }
+        }
+        
+        // Initialize the test
+        const nodeBoard = document.getElementById('node-board');
+        const eventBus = new SimpleEventBus();
+        const dragManager = new FabDragManager(nodeBoard, eventBus);
+        const statusEl = document.getElementById('status');
+        
+        // Set up real-time link updates
+        eventBus.on('drag-move', (data) => {
+            // Emit the custom event that links listen for
+            const customEvent = new CustomEvent('examai:fab:moved', {
+                detail: { 
+                    position: data.position,
+                    element: data.element
+                }
+            });
+            window.dispatchEvent(customEvent);
+            
+            statusEl.textContent = `Dragging ${data.element.id}: x=${Math.round(data.position.x)}, y=${Math.round(data.position.y)}`;
+        });
+        
+        // Register FABs
+        const fab1 = document.getElementById('fab1');
+        const fab2 = document.getElementById('fab2');
+        
+        dragManager.registerFab(fab1);
+        dragManager.registerFab(fab2);
+        
+        // Create a link between the FABs
+        const link = Link.create({
+            lineId: 'test-link',
+            startEl: fab1,
+            endEl: fab2,
+            from: 'fab1',
+            to: 'fab2'
+        });
+        
+        statusEl.textContent = 'Ready! Drag the nodes to test real-time link updates.';
+        
+        console.log('Real-time link test initialized');
+        console.log('Link object:', link);
+    </script>
+</body>
+</html>

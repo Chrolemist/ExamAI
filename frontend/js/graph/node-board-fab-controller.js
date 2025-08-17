@@ -310,6 +310,36 @@ class NodeBoardFabController {
    * Set up event listeners
    */
   setupEventListeners() {
+    // Throttle real-time drag events to prevent visual glitches
+    let lastDragUpdate = 0;
+    const dragThrottleMs = 16; // ~60fps
+    
+    // Listen for real-time drag events
+    this.eventBus.on('drag-move', (data) => {
+      const now = Date.now();
+      if (now - lastDragUpdate < dragThrottleMs) {
+        return; // Skip this update to prevent overwhelming the UI
+      }
+      lastDragUpdate = now;
+      
+      const fabInfo = this.registeredFabs.get(data.element);
+      if (fabInfo) {
+        // Use requestAnimationFrame for smooth visual updates
+        requestAnimationFrame(() => {
+          // Emit the custom event that links listen for
+          // This enables real-time link updates during dragging
+          const customEvent = new CustomEvent('examai:fab:moved', {
+            detail: { 
+              fabInfo, 
+              position: data.position,
+              element: data.element
+            }
+          });
+          window.dispatchEvent(customEvent);
+        });
+      }
+    });
+
     // Listen for drag events
     this.eventBus.on('drag-end', (data) => {
       const fabInfo = this.registeredFabs.get(data.element);

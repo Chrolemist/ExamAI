@@ -28,6 +28,8 @@ export const InternetHub = (() => {
       p.className = 'conn-point io-in';
       p.setAttribute('data-side', side);
       d.appendChild(p);
+      // Register hub IO points for stable identities
+      try { IORegistry.register(p, { nodeType: 'internet', nodeId: 'hub', side, index: 0, defaultRole: 'in' }); } catch {}
     });
     const nodeBoard = document.getElementById('nodeBoard');
     if (nodeBoard) {
@@ -43,14 +45,24 @@ export const InternetHub = (() => {
   }
   function element() { return ensure(); }
   function linkCopilot(inst, startElOrSide = null, endElOrSide = null) {
-    // Prevent duplicate link creation; just pulse existing
+    // If already linked and a new drop occurs, replace the link with the new endpoints
     if (linked.has(inst.id)) {
-      try {
-        const item = inst.connections.get(LINK_KEY);
-        if (item?.lineId) ConnectionLayer.pulse(item.lineId, { duration: 700 });
-        try { toast('Redan kopplad: Internet.', 'info'); } catch {}
-      } catch {}
-      return;
+      const existing = inst.connections.get(LINK_KEY);
+      if (existing) {
+        // If user is explicitly dropping again (new anchors provided), recreate the link
+        if (startElOrSide || endElOrSide) {
+          try { existing.remove?.(); } catch {}
+          try { inst.connections.delete(LINK_KEY); } catch {}
+          linked.delete(inst.id);
+        } else {
+          try { if (existing.lineId) ConnectionLayer.pulse(existing.lineId, { duration: 700 }); } catch {}
+          try { toast('Redan kopplad: Internet.', 'info'); } catch {}
+          return;
+        }
+      } else {
+        // Inconsistent state: allow recreating
+        linked.delete(inst.id);
+      }
     }
     const hub = element();
     // Determine anchors: use provided elements if available, else query by side, else fall back to centers
@@ -58,12 +70,28 @@ export const InternetHub = (() => {
     let startEl = null;
     if (isEl(startElOrSide)) startEl = startElOrSide;
     else if (typeof startElOrSide === 'string' && inst?.fab) startEl = inst.fab.querySelector(`.conn-point[data-side="${startElOrSide}"]`);
-    if (!startEl && inst?.fab) startEl = inst.fab; // fallback to center
+    if (!startEl && inst?.fab) {
+      // Prefer side towards hub (left if hub is left of copilot)
+      try {
+        const hubRect = element().getBoundingClientRect();
+        const fabRect = inst.fab.getBoundingClientRect();
+        const side = (hubRect.left < fabRect.left) ? 'l' : 'r';
+        startEl = inst.fab.querySelector(`.conn-point[data-side="${side}"]`) || inst.fab;
+      } catch { startEl = inst.fab; }
+    }
 
     let endEl = null;
     if (isEl(endElOrSide)) endEl = endElOrSide;
     else if (typeof endElOrSide === 'string') endEl = hub.querySelector(`.conn-point[data-side="${endElOrSide}"]`);
-    if (!endEl) endEl = hub; // fallback to center
+    if (!endEl) {
+      // Prefer side facing the copilot
+      try {
+        const hubRect = hub.getBoundingClientRect();
+        const fabRect = inst.fab.getBoundingClientRect();
+        const side = (fabRect.left < hubRect.left) ? 'l' : 'r';
+        endEl = hub.querySelector(`.conn-point[data-side="${side}"]`) || hub;
+      } catch { endEl = hub; }
+    }
 
   // Build ioId-based lineId for dedup and consistency
   const ss = (startEl?.getAttribute && startEl.getAttribute('data-side')) || 'x';
@@ -81,7 +109,29 @@ export const InternetHub = (() => {
     } catch {}
   inst.connections.set(LINK_KEY, rec);
     window.dispatchEvent(new CustomEvent('examai:internet:linked', { detail: { copilotId: inst.id } }));
+  try { rec.update?.(); } catch {}
   setTimeout(() => rec.update?.(), 0);
+  }
+
+  // Optional: allow user node to link visually to the hub as well
+  function linkUser(userNode, startElOrSide = null, endElOrSide = null) {
+    const hub = element();
+    const isEl = (x) => x && typeof x.getBoundingClientRect === 'function';
+    let startEl = null;
+    if (isEl(startElOrSide)) startEl = startElOrSide; else if (typeof startElOrSide === 'string' && userNode?.fab) startEl = userNode.fab.querySelector(`.conn-point[data-side="${startElOrSide}"]`);
+    if (!startEl && userNode?.fab) startEl = userNode.fab;
+    let endEl = null;
+    if (isEl(endElOrSide)) endEl = endElOrSide; else if (typeof endElOrSide === 'string') endEl = hub.querySelector(`.conn-point[data-side="${endElOrSide}"]`);
+    if (!endEl) endEl = hub;
+
+    const ss = (startEl?.getAttribute && startEl.getAttribute('data-side')) || 'x';
+    const es = (endEl?.getAttribute && endEl.getAttribute('data-side')) || 'x';
+    const fromIoId = (IORegistry.getByEl(startEl)?.ioId) || `user:${userNode?.id || 'user'}:${ss}:0`;
+    const toIoId = (IORegistry.getByEl(endEl)?.ioId) || `internet:hub:${es}:0`;
+    const lineId = `link_${fromIoId}__${toIoId}`;
+    const rec = Link.create({ lineId, startEl, endEl, from: 'user', to: 'internet' });
+    setTimeout(() => rec.update?.(), 0);
+    return rec;
   }
   function unlinkCopilot(inst) {
     if (!linked.has(inst.id)) return;
@@ -95,28 +145,15 @@ export const InternetHub = (() => {
     const ids = Array.from(linked);
     ids.forEach(id => { const inst = window?.CopilotManager?.instances?.get?.(id); if (inst) unlinkCopilot(inst); });
   }
-  // Simple context menu for the hub to allow manual unlinking without the copilot menu
+  // Context menu functionality removed - using disconnect buttons on connection lines instead
   function attachMenu() {
     const hub = element();
-    if (hub._menuAttached) return; hub._menuAttached = true;
-    hub.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      const menu = document.createElement('div');
-      menu.className = 'fab-menu';
-      menu.innerHTML = `<div class="fab-menu-row"><button data-action="unlink-all">Unlink alla</button></div>`;
-      document.body.appendChild(menu);
-      const pad = 8; const mw = 160;
-      const left = Math.min(Math.max(pad, e.clientX), window.innerWidth - mw - pad);
-      const top = Math.min(Math.max(pad, e.clientY), window.innerHeight - 40 - pad);
-      menu.style.left = left + 'px'; menu.style.top = top + 'px'; menu.classList.add('show');
-      const onDoc = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', onDoc); document.removeEventListener('touchstart', onDoc); } };
-      document.addEventListener('mousedown', onDoc); document.addEventListener('touchstart', onDoc);
-      const btn = menu.querySelector('[data-action="unlink-all"]');
-      btn.onclick = (ev) => { ev.stopPropagation(); unlinkAll(); menu.remove(); };
-    });
+    if (hub._menuAttached) return; 
+    hub._menuAttached = true;
+    // Menu functionality disabled - using disconnect buttons instead
   }
   function isLinked(copilotId) { return linked.has(copilotId); }
   function setActive(v) { element().classList.toggle('active', !!v); }
   attachMenu();
-  return { element, linkCopilot, unlinkCopilot, unlinkAll, isLinked, setActive, LINK_KEY };
+  return { element, linkCopilot, linkUser, unlinkCopilot, unlinkAll, isLinked, setActive, LINK_KEY };
 })();

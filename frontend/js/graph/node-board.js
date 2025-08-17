@@ -82,6 +82,10 @@ export const NodeBoard = (() => {
         }
       }
     }, { passive: false });
+    // When the Node Board scrolls, inform links to update positions
+    el.addEventListener('scroll', () => {
+      try { window.dispatchEvent(new CustomEvent('examai:fab:moved')); } catch {}
+    }, { passive: true });
     // Initial offset update
   try { setTimeout(onResize, 0); } catch {}
   }

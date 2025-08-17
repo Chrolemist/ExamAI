@@ -1,6 +1,7 @@
 // Fully extracted CopilotInstance and CopilotManager
 // Dependencies
 import { toast, escapeHtml } from '../ui.js';
+import { BaseNode } from '../core/base-node.js';
 import { ConnectionLayer } from '../graph/connection-layer.js';
 import { Link } from '../graph/link.js';
 import { ConversationManager } from '../graph/conversation-manager.js';
@@ -8,15 +9,17 @@ import { IORegistry } from '../graph/io-registry.js';
 import { InternetHub } from '../graph/internet-hub.js';
 import { GraphPersistence } from '../graph/graph-persistence.js';
 import { NodeBoard } from '../graph/node-board.js';
+import { getConnectionManager } from '../core/connection-manager.js';
 
 function getUserApi() {
   try { return window.__ExamAI_UserNodeApi || null; } catch { return null; }
 }
 
-export class CopilotInstance {
+export class CopilotInstance extends BaseNode {
   constructor(id, opts = {}) {
-    this.id = id;
-  this.name = opts.name || `CoWorker`;
+    super(id, 'copilot');
+    
+    this.name = opts.name || `CoWorker`;
     this.model = opts.model || (document.getElementById('modelSelect')?.value || 'gpt-5-mini');
     try {
       const storedName = localStorage.getItem(`examai.copilot.${id}.name`);
@@ -26,7 +29,7 @@ export class CopilotInstance {
     } catch {}
     this.history = [];
     this.renderMode = (localStorage.getItem(`examai.copilot.${id}.render_mode`) || localStorage.getItem('examai.render_mode') || 'raw');
-  this.maxTokens = parseInt(localStorage.getItem(`examai.copilot.${id}.max_tokens`) || localStorage.getItem('examai.max_tokens') || '3000', 10) || 3000;
+    this.maxTokens = parseInt(localStorage.getItem(`examai.copilot.${id}.max_tokens`) || localStorage.getItem('examai.max_tokens') || '3000', 10) || 3000;
     this.typingSpeed = parseInt(localStorage.getItem(`examai.copilot.${id}.typing_speed`) || localStorage.getItem('examai.typing_speed') || '10', 10) || 10;
     this.topic = localStorage.getItem(`examai.copilot.${id}.topic`) || '';
     this.role = localStorage.getItem(`examai.copilot.${id}.role`) || '';
@@ -72,8 +75,9 @@ export class CopilotInstance {
     this.#initInputAutoResize();
     this.#wirePanelDrag();
     this.#wireFabContextMenu?.();
-    this.#wireFabConnections?.();
+    this.#wireFabConnections(); // Use original working method
     this.#wireDrops();
+    this.#wireUnlinkEvents();
   // Load and render any persisted chat history for this copilot
   try { this.#loadAndRenderHistory(); } catch {}
   }
@@ -309,9 +313,18 @@ export class CopilotInstance {
 
   unlinkSelf() {
     if (!this._convId) { toast('Inte länkad.', 'warn'); return; }
-  // Also detach from Internet hub if linked, and clear persisted internet link
-  try { InternetHub.unlinkCopilot(this); } catch {}
-  try { GraphPersistence.removeWhere(l => l.fromType==='copilot' && l.fromId===this.id && l.toType==='internet'); } catch {}
+    
+    // Use centralized connection manager for proper two-way unlinking
+    const connectionManager = getConnectionManager();
+    
+    // Remove all connections for this node
+    const removedConnections = connectionManager.removeAllConnectionsFor(this.id);
+    
+    // Also detach from Internet hub if linked, and clear persisted internet link
+    try { InternetHub.unlinkCopilot(this); } catch {}
+    try { GraphPersistence.removeWhere(l => l.fromType==='copilot' && l.fromId===this.id && l.toType==='internet'); } catch {}
+    
+    // Legacy cleanup for any remaining direct connections
     for (const [otherId, recs] of this.connections.entries()) {
       const arr = Array.isArray(recs) ? recs : [recs];
       arr.forEach(({ lineId, updateLine }) => {
@@ -321,6 +334,8 @@ export class CopilotInstance {
         try { window.removeEventListener('examai:internet:moved', updateLine); } catch {}
         try { window.removeEventListener('examai:fab:moved', updateLine); } catch {}
       });
+      
+      // Notify other copilot about disconnection
       const other = CopilotManager.instances.get(otherId);
       if (other) {
         try { other.connections.delete(this.id); } catch {}
@@ -329,11 +344,17 @@ export class CopilotInstance {
         if (other.flowOutId === this.id) other.flowOutId = null;
       }
     }
+    
+    // Clear local state
     this.connections.clear();
     this.flowInId = null;
     this.flowOutId = null;
     try { this.inNeighbors?.clear(); this.outNeighbors?.clear(); } catch {}
+    
+    // Unlink from user node
     try { const UserNode = getUserApi(); if (UserNode && typeof UserNode.unlinkFor === 'function') { UserNode.unlinkFor(this.id); } } catch {}
+    
+    // Clean up conversation state
     try {
       if (this._convId && ConversationManager && typeof ConversationManager.removePendingFor === 'function') {
         ConversationManager.removePendingFor(this.id);
@@ -342,8 +363,19 @@ export class CopilotInstance {
     try { ConversationManager.removeMember(this._convId, this); } catch (e) {}
     this._convId = null;
     this.panel.classList.remove('active-speaking');
+    
+    // Remove from persistence
     try { GraphPersistence.removeWhere(l => (l.fromType==='copilot'&&l.fromId===this.id) || (l.toType==='copilot'&&l.toId===this.id)); } catch {}
-    toast('Urkopplad.');
+    
+    // Emit global unlink event for UI updates
+    window.dispatchEvent(new CustomEvent('examai:copilot:unlinked', {
+      detail: { 
+        copilotId: this.id, 
+        removedConnections: removedConnections.length 
+      }
+    }));
+    
+    toast(`Urkopplad. ${removedConnections.length} kopplingar borttagna.`);
   }
   _setOutbound(target) {
     const prev = this.flowOutId;
@@ -565,66 +597,8 @@ export class CopilotInstance {
     if (persist) try { GraphPersistence.addLink({ fromType:'copilot', fromId:this.id, fromSide:ss, toType:'copilot', toId:other.id, toSide:es }); } catch {}
   }
   #wireFabContextMenu() {
-    const fab = this.fab;
-    if (!fab) return;
-    let longPressTimer = null;
-    const clearLongPress = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
-    const removeExisting = () => {
-      const existing = document.querySelector(`.fab-menu[data-id="${this.id}"]`);
-      if (existing) existing.remove();
-    };
-    const showMenuAt = (x, y) => {
-      removeExisting();
-      const menu = document.createElement('div');
-      menu.className = 'fab-menu';
-      menu.setAttribute('data-id', String(this.id));
-      menu.innerHTML = `
-        <div class="fab-menu-row">
-          <button data-action="unlink">Unlink</button>
-          <button data-action="unlink-internet">Från Internet</button>
-        </div>
-        <div style="border-top:1px solid rgba(255,255,255,0.03);margin-top:6px;padding-top:6px;display:flex;justify-content:flex-end">
-          <button data-action="delete" class="danger">Radera</button>
-        </div>`;
-      document.body.appendChild(menu);
-      const pad = 8;
-      const mw = 180;
-      const left = Math.min(Math.max(pad, x), window.innerWidth - mw - pad);
-      const top = Math.min(Math.max(pad, y), window.innerHeight - 40 - pad);
-      menu.style.left = left + 'px';
-      menu.style.top = top + 'px';
-      menu.classList.add('show');
-      const onDocClick = (ev) => {
-        if (!menu.contains(ev.target)) {
-          menu.classList.remove('show');
-          setTimeout(() => menu.remove(), 120);
-          document.removeEventListener('mousedown', onDocClick);
-          document.removeEventListener('touchstart', onDocClick);
-        }
-      };
-      document.addEventListener('mousedown', onDocClick);
-      document.addEventListener('touchstart', onDocClick);
-      const btnUnlink = menu.querySelector('[data-action="unlink"]');
-      const btnNet = menu.querySelector('[data-action="unlink-internet"]');
-      const btnDel = menu.querySelector('[data-action="delete"]');
-      btnUnlink.onclick = (ev) => { ev.stopPropagation(); removeExisting(); this.unlinkSelf(); };
-      btnNet.onclick = (ev) => { ev.stopPropagation(); removeExisting(); InternetHub.unlinkCopilot(this); };
-      btnDel.onclick = (ev) => { ev.stopPropagation(); removeExisting(); const ok = confirm('Radera denna copilot? Detta kan inte ångras.'); if (ok) this.destroy(); };
-    };
-    fab.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      const now = Date.now();
-      if (now - (this._lastDragAt || 0) < 300) return;
-      showMenuAt(e.clientX, e.clientY);
-    });
-    fab.addEventListener('touchstart', (e) => {
-      clearLongPress();
-      const p = e.touches ? e.touches[0] : e;
-      longPressTimer = setTimeout(() => { showMenuAt(p.clientX, p.clientY); }, 600);
-    }, { passive: true });
-    fab.addEventListener('touchend', clearLongPress);
-    fab.addEventListener('touchmove', clearLongPress);
-    fab.addEventListener('touchcancel', clearLongPress);
+    // Context menu functionality removed - using disconnect buttons on connection lines instead
+    return;
   }
   #wireDrag() {
     // Drag functionality disabled - FABs are now statically positioned
@@ -928,9 +902,28 @@ export class CopilotInstance {
       moved = true;
       const w = this.panel.offsetWidth;
       const h = this.panel.offsetHeight;
-  const topMin = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
-  let nl = clamp(sl + dx, 4, window.innerWidth - w - 4);
-  let nt = clamp(st + dy, topMin, window.innerHeight - h - 4);
+      
+      // Get Node Board bounds to constrain panels within it
+      const nodeBoard = document.getElementById('nodeBoard');
+      const nodeBoardRect = nodeBoard ? nodeBoard.getBoundingClientRect() : null;
+      
+      let minLeft = 4, minTop = 8, maxRight = window.innerWidth - 4, maxBottom = window.innerHeight - 4;
+      
+      if (nodeBoardRect) {
+        // Constrain to Node Board area
+        minLeft = nodeBoardRect.left + 4;
+        minTop = nodeBoardRect.top + 8;
+        maxRight = nodeBoardRect.right - 4;
+        maxBottom = nodeBoardRect.bottom - 4;
+      } else {
+        // Fallback constraint if no Node Board found
+        const topMin = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
+        minTop = topMin;
+      }
+      
+      let nl = clamp(sl + dx, minLeft, maxRight - w);
+      let nt = clamp(st + dy, minTop, maxBottom - h);
+      
       // Prevent overlap with other panels by simple collision stop and edge snapping
       try {
         const pads = 6; const snap = 10;
@@ -949,8 +942,8 @@ export class CopilotInstance {
             const min = Math.min(dxL, dxR, dyT, dyB);
             if (min === dxL) nl = other.left - w - pads;
             else if (min === dxR) nl = other.right + pads;
-    else if (min === dyT) nt = other.top - h - pads;
-    else nt = other.bottom + pads;
+            else if (min === dyT) nt = other.top - h - pads;
+            else nt = other.bottom + pads;
             myRect.left = nl; myRect.top = nt; myRect.right = nl + w; myRect.bottom = nt + h;
           } else {
             // edge snapping when close
@@ -961,9 +954,11 @@ export class CopilotInstance {
           }
         }
       } catch {}
-  // Final clamp to viewport and top app bar boundary
-  nl = clamp(nl, 4, window.innerWidth - w - 4);
-  nt = clamp(nt, topMin, window.innerHeight - h - 4);
+      
+      // Final clamp to ensure we stay within bounds
+      nl = clamp(nl, minLeft, maxRight - w);
+      nt = clamp(nt, minTop, maxBottom - h);
+      
       this.panel.style.left = Math.round(nl) + 'px';
       this.panel.style.top = Math.round(nt) + 'px';
       this.#positionFabUnderPanel();
@@ -1077,20 +1072,98 @@ export class CopilotInstance {
     } catch {}
   }
   #wireSubmit() { this.formEl.addEventListener('submit', (e) => { e.preventDefault(); this.sendFromInput(); }); }
+  
+  /**
+   * Wire event listeners for global unlink events
+   */
+  #wireUnlinkEvents() {
+    // Listen for when other copilots unlink themselves
+    window.addEventListener('examai:copilot:unlinked', (event) => {
+      const { copilotId } = event.detail;
+      
+      // If this copilot was connected to the unlinked one, update UI
+      if (this.connections.has(copilotId)) {
+        this.connections.delete(copilotId);
+        
+        // Update flow connections
+        if (this.flowInId === copilotId) {
+          this.flowInId = null;
+        }
+        if (this.flowOutId === copilotId) {
+          this.flowOutId = null;
+        }
+        
+        // Update neighbor sets
+        if (this.inNeighbors) {
+          this.inNeighbors.delete(copilotId);
+        }
+        if (this.outNeighbors) {
+          this.outNeighbors.delete(copilotId);
+        }
+        
+        console.log(`Copilot ${this.id} updated due to ${copilotId} unlinking`);
+      }
+    });
+    
+    // Listen for connection manager events
+    const connectionManager = getConnectionManager();
+    connectionManager.eventBus.on('connection-removed', (data) => {
+      const { connection } = data;
+      
+      // Update this copilot if it was involved in the removed connection
+      if (connection.from.id === this.id || connection.to.id === this.id) {
+        const otherId = connection.from.id === this.id ? connection.to.id : connection.from.id;
+        
+        // Remove from local connections if it exists
+        if (this.connections.has(otherId)) {
+          const existing = this.connections.get(otherId);
+          if (Array.isArray(existing)) {
+            // Remove the specific connection from the array
+            const filtered = existing.filter(conn => conn.lineId !== connection.lineId);
+            if (filtered.length === 0) {
+              this.connections.delete(otherId);
+            } else {
+              this.connections.set(otherId, filtered);
+            }
+          } else if (existing.lineId === connection.lineId) {
+            this.connections.delete(otherId);
+          }
+        }
+      }
+    });
+  }
+  
   show() {
     const r = this.fab.getBoundingClientRect();
-  const w = this.panel.offsetWidth || 420;
-  const h = this.panel.offsetHeight || 320;
-  const px = Math.max(4, Math.min(window.innerWidth - w - 4, r.left));
-  const minTop = (document.querySelector('.appbar')?.getBoundingClientRect()?.bottom || 0) + 8;
-  const py = Math.max(minTop, Math.min(window.innerHeight - h - 4, r.top - h - 12));
-  this.panel.style.left = px + 'px';
-  this.panel.style.top = py + 'px';
-  
-  // Update aria-hidden BEFORE removing hidden class to prevent focus conflicts
-  this.panel.setAttribute('aria-hidden', 'false');
-  this.panel.classList.remove('hidden');
-  
+    const w = this.panel.offsetWidth || 420;
+    const h = this.panel.offsetHeight || 320;
+    
+    // Get Node Board bounds to constrain panels within it
+    const nodeBoard = document.getElementById('nodeBoard');
+    const nodeBoardRect = nodeBoard ? nodeBoard.getBoundingClientRect() : null;
+    
+    let maxRight, maxBottom;
+    if (nodeBoardRect) {
+      // Constrain to Node Board area
+      maxRight = nodeBoardRect.right - 4;
+      maxBottom = nodeBoardRect.bottom - 4;
+    } else {
+      // Fallback to viewport if Node Board not found
+      maxRight = window.innerWidth - 4;
+      maxBottom = window.innerHeight - 4;
+    }
+    
+    const px = Math.max(4, Math.min(maxRight - w, r.left));
+    const minTop = nodeBoardRect ? nodeBoardRect.top + 8 : 8;
+    const py = Math.max(minTop, Math.min(maxBottom - h, r.top - h - 12));
+    
+    this.panel.style.left = px + 'px';
+    this.panel.style.top = py + 'px';
+    
+    // Update aria-hidden BEFORE removing hidden class to prevent focus conflicts
+    this.panel.setAttribute('aria-hidden', 'false');
+    this.panel.classList.remove('hidden');
+    
     requestAnimationFrame(() => {
       this.panel.classList.add('show');
       try { this.updateKeyStatusBadge(); } catch {}
@@ -1444,7 +1517,12 @@ export const CopilotManager = (() => {
   let nextId = 1;
   const instances = new Map();
   function add(forceId) {
-    const id = Number.isInteger(forceId) ? forceId : nextId++;
+    const usingForced = Number.isInteger(forceId);
+    const id = usingForced ? forceId : nextId++;
+    // If we are restoring with explicit IDs, advance nextId so subsequent adds don't collide (e.g. after restore [1..N])
+    if (usingForced) {
+      nextId = Math.max(nextId, id + 1);
+    }
     // Compute next default name: CoWorker N (avoid duplicates among existing CoWorkers)
     const base = 'CoWorker';
     const used = new Set();

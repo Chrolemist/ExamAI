@@ -116,65 +116,16 @@ class SectionManager {
    * Setup context menu for section elements
    */
   setupContextMenu(element, sectionKey) {
-    this.dom.addEventListener(element, 'contextmenu', (e) => {
-      e.preventDefault();
-      this.showContextMenu(e.clientX, e.clientY, sectionKey);
-    });
+    // Context menu functionality removed - using disconnect buttons on connection lines instead
+    return;
   }
   
   /**
-   * Show context menu for section
+   * Show context menu for section - functionality removed
    */
   showContextMenu(x, y, sectionKey) {
-    const menu = this.dom.create('div', {
-      className: 'fab-menu section-menu'
-    });
-    
-    const unlinkButton = this.dom.create('button', {
-      'data-action': 'unlink-all',
-      textContent: 'Unlink till denna sektion'
-    });
-    
-    const menuRow = this.dom.create('div', {
-      className: 'fab-menu-row'
-    });
-    
-    this.dom.append(menuRow, unlinkButton);
-    this.dom.append(menu, menuRow);
-    this.dom.append(document.body, menu);
-    
-    // Position menu
-    const padding = 8;
-    const menuWidth = 220;
-    const left = Math.min(Math.max(padding, x), window.innerWidth - menuWidth - padding);
-    const top = Math.min(Math.max(padding, y), window.innerHeight - 40 - padding);
-    
-    this.dom.setStyle(menu, {
-      left: left + 'px',
-      top: top + 'px'
-    });
-    
-    this.dom.addClass(menu, 'show');
-    
-    // Setup event handlers
-    const cleanup = () => this.dom.remove(menu);
-    
-    const outsideClickHandler = (ev) => {
-      if (!menu.contains(ev.target)) {
-        cleanup();
-        document.removeEventListener('mousedown', outsideClickHandler);
-        document.removeEventListener('touchstart', outsideClickHandler);
-      }
-    };
-    
-    document.addEventListener('mousedown', outsideClickHandler);
-    document.addEventListener('touchstart', outsideClickHandler);
-    
-    this.dom.addEventListener(unlinkButton, 'click', (ev) => {
-      ev.stopPropagation();
-      this.unlinkAllConnections(sectionKey);
-      cleanup();
-    });
+    // Context menu functionality removed - using disconnect buttons on connection lines instead
+    return;
   }
   
   /**
