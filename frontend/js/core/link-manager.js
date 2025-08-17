@@ -329,4 +329,5 @@ class LinkManager {
   }
 }
 
-export { LinkManager };
+// Make LinkManager available globally
+window.LinkManager = LinkManager;

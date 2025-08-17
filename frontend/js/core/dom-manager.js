@@ -333,5 +333,6 @@ class DOMManager {
   }
 }
 
-// Export singleton instance
-export const domManager = new DOMManager();
+// Create singleton instance and make available globally
+const domManager = new DOMManager();
+window.domManager = domManager;

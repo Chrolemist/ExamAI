@@ -216,4 +216,5 @@ class ConnectionAnimator {
   }
 }
 
-export { ConnectionAnimator };
+// Make ConnectionAnimator available globally
+window.ConnectionAnimator = ConnectionAnimator;

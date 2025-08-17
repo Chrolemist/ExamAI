@@ -156,4 +156,5 @@ class InternetConnectionManager {
   }
 }
 
-export { InternetConnectionManager };
+// Make InternetConnectionManager available globally
+window.InternetConnectionManager = InternetConnectionManager;

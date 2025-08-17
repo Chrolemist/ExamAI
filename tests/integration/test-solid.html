@@ -305,9 +305,34 @@
         </div>
     </div>
 
-    <script type="module">
-        import { SOLIDComplianceTestSuite } from './test-solid-compliance.js';
-        
+    <!-- Load all JS components before tests -->
+    <script src="../../frontend/js/core/storage-provider.js"></script>
+    <script src="../../frontend/js/core/node-interfaces.js"></script>
+    <script src="../../frontend/js/core/dom-manager.js"></script>
+    <script src="../../frontend/js/core/ui-components-manager.js"></script>
+    <script src="../../frontend/js/core/flow-control-manager.js"></script>
+    <script src="../../frontend/js/core/graph-repository.js"></script>
+    <script src="../../frontend/js/core/node-connection-manager.js"></script>
+    <script src="../../frontend/js/core/path-calculator.js"></script>
+    <script src="../../frontend/js/core/connection-animator.js"></script>
+    <script src="../../frontend/js/core/geometry-calculator.js"></script>
+    <script src="../../frontend/js/core/internet-connection-manager.js"></script>
+    <script src="../../frontend/js/core/link-manager.js"></script>
+    <script src="../../frontend/js/nodes/user-node-factory.js"></script>
+    <script src="../../frontend/js/nodes/user-settings-manager.js"></script>
+    <script src="../../frontend/js/nodes/user-history-manager.js"></script>
+    <script src="../../frontend/js/nodes/copilot-settings-manager.js"></script>
+    <script src="../../frontend/js/nodes/copilot-chat-manager.js"></script>
+    <script src="../../frontend/js/graph/section-repository.js"></script>
+    <script src="../../frontend/js/graph/section-manager.js"></script>
+    <script src="../../frontend/js/graph/conversation-repository.js"></script>
+    <script src="../../frontend/js/graph/message-router.js"></script>
+    <script src="../../frontend/js/graph/turn-manager.js"></script>
+
+    <!-- Load the test suite -->
+    <script src="./test-solid-compliance.js"></script>
+
+    <script>
         let testSuite = null;
         
         // Initialize test suite
@@ -382,7 +407,7 @@
                 
                 await suite.runAllTests();
                 await suite.testArchitectureIntegration();
-                await suite.testPerformanceTests();
+                await suite.testPerformance();
                 
                 // Update status to success (simplified - in real scenario you'd track individual results)
                 ['srp', 'ocp', 'lsp', 'isp', 'dip', 'perf'].forEach(p => {

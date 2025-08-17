@@ -63,3 +63,44 @@ class IPersistable {
   save() { throw new Error('Must implement save'); }
   load() { throw new Error('Must implement load'); }
 }
+
+// Factory interface for creating nodes
+class INodeFactory {
+  createNode(type, config) { throw new Error('Must implement createNode'); }
+  getSupportedTypes() { throw new Error('Must implement getSupportedTypes'); }
+}
+
+// Connection interface
+class IConnection {
+  connect(from, to) { throw new Error('Must implement connect'); }
+  disconnect() { throw new Error('Must implement disconnect'); }
+  isConnected() { throw new Error('Must implement isConnected'); }
+}
+
+// Conversation participant interface
+class IConversationParticipant {
+  sendMessage(message) { throw new Error('Must implement sendMessage'); }
+  receiveMessage(message) { throw new Error('Must implement receiveMessage'); }
+  getParticipantId() { throw new Error('Must implement getParticipantId'); }
+}
+
+// History management interface
+class IHistoryManager {
+  addEntry(entry) { throw new Error('Must implement addEntry'); }
+  getHistory() { throw new Error('Must implement getHistory'); }
+  clearHistory() { throw new Error('Must implement clearHistory'); }
+}
+
+// Make available globally for backwards compatibility
+window.INode = INode;
+window.IDraggable = IDraggable;
+window.IConnectable = IConnectable;
+window.IPositionable = IPositionable;
+window.IPanelNode = IPanelNode;
+window.IConfigurable = IConfigurable;
+window.IHistoryNode = IHistoryNode;
+window.IPersistable = IPersistable;
+window.INodeFactory = INodeFactory;
+window.IConnection = IConnection;
+window.IConversationParticipant = IConversationParticipant;
+window.IHistoryManager = IHistoryManager;

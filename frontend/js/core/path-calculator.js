@@ -95,4 +95,5 @@ class PathCalculator {
   }
 }
 
-export { PathCalculator };
+// Make PathCalculator available globally
+window.PathCalculator = PathCalculator;

@@ -256,4 +256,5 @@ class GeometryCalculator {
   }
 }
 
-export { GeometryCalculator };
+// Make GeometryCalculator available globally
+window.GeometryCalculator = GeometryCalculator;

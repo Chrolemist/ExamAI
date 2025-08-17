@@ -14,6 +14,7 @@
   <!-- Floating controls (no app bar) -->
   <button id="addCopilotBtn" class="copilot-plus" title="Lägg till Copilot">+</button>
   <button id="pauseFlowBtn" class="btn" title="Pausa/återuppta konversationsflödet">Pausa flöde</button>
+  <a href="../tests/integration/test-solid.html" id="testSolidBtn" class="btn test-btn" title="Kör SOLID compliance tester" style="position: fixed; top: 10px; right: 120px; background: linear-gradient(135deg, #7c5cff 0%, #00d4ff 100%); color: white; text-decoration: none; z-index: 10000;">🧪 SOLID Tests</a>
       <!-- Node Board: area to organize and park nodes -->
       <section id="nodeBoard" class="node-board" aria-label="Node Board">
         <div class="nb-sections">
@@ -103,7 +104,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.2/dist/markdown-it.min.js"></script>
   
-  <!-- Core Architecture -->
+  <!-- Non-module components that define global objects -->
   <script src="./js/core/storage-provider.js"></script>
   <script src="./js/core/node-interfaces.js"></script>
   <script src="./js/core/node-connection-manager.js"></script>
@@ -111,22 +112,16 @@
   <script src="./js/core/graph-repository.js"></script>
   <script src="./js/core/dom-manager.js"></script>
   <script src="./js/core/ui-components-manager.js"></script>
-  
-  <!-- Graph Components -->
   <script src="./js/graph/section-repository.js"></script>
   <script src="./js/graph/section-editor.js"></script>
   <script src="./js/graph/section-io-manager.js"></script>
   <script src="./js/graph/section-manager.js"></script>
-  
-  <!-- Node Components -->
   <script src="./js/nodes/user-node-factory.js"></script>
   <script src="./js/nodes/user-settings-manager.js"></script>
   <script src="./js/nodes/user-history-manager.js"></script>
   <script src="./js/nodes/user-node.js"></script>
   <script src="./js/nodes/copilot-settings-manager.js"></script>
   <script src="./js/nodes/copilot-chat-manager.js"></script>
-  
-  <!-- FAB Management System -->
   <script src="./js/graph/fab-drag-manager.js"></script>
   <script src="./js/graph/fab-position-manager.js"></script>
   <script src="./js/graph/node-board-fab-controller.js"></script>

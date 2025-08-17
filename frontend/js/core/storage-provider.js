@@ -100,3 +100,8 @@ class StorageFactory {
     }
   }
 }
+
+// Make available globally for backwards compatibility  
+window.StorageFactory = StorageFactory;
+window.LocalStorageProvider = LocalStorageProvider;
+window.MemoryStorageProvider = MemoryStorageProvider;

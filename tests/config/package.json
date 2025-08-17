@@ -1,0 +1,23 @@
+{
+  "name": "examai-tests",
+  "version": "1.0.0",
+  "description": "Automated SOLID compliance testing for ExamAI",
+  "scripts": {
+    "test": "playwright test --config=./playwright.config.js",
+    "test:ui": "playwright test --config=./playwright.config.js --ui",
+    "test:report": "playwright show-report ../test-results",
+    "lint": "eslint ../../frontend/js/**/*.js --ext .js --config=./.eslintrc.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "eslint": "^8.55.0"
+  },
+  "keywords": [
+    "solid",
+    "testing",
+    "compliance",
+    "automation"
+  ],
+  "author": "ExamAI Team",
+  "license": "MIT"
+}

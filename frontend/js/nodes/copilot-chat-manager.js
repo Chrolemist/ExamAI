@@ -129,7 +129,7 @@ class CopilotChatManager {
    * Make the actual API call
    */
   async makeApiCall(requestData) {
-    const response = await fetch('/api/chat', {
+    const response = await fetch(`${window.API_BASE_URL || 'http://localhost:8000'}/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

@@ -362,7 +362,11 @@ class SectionManager {
   }
 }
 
-// Export factory function
-export function createSectionManager(dependencies = {}) {
+// Factory function made available globally
+function createSectionManager(dependencies = {}) {
   return new SectionManager(dependencies);
 }
+
+// Make available globally
+window.SectionManager = SectionManager;
+window.createSectionManager = createSectionManager;

@@ -11,11 +11,12 @@ def make_test_client():
 
 
 def test_root_serves_index_html():
+    # Since we moved frontend to separate structure,
+    # backend root should return 404 or redirect
     client, _ = make_test_client()
     r = client.get("/")
-    assert r.status_code == 200
-    # Basic sanity: HTML returned
-    assert b"<html" in r.data.lower()
+    # Backend is now API-only, no static frontend serving expected
+    assert r.status_code == 404
 
 
 def test_key_status_no_key_env(monkeypatch):

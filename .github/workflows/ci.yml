@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  backend-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,7 +29,52 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-      - name: Run tests
+          python -m pip install -r backend/requirements.txt
+      - name: Run Python unit tests
         run: |
-          python -m pytest -q
+          cd backend && python -m pytest ../tests/unit/test_app.py -v
+
+  solid-compliance-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'tests/config/package.json'
+      - name: Install dependencies
+        run: |
+          cd tests/config && npm install
+      - name: Install Playwright browsers
+        run: |
+          cd tests/config && npx playwright install chromium
+      - name: Run SOLID Compliance Tests
+        run: |
+          cd tests && npx playwright test --config=config/playwright.config.js
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: solid-test-results
+          path: tests/test-results/
+
+  frontend-linting:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'tests/config/package.json'
+      - name: Install dependencies
+        run: |
+          cd tests/config && npm install
+      - name: Lint JavaScript files
+        run: |
+          cd tests && npx eslint ../frontend/js/**/*.js --ext .js --format=compact --config=config/.eslintrc.json

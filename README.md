@@ -2,36 +2,84 @@
 
 Multi-copilot chat app with optional web access via an Internet hub and server-side Playwright browsing.
 
-## Quick start
+# ExamAI
 
-1) Python env
-- Use your existing `examai` conda env or any Python 3.10+.
-- Install deps (includes Playwright):
+AI-driven examination system med modulär arkitektur och SOLID-principerna.
+
+## Projektstruktur
 
 ```
+ExamAI/
+├── backend/           # Flask backend server
+│   ├── app.py        # Huvudapplikation  
+│   ├── wsgi.py       # WSGI konfiguration
+│   ├── requirements.txt
+│   └── README.md
+├── frontend/         # JavaScript frontend
+│   ├── js/           # Modulär JavaScript kod
+│   │   ├── core/     # Kärnkomponenter
+│   │   ├── graph/    # Graf och visualisering
+│   │   └── nodes/    # Node-hantering
+│   ├── index.html    # Huvudsida
+│   ├── app.js        # Huvudapplikation
+│   ├── styles.css    # Stilar
+│   └── README.md
+└── tests/            # Test suite
+    ├── test-solid-compliance.js
+    ├── test-solid.html
+    ├── test_app.py
+    └── README.md
+```
+
+## Snabbstart
+
+1. **Backend**: 
+```bash
+cd backend
 pip install -r requirements.txt
-python -m playwright install chromium --with-deps
+python app.py
 ```
 
-2) API key
-- Create a `.env` file in this folder with your OpenAI key:
-
-```
-OPENAI_API_KEY=sk-...your-key...
-# Optional: pick a default model used as fallback when selecting gpt-5* aliases
-OPENAI_FALLBACK_MODEL=gpt-4o-mini
-PORT=8011
+2. **Frontend**:
+```bash
+python -m http.server 8080
+# Öppna http://localhost:8080/frontend/index.html
 ```
 
-- Alternatively paste a key in the UI settings (overrides server key for that session).
+3. **Tester**:
+```bash
+# SOLID compliance tests:
+# Öppna http://localhost:8080/tests/test-solid.html
 
-3) Run the server
-
+# Backend tests:
+cd backend && python -m pytest ../tests/test_app.py -v
 ```
-PORT=8011 python app.py
-```
 
-Browse http://127.0.0.1:8011
+## Arkitektur
+
+Projektet följer **SOLID-principerna** med:
+- **Single Responsibility**: Varje modul har en specifik uppgift
+- **Open/Closed**: Utbyggbart utan att ändra befintlig kod
+- **Liskov Substitution**: Komponenter kan bytas ut transparent
+- **Interface Segregation**: Små, fokuserade interfaces
+- **Dependency Inversion**: Dependencies injiceras, inte hardkodade
+
+## Funktioner
+
+- Interaktiv grafvisualiseringen med nodes och kopplingar
+- Modulär frontend med ES6 modules och dependency injection
+- Comprehensive test suite för SOLID compliance
+- Flask backend med RESTful APIs
+- Docker support för deployment
+
+## Original Features
+
+- Multiple copilots (floating panels) with per-instance settings and keys
+- Link copilots together for shared conversation and turn-taking
+- Internet hub (globe): drag it on the board; link a copilot to grant web access
+- Drag & drop files (PDF/TXT/MD) into chat; text is extracted server-side
+- Saved chat sessions (client-side storage)
+- Global pause/resume flow and global display name
 
 ## Features
 - Multiple copilots (floating panels) with per-instance settings and keys.

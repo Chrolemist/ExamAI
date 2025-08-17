@@ -409,7 +409,10 @@ class UIComponentsManager {
   }
 }
 
-// Export factory function
-export function createUIManager(domManager) {
+// Export factory function and make globally available
+function createUIManager(domManager) {
   return new UIComponentsManager(domManager);
 }
+
+window.createUIManager = createUIManager;
+window.UIComponentsManager = UIComponentsManager;

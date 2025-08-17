@@ -1176,7 +1176,7 @@ export class CopilotInstance {
       for (const f of this._stagedFiles) form.append('files', f, f.name);
       form.append('maxChars', '60000');
       try {
-        const resU = await fetch('/upload', { method: 'POST', body: form });
+        const resU = await fetch(`${window.API_BASE_URL || 'http://localhost:8000'}/upload`, { method: 'POST', body: form });
         const dataU = await resU.json();
         if (!resU.ok) {
           toast(dataU.error || 'Kunde inte läsa bilagor', 'error');
@@ -1216,7 +1216,7 @@ export class CopilotInstance {
       }
       body.max_tokens = maxTok;
       if (webEnable) InternetHub.setActive(true);
-      const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(`${window.API_BASE_URL || 'http://localhost:8000'}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
       if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
@@ -1267,7 +1267,7 @@ export class CopilotInstance {
       }
       body.max_tokens = maxTok;
       if (webEnable) InternetHub.setActive(true);
-      const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(`${window.API_BASE_URL || 'http://localhost:8000'}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
       if (!res.ok) { this.renderAssistantReply((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
@@ -1303,7 +1303,7 @@ export class CopilotInstance {
     }
     body.max_tokens = maxTok;
     if (webEnable) InternetHub.setActive(true);
-    const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await fetch(`${window.API_BASE_URL || 'http://localhost:8000'}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     let data = null; let rawText = '';
     try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
     if (!res.ok) { InternetHub.setActive(false); throw new Error((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); }
@@ -1381,7 +1381,7 @@ export class CopilotInstance {
     this.setBusy(true);
     if (webEnable) InternetHub.setActive(true);
     try {
-      const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(`${window.API_BASE_URL || 'http://localhost:8000'}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
     if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }
@@ -1425,7 +1425,7 @@ export class CopilotInstance {
     this.setBusy(true);
     if (webEnable) InternetHub.setActive(true);
     try {
-      const res = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const res = await fetch(`${window.API_BASE_URL || 'http://localhost:8000'}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       let data = null; let rawText = '';
       try { data = await res.json(); } catch { try { rawText = await res.text(); } catch {} }
   if (!res.ok) { this.addAssistant((data && (data.error || data.message)) || rawText || 'Fel vid förfrågan.'); return; }

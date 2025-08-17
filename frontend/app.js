@@ -11,6 +11,10 @@ import { IORegistry } from './js/graph/io-registry.js';
 import { ConversationManager } from './js/graph/conversation-manager.js';
 import { CopilotInstance, CopilotManager } from './js/nodes/copilot-instance.js';
 
+// API Configuration
+const API_BASE_URL = 'http://localhost:8000';
+window.API_BASE_URL = API_BASE_URL; // Make available globally for other modules
+
 // Server key status (from backend /key-status)
 let hasServerKey = false;
 
@@ -123,7 +127,7 @@ try { window.BoardSections = BoardSections; } catch {}
 // Refresh server key status
 (async () => {
   try {
-    const res = await fetch('/key-status');
+    const res = await fetch(`${API_BASE_URL}/key-status`);
     const data = await res.json();
     hasServerKey = !!(data && data.hasKey);
     window.__ExamAI_hasServerKey = hasServerKey;
@@ -486,7 +490,7 @@ const UserNode = (() => {
         files.forEach(f => formU.append('files', f, f.name));
         formU.append('maxChars', '40000');
         try {
-          const resU = await fetch('/upload', { method: 'POST', body: formU });
+          const resU = await fetch(`${API_BASE_URL}/upload`, { method: 'POST', body: formU });
           const dataU = await resU.json();
           if (!resU.ok) { toast(dataU.error || 'Kunde inte l\u00e4sa bilagor', 'error'); return; }
           const items = Array.isArray(dataU.items) ? dataU.items : [];
