@@ -4,6 +4,7 @@ import { escapeHtml, toast } from '../ui.js';
 import { BaseNode } from '../core/base-node.js';
 import { ConnectionLayer } from '../graph/connection-layer.js';
 import { Link } from '../graph/link.js';
+import { ConnectionFactory } from '../core/connection-factory.js';
 import { ConversationManager } from '../graph/conversation-manager.js';
 import { IORegistry } from '../graph/io-registry.js';
 import { GraphPersistence } from '../graph/graph-persistence.js';
@@ -852,7 +853,9 @@ export class UserNode extends BaseNode {
     }
 
     // Create visual link and persist bookkeeping
-    const rec = Link.create({ lineId, startEl: sEl, endEl: eEl, from: inst.id, to: 'user' });
+  // Build OO connection to enforce out→in rule and carry payloads; also get visual record
+  const conn = ConnectionFactory.connect(sEl, eEl, { nodeType:'copilot', nodeId: String(inst.id) }, { nodeType:'user', nodeId: String(this.id) }, { ownerOut: inst, ownerIn: this });
+  const rec = conn || Link.create({ lineId, startEl: sEl, endEl: eEl, from: inst.id, to: 'user' });
     if (rec) {
       const mine = this._linkLines.get(inst.id);
       if (mine) { if (Array.isArray(mine)) mine.push(rec); else this._linkLines.set(inst.id, [mine, rec]); }
@@ -896,7 +899,8 @@ export class UserNode extends BaseNode {
       return;
     }
 
-    const rec = Link.create({ lineId, startEl: sEl, endEl: eEl, from: 'user', to: inst.id });
+  const conn = ConnectionFactory.connect(sEl, eEl, { nodeType:'user', nodeId: String(this.id) }, { nodeType:'copilot', nodeId: String(inst.id) }, { ownerOut: this, ownerIn: inst });
+  const rec = conn || Link.create({ lineId, startEl: sEl, endEl: eEl, from: 'user', to: inst.id });
     if (rec) {
       const mine = this._linkLines.get(inst.id);
       if (mine) { if (Array.isArray(mine)) mine.push(rec); else this._linkLines.set(inst.id, [mine, rec]); }

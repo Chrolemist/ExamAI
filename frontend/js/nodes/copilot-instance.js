@@ -4,6 +4,7 @@ import { toast, escapeHtml } from '../ui.js';
 import { BaseNode } from '../core/base-node.js';
 import { ConnectionLayer } from '../graph/connection-layer.js';
 import { Link } from '../graph/link.js';
+import { ConnectionFactory } from '../core/connection-factory.js';
 import { ConversationManager } from '../graph/conversation-manager.js';
 import { IORegistry } from '../graph/io-registry.js';
 import { InternetHub } from '../graph/internet-hub.js';
@@ -537,7 +538,8 @@ export class CopilotInstance extends BaseNode {
             return;
           }
         }
-  const rec = Link.create({ lineId, startEl, endEl, from: this.id, to: other.id });
+  const conn = ConnectionFactory.connect(startEl, endEl, { nodeType:'copilot', nodeId: String(this.id) }, { nodeType:'copilot', nodeId: String(other.id) }, { ownerOut: this, ownerIn: other });
+  const rec = conn || Link.create({ lineId, startEl, endEl, from: this.id, to: other.id });
         if (rec) {
           const mine = this.connections.get(other.id);
           if (mine) { if (Array.isArray(mine)) mine.push(rec); else this.connections.set(other.id, [mine, rec]); } else { this.connections.set(other.id, [rec]); }

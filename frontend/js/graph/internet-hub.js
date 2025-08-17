@@ -3,6 +3,7 @@ import { ConnectionLayer } from './connection-layer.js';
 import { GraphPersistence } from './graph-persistence.js';
 import { IORegistry } from './io-registry.js';
 import { Link } from './link.js';
+import { ConnectionFactory } from '../core/connection-factory.js';
 import { NodeBoard } from './node-board.js';
 
 export const InternetHub = (() => {
@@ -99,7 +100,8 @@ export const InternetHub = (() => {
   const fromIoId = (IORegistry.getByEl(startEl)?.ioId) || `copilot:${inst.id}:${ss}:0`;
   const toIoId = (IORegistry.getByEl(endEl)?.ioId) || `internet:hub:${es}:0`;
   const lineId = `link_${fromIoId}__${toIoId}`;
-  const rec = Link.create({ lineId, startEl, endEl, from: inst.id, to: 'internet' });
+  const conn = ConnectionFactory.connect(startEl, endEl, { nodeType:'copilot', nodeId: String(inst.id) }, { nodeType:'internet', nodeId:'hub' }, { ownerOut: inst, ownerIn: InternetHub });
+  const rec = conn || Link.create({ lineId, startEl, endEl, from: inst.id, to: 'internet' });
     linked.add(inst.id);
     // Persist sides if we can resolve them
     try {
