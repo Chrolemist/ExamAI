@@ -1,7 +1,7 @@
 {
   "config": {
     "configFile": "/home/crv/examai/ExamAI/tests/config/playwright.config.js",
-    "rootDir": "/home/crv/examai/ExamAI/tests/e2e",
+    "rootDir": "/home/crv/examai/ExamAI/tests/config",
     "forbidOnly": false,
     "fullyParallel": true,
     "globalSetup": null,
@@ -45,7 +45,7 @@
         "metadata": {},
         "id": "chromium",
         "name": "chromium",
-        "testDir": "/home/crv/examai/ExamAI/tests/e2e",
+        "testDir": "/home/crv/examai/ExamAI/tests/config",
         "testIgnore": [],
         "testMatch": [
           "**/*.@(spec|test).?(c|m)[jt]s?(x)"
@@ -64,28 +64,91 @@
       "reuseExistingServer": true
     }
   },
-  "suites": [],
-  "errors": [
+  "suites": [
     {
-      "message": "Error: Cannot find module '@playwright/test'\nRequire stack:\n- /home/crv/examai/ExamAI/tests/e2e/solid-compliance.spec.js\n- /home/crv/examai/ExamAI/tests/config/node_modules/playwright/lib/transform/transform.js\n- /home/crv/examai/ExamAI/tests/config/node_modules/playwright/lib/common/configLoader.js\n- /home/crv/examai/ExamAI/tests/config/node_modules/playwright/lib/program.js\n- /home/crv/examai/ExamAI/tests/config/node_modules/@playwright/test/cli.js",
-      "stack": "Error: Cannot find module '@playwright/test'\nRequire stack:\n- /home/crv/examai/ExamAI/tests/e2e/solid-compliance.spec.js\n- /home/crv/examai/ExamAI/tests/config/node_modules/playwright/lib/transform/transform.js\n- /home/crv/examai/ExamAI/tests/config/node_modules/playwright/lib/common/configLoader.js\n- /home/crv/examai/ExamAI/tests/config/node_modules/playwright/lib/program.js\n- /home/crv/examai/ExamAI/tests/config/node_modules/@playwright/test/cli.js\n    at Object.<anonymous> (/home/crv/examai/ExamAI/tests/e2e/solid-compliance.spec.js:2:1)",
-      "location": {
-        "file": "/home/crv/examai/ExamAI/tests/e2e/solid-compliance.spec.js",
-        "column": 1,
-        "line": 2
-      },
-      "snippet": "\u001b[90m   at \u001b[39msolid-compliance.spec.js:2\n\n\u001b[0m \u001b[90m 1 |\u001b[39m \u001b[90m// Automated SOLID Compliance Tests for GitHub Actions\u001b[39m\n\u001b[31m\u001b[1m>\u001b[22m\u001b[39m\u001b[90m 2 |\u001b[39m \u001b[36mimport\u001b[39m { test\u001b[33m,\u001b[39m expect } \u001b[36mfrom\u001b[39m \u001b[32m'@playwright/test'\u001b[39m\u001b[33m;\u001b[39m\n \u001b[90m   |\u001b[39m \u001b[31m\u001b[1m^\u001b[22m\u001b[39m\n \u001b[90m 3 |\u001b[39m\n \u001b[90m 4 |\u001b[39m test\u001b[33m.\u001b[39mdescribe(\u001b[32m'SOLID Compliance Tests'\u001b[39m\u001b[33m,\u001b[39m () \u001b[33m=>\u001b[39m {\n \u001b[90m 5 |\u001b[39m   test(\u001b[32m'should pass all SOLID principle tests'\u001b[39m\u001b[33m,\u001b[39m \u001b[36masync\u001b[39m ({ page }) \u001b[33m=>\u001b[39m {\u001b[0m"
-    },
-    {
-      "message": "Error: No tests found",
-      "stack": "Error: No tests found"
+      "title": "solid-compliance.spec.js",
+      "file": "solid-compliance.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "SOLID Compliance Tests",
+          "file": "solid-compliance.spec.js",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "should pass all SOLID principle tests",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "6dcbdd06ab3ba815302b-88b0bf5b85856b1bd74e",
+              "file": "solid-compliance.spec.js",
+              "line": 5,
+              "column": 7
+            },
+            {
+              "title": "should validate architectural compliance",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "6dcbdd06ab3ba815302b-e0829a2a039469b846d2",
+              "file": "solid-compliance.spec.js",
+              "line": 48,
+              "column": 7
+            },
+            {
+              "title": "should validate no broken dependencies",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "6dcbdd06ab3ba815302b-99ff3f1adf9e7044bae3",
+              "file": "solid-compliance.spec.js",
+              "line": 70,
+              "column": 7
+            }
+          ]
+        }
+      ]
     }
   ],
+  "errors": [],
   "stats": {
-    "startTime": "2025-08-17T11:03:18.972Z",
-    "duration": 21.552999999999997,
+    "startTime": "2025-08-17T11:37:29.008Z",
+    "duration": 53.08899999999994,
     "expected": 0,
-    "skipped": 0,
+    "skipped": 3,
     "unexpected": 0,
     "flaky": 0
   }
