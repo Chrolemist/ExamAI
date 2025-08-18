@@ -33,7 +33,7 @@
 			// mark header IO points as connectable
 			document.querySelectorAll('.panel .head .section-io').forEach((io, idx) => {
 				const section = io.closest('.panel');
-				if (section) section.dataset.sectionId = 's' + idx;
+				if (section && !section.dataset.sectionId) section.dataset.sectionId = 's' + idx;
 				if (window.makeConnPointInteractive) window.makeConnPointInteractive(io, section);
 			});
 
@@ -46,6 +46,20 @@
 				document.querySelectorAll('.panel').forEach(p => window.updateConnectionsFor && window.updateConnectionsFor(p));
 				document.querySelectorAll('.panel-flyout').forEach(p => window.updateConnectionsFor && window.updateConnectionsFor(p));
 			});
+
+			// also keep connections fresh on scroll (window or scroll container)
+			const refreshAllConnections = () => {
+				try{
+					document.querySelectorAll('.fab').forEach(f => window.updateConnectionsFor && window.updateConnectionsFor(f));
+					document.querySelectorAll('.panel').forEach(p => window.updateConnectionsFor && window.updateConnectionsFor(p));
+					document.querySelectorAll('.panel-flyout').forEach(p => window.updateConnectionsFor && window.updateConnectionsFor(p));
+				}catch{}
+			};
+			window.addEventListener('scroll', refreshAllConnections, { passive: true });
+			try{ const sc = document.querySelector('.layout'); if (sc) sc.addEventListener('scroll', refreshAllConnections, { passive: true }); }catch{}
+
+			// Initialize per-section settings (render mode)
+			try{ window.initBoardSectionSettings && window.initBoardSectionSettings(); }catch{}
 		} catch (err) {
 			console.error('[ExamAI] Bootstrap error:', err);
 		}

@@ -19,8 +19,8 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 
 .layout{overflow:auto;padding:0 18px 96px}
 .content{padding:16px 0 96px}
-.panel{position:relative;border:1px solid #23232b;background:linear-gradient(180deg,#121219,#0e0e14);border-radius:12px;box-shadow:var(--shadow);margin-bottom:12px}
-.panel .head{display:flex;align-items:baseline;gap:10px;padding:10px 12px;border-bottom:1px solid #23232b;position:relative}
+.panel{position:relative;z-index:2000;border:1px solid #23232b;background:linear-gradient(180deg,#121219,#0e0e14);border-radius:12px;box-shadow:var(--shadow);margin-bottom:12px}
+.panel .head{display:flex;align-items:baseline;gap:10px;padding:10px 52px 10px 12px;border-bottom:1px solid #23232b;position:relative}
 .panel .head h2{margin:0;font-size:16px}
 .panel .body{padding:12px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -51,6 +51,9 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 .btn.danger{background:linear-gradient(135deg,#7c0000,#b01818);border:0;color:#fff;padding:6px 12px;border-radius:8px}
 .brand{font-weight:700;letter-spacing:.5px;opacity:.9}
 .note{color:#a6a6b3}
+/* Editable section note UX */
+.panel .body .note[contenteditable="true"]{min-height:160px;padding:8px;border:1px dashed #2a2a35;border-radius:8px}
+.panel .body .note[contenteditable="true"]:focus{outline:1px solid #2a2a35;border-color:#3a3a45}
 
 /* Glow/busy */
 .fab.busy{box-shadow:0 0 0 2px rgba(124,92,255,0.75),0 0 22px rgba(124,92,255,0.35),0 0 44px rgba(0,212,255,0.25);border-color:rgba(124,92,255,0.6);animation:glowPulse 1.2s ease-in-out infinite}

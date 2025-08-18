@@ -132,6 +132,14 @@
     const ts = payload.ts || Date.now();
     try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, who, { via: `${conn.fromId}->${conn.toId}`, from: sourceId, ts }); }catch{}
     try{ if(window.receiveMessage) window.receiveMessage(targetId, text, who, { ts, via: `${conn.fromId}->${conn.toId}`, from: sourceId }); }catch{}
+  // If the target is a board section, append content there as well
+    try{
+      const targetEl = document.querySelector(`.panel.board-section[data-section-id="${targetId}"]`);
+      if (targetEl && window.appendToSection){
+    // Sections decide their own render mode; just pass text
+    window.appendToSection(targetId, text);
+      }
+    }catch{}
     // If the receiving node is a coworker, request a real AI reply from backend
     try{
       const host = document.querySelector(`.fab[data-id="${targetId}"]`);
@@ -142,12 +150,29 @@
   // Backend integration: request an AI reply for a coworker node
   function requestAIReply(ownerId, ctx){
     if (!ownerId || !ctx || !ctx.text) return;
+    // Turn on thinking glow on the coworker while request is in-flight
+    function setThinking(id, on){
+      try{
+        const host = document.querySelector(`.fab[data-id="${id}"]`);
+        if (!host) return;
+        const cur = Number(host.dataset.pending||0) || 0;
+        const next = on ? (cur+1) : Math.max(0, cur-1);
+        host.dataset.pending = String(next);
+        host.classList.toggle('busy', next > 0);
+      }catch{}
+    }
     const apiBase = (location.protocol === 'file:') ? 'http://localhost:5000' : '';
-    // Gather settings from coworker panel if present
+    // Gather settings from coworker panel if present, else from Graph/localStorage
     let model = 'gpt-5-mini';
     let systemPrompt = '';
     let apiKey = '';
     let maxTokens = 1000;
+    const readSaved = ()=>{
+      let s={};
+      try{ if(window.graph) s = Object.assign({}, window.graph.getNodeSettings(ownerId)||{}); }catch{}
+      try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw) s = Object.assign({}, s, JSON.parse(raw)||{}); }catch{}
+      return s;
+    };
     try{
       const panel = [...document.querySelectorAll('.panel-flyout')].find(p => p.dataset.ownerId === ownerId);
       if (panel){
@@ -162,6 +187,18 @@
         const roleText = roleEl && roleEl.value ? String(roleEl.value).trim() : '';
         const topicText = topicEl && topicEl.value ? String(topicEl.value).trim() : '';
         const includeRole = !!(useRole && useRole.checked);
+        if (includeRole && (roleText || topicText)){
+          systemPrompt = roleText;
+          if (topicText) systemPrompt += (systemPrompt ? '\n\n' : '') + 'Topic: ' + topicText;
+        }
+      } else {
+        const s = readSaved();
+        if (s.model) model = s.model;
+        if (s.maxTokens) maxTokens = Math.min(30000, Math.max(256, Number(s.maxTokens)||1000));
+        if (s.apiKey) apiKey = s.apiKey;
+        const includeRole = !!s.useRole;
+        const roleText = (s.role||'').trim();
+        const topicText = (s.topic||'').trim();
         if (includeRole && (roleText || topicText)){
           systemPrompt = roleText;
           if (topicText) systemPrompt += (systemPrompt ? '\n\n' : '') + 'Topic: ' + topicText;
@@ -184,7 +221,8 @@
     if (messages && messages.length) body.messages = messages;
     if (apiKey) body.apiKey = apiKey;
     const author = (()=>{ try{ const host=document.querySelector(`.fab[data-id="${ownerId}"]`); return (host?.dataset?.displayName)||'Assistant'; }catch{ return 'Assistant'; } })();
-    fetch(apiBase + '/chat', {
+  setThinking(ownerId, true);
+  fetch(apiBase + '/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     }).then(r=>r.json()).then(data=>{
       let reply = '';
@@ -196,12 +234,12 @@
       try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts }); }catch{}
       // Route out via cables (if any)
       try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts }); }catch{}
-    }).catch(err=>{
+  }).catch(err=>{
       const msg = 'Fel vid AI-förfrågan: ' + (err?.message||String(err));
       let ts = Date.now();
       try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}
       try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{}
-    });
+  }).finally(()=>{ setThinking(ownerId, false); });
   }
 
   // delete UI
@@ -327,6 +365,19 @@
   // Let the cable self-animate on traffic
   try{ path.addEventListener('connection:transmit', (ev)=>{ try{ triggerFlowEffect(conn, ev?.detail); }catch{} }); }catch{}
     if (fromId && toId && window.graph) window.graph.connect(fromId, toId);
+    // If one side is a board section, ensure it has a stable sectionId attribute
+    try{
+      const a = document.querySelector(`[data-id="${fromId}"]`) || document.querySelector(`[data-section-id="${fromId}"]`);
+      const b = document.querySelector(`[data-id="${toId}"]`) || document.querySelector(`[data-section-id="${toId}"]`);
+      const ensureSecId = (el, fallbackIdx)=>{
+        if (!el) return;
+        if (el.classList.contains('panel') && el.classList.contains('board-section')){
+          if (!el.dataset.sectionId){ el.dataset.sectionId = fallbackIdx || ('s'+Math.random().toString(36).slice(2,6)); }
+        }
+      };
+      ensureSecId(a);
+      ensureSecId(b);
+    }catch{}
   }
 
   // expose

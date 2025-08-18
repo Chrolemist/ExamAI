@@ -14,6 +14,8 @@
       this.y = y;
       /** @type {Set<string>} */
       this.connections = new Set();
+  /** per-node settings persisted in Graph (e.g., model, role, topic, etc.) */
+  this.settings = {};
     }
   }
   window.Node = Node;

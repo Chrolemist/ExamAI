@@ -3,6 +3,22 @@
 // Panels are draggable/resizable and connectable via header IO points.
 (function(){
   function formatTime(ts){ try{ return new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); }catch{ return ''; } }
+  // Basic sanitizer for HTML mode: strip <script> and inline event handlers, and javascript: URLs
+  function sanitizeHtml(html){
+    try{
+      let s = String(html||'');
+      // remove scripts
+      s = s.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+      // remove on*="..." attributes
+      s = s.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '');
+      s = s.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');
+      s = s.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
+      // neutralize javascript: in href/src
+      s = s.replace(/(href|src)\s*=\s*"javascript:[^"]*"/gi, '$1="#"');
+      s = s.replace(/(href|src)\s*=\s*'javascript:[^']*'/gi, "$1='#'");
+      return s;
+    }catch{ return String(html||''); }
+  }
   /** Position a panel's I/O point at the panel edges. */
   function positionPanelConn(cp, panel){ const rect = panel.getBoundingClientRect(); const pos = { t:[rect.width/2, 0], b:[rect.width/2, rect.height], l:[0, rect.height/2], r:[rect.width, rect.height/2] }[cp.dataset.side]; cp.style.left = pos[0] + 'px'; cp.style.top = pos[1] + 'px'; }
   /** Position a flyout panel near its host node. */
@@ -198,6 +214,117 @@
     const clearBtn=panel.querySelector('[data-action="clear"]'); clearBtn?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
     const delBtn=panel.querySelector('[data-action="delete"]'); delBtn?.addEventListener('click', ()=>panel.remove());
     panel.querySelector('[data-close]')?.addEventListener('click', ()=>panel.remove());
+    // Settings persistence wiring (Graph + localStorage)
+    try{
+      const ownerId = panel.dataset.ownerId||'';
+      const lsKey = (id)=>`nodeSettings:${id}`;
+      const apiBase = (location.protocol === 'file:') ? 'http://localhost:5000' : '';
+      let hasGlobalKey = false;
+      // fetch global key status once
+      try{
+        fetch(apiBase + '/key-status').then(r=>r.json()).then(d=>{ hasGlobalKey = !!(d && d.hasKey); updateKeyBadge(); }).catch(()=>{ hasGlobalKey=false; updateKeyBadge(); });
+      }catch{}
+      const readSaved = ()=>{
+        let s = {};
+        try{ if(window.graph && ownerId) s = Object.assign({}, window.graph.getNodeSettings(ownerId)||{}); }catch{}
+        try{ const raw = localStorage.getItem(lsKey(ownerId)); if(raw){ s = Object.assign({}, s, JSON.parse(raw)||{}); } }catch{}
+        return s;
+      };
+      const persist = (partial)=>{
+        try{ if(window.graph && ownerId) window.graph.setNodeSettings(ownerId, partial||{}); }catch{}
+        try{ const cur = readSaved(); const next = Object.assign({}, cur, partial||{}); localStorage.setItem(lsKey(ownerId), JSON.stringify(next)); }catch{}
+      };
+      const by = (sel)=>panel.querySelector(sel);
+      const modelEl = by('[data-role="model"]');
+      const nameEl = by('[data-role="name"]');
+      const topicEl = by('[data-role="topic"]');
+      const roleEl = by('[data-role="role"]');
+      const useRoleEl = by('[data-role="useRole"]');
+      const maxTokEl = by('[data-role="maxTokens"]');
+      const maxTokVal = by('[data-role="maxTokensValue"]');
+      const typeSpdEl = by('[data-role="typingSpeed"]');
+      const typeSpdVal = by('[data-role="typingSpeedValue"]');
+      const renderEl = by('[data-role="renderMode"]');
+      const webMaxEl = by('[data-role="webMaxResults"]');
+      const webPerEl = by('[data-role="webPerPageChars"]');
+      const webPerVal = by('[data-role="webPerPageCharsValue"]');
+      const webTotEl = by('[data-role="webTotalChars"]');
+      const webTotVal = by('[data-role="webTotalCharsValue"]');
+      const apiKeyEl = by('[data-role="apiKey"]');
+      const keyBadge = by('[data-role="keyStatus"]');
+      const roleBadge = by('[data-role="roleBadge"]');
+      const headerNameEl = panel.querySelector('.drawer-head .meta .name');
+      const updateKeyBadge = ()=>{
+        try{
+          const hasLocal = !!(apiKeyEl && apiKeyEl.value);
+          if (!keyBadge) return;
+          if (hasLocal){
+            keyBadge.textContent = 'Lokal nyckel';
+            keyBadge.classList.add('badge-success');
+            keyBadge.classList.remove('badge-error');
+          } else if (hasGlobalKey){
+            keyBadge.textContent = 'Global nyckel';
+            keyBadge.classList.remove('badge-success');
+            keyBadge.classList.remove('badge-error');
+          } else {
+            keyBadge.textContent = 'Ingen nyckel';
+            keyBadge.classList.remove('badge-success');
+            keyBadge.classList.add('badge-error');
+          }
+        }catch{}
+      };
+      const updateRoleBadge = ()=>{
+        try{
+          if (!roleBadge) return;
+          const include = !!(useRoleEl && useRoleEl.checked);
+          const roleTxt = (roleEl && roleEl.value ? String(roleEl.value).trim() : '');
+          const topicTxt = (topicEl && topicEl.value ? String(topicEl.value).trim() : '');
+          const active = include && (roleTxt || topicTxt);
+          roleBadge.style.display = active ? '' : 'none';
+          roleBadge.textContent = 'Roll';
+          roleBadge.classList.toggle('badge-success', active);
+          let tip = 'Roll';
+          if (roleTxt) tip += `: ${roleTxt}`;
+          if (topicTxt) tip += (roleTxt ? '\n' : ': ') + `Topic: ${topicTxt}`;
+          roleBadge.title = tip;
+        }catch{}
+      };
+      const updateName = (name)=>{
+        const nm = (name||'').trim() || (hostEl.dataset.displayName||'CoWorker');
+        if(headerNameEl) headerNameEl.textContent = nm;
+        try{ const fabLab = hostEl.querySelector('.fab-label'); if(fabLab) fabLab.textContent = nm; }catch{}
+        try{ hostEl.dataset.displayName = nm; }catch{}
+      };
+      const saved = readSaved();
+      // Initialize controls from saved settings
+      if (saved.model && modelEl) modelEl.value = saved.model;
+      if (saved.name && nameEl) { nameEl.value = saved.name; updateName(saved.name); }
+      if (saved.topic && topicEl) topicEl.value = saved.topic;
+      if (saved.role && roleEl) roleEl.value = saved.role;
+      if (typeof saved.useRole === 'boolean' && useRoleEl) useRoleEl.checked = !!saved.useRole;
+      if (saved.maxTokens && maxTokEl) { maxTokEl.value = String(saved.maxTokens); if(maxTokVal) maxTokVal.textContent = String(saved.maxTokens); }
+      if (typeof saved.typingSpeed === 'number' && typeSpdEl) { typeSpdEl.value = String(saved.typingSpeed); if(typeSpdVal) typeSpdVal.textContent = (saved.typingSpeed>=66?'Snabb':saved.typingSpeed<=33?'Långsam':'Medel'); }
+      if (saved.renderMode && renderEl) renderEl.value = saved.renderMode;
+      if (saved.webMaxResults && webMaxEl) webMaxEl.value = String(saved.webMaxResults);
+      if (saved.webPerPageChars && webPerEl) { webPerEl.value = String(saved.webPerPageChars); if(webPerVal) webPerVal.textContent = String(saved.webPerPageChars); }
+      if (saved.webTotalChars && webTotEl) { webTotEl.value = String(saved.webTotalChars); if(webTotVal) webTotVal.textContent = String(saved.webTotalChars); }
+      if (saved.apiKey && apiKeyEl) { apiKeyEl.value = saved.apiKey; }
+      updateKeyBadge();
+      updateRoleBadge();
+      // Wire events to persist immediately
+      modelEl?.addEventListener('change', ()=>persist({ model: modelEl.value }));
+      nameEl?.addEventListener('input', ()=>{ const v=nameEl.value||''; updateName(v); persist({ name: v }); });
+      topicEl?.addEventListener('input', ()=>{ persist({ topic: topicEl.value||'' }); updateRoleBadge(); });
+      roleEl?.addEventListener('input', ()=>{ persist({ role: roleEl.value||'' }); updateRoleBadge(); });
+      useRoleEl?.addEventListener('change', ()=>{ persist({ useRole: !!useRoleEl.checked }); updateRoleBadge(); });
+      maxTokEl?.addEventListener('input', ()=>{ const v=Math.max(256, Math.min(30000, Number(maxTokEl.value)||1000)); if(maxTokVal) maxTokVal.textContent=String(v); persist({ maxTokens: v }); });
+      typeSpdEl?.addEventListener('input', ()=>{ const v = Math.max(0, Math.min(100, Number(typeSpdEl.value)||10)); if(typeSpdVal) typeSpdVal.textContent = (v>=66?'Snabb':v<=33?'Långsam':'Medel'); persist({ typingSpeed: v }); });
+      renderEl?.addEventListener('change', ()=>persist({ renderMode: renderEl.value }));
+      webMaxEl?.addEventListener('change', ()=>persist({ webMaxResults: Math.max(1, Number(webMaxEl.value)||3) }));
+      webPerEl?.addEventListener('input', ()=>{ const v=Math.max(100, Math.min(12000, Number(webPerEl.value)||3000)); if(webPerVal) webPerVal.textContent=String(v); persist({ webPerPageChars: v }); });
+      webTotEl?.addEventListener('input', ()=>{ const v=Math.max(1000, Math.min(24000, Number(webTotEl.value)||9000)); if(webTotVal) webTotVal.textContent=String(v); persist({ webTotalChars: v }); });
+      apiKeyEl?.addEventListener('input', ()=>{ persist({ apiKey: apiKeyEl.value||'' }); updateKeyBadge(); });
+    }catch{}
   // Render historical messages if any
     try{
       const ownerId = panel.dataset.ownerId||''; const list = panel.querySelector('.messages');
@@ -237,6 +364,173 @@
     const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent=String(text);
   b.appendChild(textEl); const metaEl=document.createElement('div'); metaEl.className='subtle'; metaEl.style.marginTop='6px'; metaEl.style.opacity='0.8'; metaEl.style.textAlign = (who==='user' ? 'right' : 'left'); const ts = meta?.ts || Date.now(); metaEl.textContent = formatTime(ts); b.appendChild(metaEl); group.appendChild(author); group.appendChild(b); row.appendChild(group); list.appendChild(row); list.scrollTop=list.scrollHeight;
   }
+  /** Append text content into a board section (by sectionId) with optional Markdown rendering. */
+  function appendToSection(sectionId, text, opts){
+    try{
+      const sec = document.querySelector(`.panel.board-section[data-section-id="${sectionId}"]`)
+                || document.querySelector(`.panel.board-section:nth-of-type(${Number(sectionId?.replace(/^s/,''))||0})`);
+      const note = sec ? sec.querySelector('.note') : null;
+      if (!note) return;
+      // Determine section's own render mode
+      const readSecMode = ()=>{
+        try{
+          const id = sec?.dataset.sectionId || '';
+          const raw = localStorage.getItem(`sectionSettings:${id}`);
+          const saved = raw ? JSON.parse(raw) : {};
+          return saved.renderMode || 'raw';
+        }catch{ return 'raw'; }
+      };
+      const getSecRaw = (id)=>{ try{ return localStorage.getItem(`sectionRaw:${id}`) || ''; }catch{ return ''; } };
+      const setSecRaw = (id, value)=>{ try{ localStorage.setItem(`sectionRaw:${id}`, String(value||'')); }catch{} };
+      const mode = (opts && opts.mode) || readSecMode();
+      const content = String(text||'');
+      const id = sec?.dataset.sectionId || '';
+      if (mode === 'md' && window.mdToHtml){
+        const prev = getSecRaw(id);
+        const next = (prev ? (prev + '\n\n') : '') + content;
+        setSecRaw(id, next);
+        note.innerHTML = window.mdToHtml(next);
+        note.dataset.rendered = '1';
+      } else if (mode === 'html'){
+        const prev = getSecRaw(id);
+        const next = (prev ? (prev + '\n\n') : '') + content;
+        setSecRaw(id, next);
+        note.innerHTML = sanitizeHtml(next);
+        note.dataset.rendered = '1';
+      } else {
+        const p = document.createElement('p');
+        p.className = 'note-block raw';
+        p.textContent = content;
+        note.appendChild(p);
+        try{ setSecRaw(id, note.innerText || ''); }catch{}
+      }
+    }catch{}
+  }
+  /** Initialize per-section settings (render mode toggle) and persistence. */
+  function initBoardSectionSettings(){
+    try{
+      document.querySelectorAll('.panel.board-section').forEach((sec)=>{
+        const id = sec.dataset.sectionId || '';
+        if (!id) return;
+        // Inject a simple render mode toggle if not present
+        const head = sec.querySelector('.head');
+        if (!head) return;
+        if (!head.querySelector('[data-role="secRenderMode"]')){
+          const wrap = document.createElement('div');
+          wrap.style.marginLeft = 'auto';
+          wrap.style.display = 'flex';
+          wrap.style.alignItems = 'center';
+          wrap.style.gap = '8px';
+          const label = document.createElement('label');
+          label.className = 'subtle';
+          label.textContent = 'Visning:';
+          const sel = document.createElement('select');
+          sel.setAttribute('data-role','secRenderMode');
+          sel.innerHTML = '<option value="raw">Rå text</option><option value="md">Markdown</option><option value="html">HTML</option>';
+          // load saved
+          try{
+            const raw = localStorage.getItem(`sectionSettings:${id}`);
+            const saved = raw ? JSON.parse(raw) : {};
+            if (saved.renderMode) sel.value = saved.renderMode;
+          }catch{}
+          sel.addEventListener('change', ()=>{
+            try{
+              const raw = localStorage.getItem(`sectionSettings:${id}`);
+              const cur = raw ? JSON.parse(raw) : {};
+              const next = Object.assign({}, cur, { renderMode: sel.value });
+              localStorage.setItem(`sectionSettings:${id}`, JSON.stringify(next));
+              // Re-render current content according to the new mode
+              const note = sec.querySelector('.note');
+              if (note){
+                const mode = sel.value;
+                if (mode === 'md' && window.mdToHtml){
+                  const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
+                  localStorage.setItem(`sectionRaw:${id}`, src);
+                  note.innerHTML = window.mdToHtml(src);
+                  note.dataset.rendered = '1';
+                } else if (mode === 'html'){
+                  const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
+                  localStorage.setItem(`sectionRaw:${id}`, src);
+                  note.innerHTML = sanitizeHtml(src);
+                  note.dataset.rendered = '1';
+                } else {
+                  const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
+                  localStorage.setItem(`sectionRaw:${id}`, src);
+                  note.textContent = src;
+                  delete note.dataset.rendered;
+                }
+              }
+            }catch{}
+          });
+          wrap.appendChild(label);
+          wrap.appendChild(sel);
+          // Insert before IO point to keep layout
+          const io = head.querySelector('.section-io');
+          if (io && io.parentElement === head){ head.insertBefore(wrap, io); }
+          else { head.appendChild(wrap); }
+        }
+        // Note focus/blur: auto MD render on blur when mode=md
+        const note = sec.querySelector('.note');
+        if (note){
+          note.addEventListener('focus', ()=>{
+            try{
+              const raw = localStorage.getItem(`sectionRaw:${id}`);
+              const mode = (function(){ const s = localStorage.getItem(`sectionSettings:${id}`); try{ return (s?JSON.parse(s):{}).renderMode||'raw'; }catch{ return 'raw'; } })();
+              if (mode === 'md' || mode === 'html'){
+                if (raw != null){ note.textContent = raw; delete note.dataset.rendered; }
+                else {
+                  const src = (mode === 'md') ? (note.innerText || '') : (note.innerHTML || '');
+                  localStorage.setItem(`sectionRaw:${id}`, src);
+                }
+              }
+            }catch{}
+          });
+          note.addEventListener('blur', ()=>{
+            try{
+              const mode = (function(){ const s = localStorage.getItem(`sectionSettings:${id}`); try{ return (s?JSON.parse(s):{}).renderMode||'raw'; }catch{ return 'raw'; } })();
+              const alreadyRendered = note.dataset.rendered === '1';
+              const storedRaw = localStorage.getItem(`sectionRaw:${id}`) || '';
+              const src = alreadyRendered ? storedRaw : (note.textContent || '');
+              // Only update stored raw if we were editing (not already rendered)
+              if (!alreadyRendered){ localStorage.setItem(`sectionRaw:${id}`, src); }
+              if (mode === 'md' && window.mdToHtml){ note.innerHTML = window.mdToHtml(src); note.dataset.rendered = '1'; }
+              else if (mode === 'html'){ note.innerHTML = sanitizeHtml(src); note.dataset.rendered = '1'; }
+            }catch{}
+          });
+          // Ctrl+Enter: render immediately without losing focus context permanently
+          note.addEventListener('keydown', (e)=>{
+            try{
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){
+                e.preventDefault();
+                const src = note.textContent || '';
+                localStorage.setItem(`sectionRaw:${id}`, src);
+                const mode = (function(){ const s = localStorage.getItem(`sectionSettings:${id}`); try{ return (s?JSON.parse(s):{}).renderMode||'raw'; }catch{ return 'raw'; } })();
+                if (mode === 'md' && window.mdToHtml){ note.innerHTML = window.mdToHtml(src); note.dataset.rendered = '1'; }
+                else if (mode === 'html'){ note.innerHTML = sanitizeHtml(src); note.dataset.rendered = '1'; }
+                else { note.textContent = src; }
+              }
+            }catch{}
+          });
+          // Initial render if mode=md and we have stored raw
+          try{
+            const s = localStorage.getItem(`sectionSettings:${id}`);
+            const mode = s ? (JSON.parse(s).renderMode || 'raw') : 'raw';
+            if (mode === 'md' && window.mdToHtml){
+              const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
+              localStorage.setItem(`sectionRaw:${id}`, src);
+              note.innerHTML = window.mdToHtml(src);
+              note.dataset.rendered = '1';
+            } else if (mode === 'html'){
+              const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
+              localStorage.setItem(`sectionRaw:${id}`, src);
+              note.innerHTML = sanitizeHtml(src);
+              note.dataset.rendered = '1';
+            }
+          }catch{}
+        }
+      });
+    }catch{}
+  }
   // expose
   window.openPanel = openPanel;
   window.openUserPanel = openUserPanel;
@@ -245,4 +539,6 @@
   window.makePanelDraggable = makePanelDraggable;
   window.positionPanelConn = positionPanelConn;
   window.receiveMessage = receiveMessage;
+  window.appendToSection = appendToSection;
+  window.initBoardSectionSettings = initBoardSectionSettings;
 })();

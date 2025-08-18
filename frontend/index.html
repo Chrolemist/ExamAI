@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ExamAI - Visual Prototype</title>
-    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
-    <link rel="alternate icon" href="../favicon.ico">
-  <link rel="stylesheet" href="./styles.css" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="alternate icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/frontend/styles.css" />
   </head>
   <body>
     <div id="app">
@@ -31,47 +31,37 @@
         </div>
       </section>
 
-      <!-- Panels (visual only) -->
+      <!-- Main Content Area -->
       <div class="layout">
         <main class="content">
-          <section class="panel board-section" aria-label="Teori">
+      <section class="panel board-section" aria-label="Teori" data-section-id="s-teori">
             <div class="head">
-              <h2>Teori</h2>
+        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
               <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
             </div>
             <div class="body">
               <div class="grid"></div>
-              <article class="note">
-                <p>Teori beskriver begrepp, modeller och samband. Använd det här avsnittet för att sammanfatta viktiga definitioner och principer.</p>
-              </article>
+        <article class="note" contenteditable="true" spellcheck="false"></article>
             </div>
           </section>
-          <section class="panel board-section" aria-label="Exempel">
+      <section class="panel board-section" aria-label="Exempel" data-section-id="s-exempel">
             <div class="head">
-              <h2>Exempel</h2>
+        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
               <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
             </div>
             <div class="body">
               <div class="grid"></div>
-              <article class="note">
-                <p>Här kan du visa konkreta kodexempel, skärmdumpar eller korta scenarion som illustrerar teorin.</p>
-              </article>
+        <article class="note" contenteditable="true" spellcheck="false"></article>
             </div>
           </section>
-          <section class="panel board-section" aria-label="Övningsuppgifter">
+      <section class="panel board-section" aria-label="Övningsuppgifter" data-section-id="s-ovningar">
             <div class="head">
-              <h2>Övningsuppgifter</h2>
+        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
               <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
             </div>
             <div class="body">
               <div class="grid"></div>
-              <article class="note">
-                <ol>
-                  <li>Skriv en kort sammanfattning av ett valfritt ämne.</li>
-                  <li>Ge två exempel som belyser ämnet.</li>
-                  <li>Reflektera: vilka begränsningar finns?</li>
-                </ol>
-              </article>
+        <article class="note" contenteditable="true" spellcheck="false"></article>
             </div>
           </section>
         </main>
@@ -83,20 +73,21 @@
 
   <!-- Klassiska skript så sidan fungerar via file:// utan moduler -->
   <!-- Core datastrukturer -->
-  <script src="./js/port.js"></script>
-  <script src="./js/connection.js"></script>
-  <script src="./js/node.js"></script>
-  <script src="./js/graph.js"></script>
+  <script src="/frontend/js/port.js"></script>
+  <script src="/frontend/js/connection.js"></script>
+  <script src="/frontend/js/node.js"></script>
+  <script src="/frontend/js/graph.js"></script>
   <!-- App state and utilities -->
-  <script src="./js/state.js"></script>
-  <script src="./js/utils.js"></script>
+  <script src="/frontend/js/state.js"></script>
+  <script src="/frontend/js/utils.js"></script>
   <!-- SVG layer and connection system -->
-  <script src="./js/svg-layer.js"></script>
-  <script src="./js/connect.js"></script>
+  <script src="/frontend/js/svg-layer.js"></script>
+  <script src="/frontend/js/connect.js"></script>
+  <script src="/frontend/js/markdown.js"></script>
   <!-- UI: nodes and panels -->
-  <script src="./js/panels.js"></script>
-  <script src="./js/nodes-ui.js"></script>
+  <script src="/frontend/js/panels.js"></script>
+  <script src="/frontend/js/nodes-ui.js"></script>
   <!-- Bootstrap (creates default nodes, binds handlers) -->
-  <script src="./js/main.js"></script>
+  <script src="/frontend/js/main.js"></script>
   </body>
 </html>

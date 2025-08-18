@@ -80,6 +80,12 @@
 
   /** Rensa chattlogg (om du vill rensa historik). */
     clearMessages(ownerId){ this.chatLogs.delete(ownerId); }
+
+  /** Get settings for a node (returns an object, never null). */
+    getNodeSettings(id){ const n=this.nodes.get(id); return (n && n.settings) ? n.settings : {}; }
+
+  /** Merge and persist settings for a node. Shallow merge. */
+    setNodeSettings(id, partial){ const n=this.nodes.get(id); if(!n) return; n.settings = Object.assign({}, n.settings||{}, partial||{}); }
   }
 
   window.Graph = Graph;
