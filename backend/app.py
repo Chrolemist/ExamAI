@@ -41,9 +41,11 @@ except Exception:
 
 
 def create_app():
+    # Resolve repository root (one level up from backend/)
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
     app = Flask(
         __name__,
-        static_folder=".",  # serve files from project root (index.html, styles.css, app.js)
+        static_folder=repo_root,  # serve files from project root (Frontend/, favicon, etc.)
         static_url_path="",
     )
     # If you open index via Flask, CORS isn't needed. Keep CORS permissive for local dev tools.
@@ -51,7 +53,8 @@ def create_app():
 
     @app.route("/")
     def root():
-        return send_from_directory(app.static_folder, "index.html")
+        # Serve the SPA from the frontend folder while keeping static files at project root
+        return send_from_directory(app.static_folder, "frontend/index.html")
 
     @app.get("/key-status")
     def key_status():
