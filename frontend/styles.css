@@ -229,7 +229,11 @@ body.flow-paused #pausedBanner{ opacity:1; }
 .panel-flyout .drawer-head[data-role="dragHandle"]{cursor:move}
 .panel-flyout .messages{padding:14px;overflow:auto;flex:1}
 .panel-flyout .composer{display:flex;gap:8px;padding:14px;background:linear-gradient(180deg,#0f0f13,#0c0c10);border-top:1px solid #23232b;border-bottom-left-radius:12px;border-bottom-right-radius:12px}
-.panel-flyout .author-label{padding:4px 14px 0 14px;font-size:12px;color:var(--subtle)}
+.panel-flyout .author-label{font-size:12px;color:var(--subtle);margin:0 0 2px 0;padding:0}
+/* Ensure author label aligns with its bubble by using a message-row wrapper */
+.message-row{display:flex;flex-direction:column}
+.message-row.user{align-items:flex-end}
+.message-row:not(.user){align-items:flex-start}
 .panel-flyout .settings{display:grid;gap:8px;margin:10px;border-bottom:1px solid #23232b;background:linear-gradient(180deg,#131317,#0f0f13);padding:8px;border-radius:10px;max-height:min(50vh, 420px);overflow:auto;overscroll-behavior:contain}
 .panel-flyout .settings.collapsed{display:none}
 .panel-flyout .settings label{display:grid;gap:6px;font-size:12px;color:var(--subtle)}
@@ -420,7 +424,7 @@ svg#connLayer .disconnect-btn:hover circle {
 /* User Node */
 .user-node.fab{width:56px;height:56px;position:fixed;border-radius:50%;background:var(--panel);box-shadow:0 6px 18px rgba(0,0,0,0.25);display:inline-flex;align-items:center;justify-content:center;color:var(--text);z-index:9000}
 .user-node .user-dot{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#0ea5e9,#34d399)}
-.user-node .fab-label{top:-20px}
+.user-node .fab-label{top:-34px}
 .user-node-panel{min-width:280px;min-height:200px;z-index:10015}
 .user-node-panel.show{opacity:1;transform:scale(1);pointer-events:auto}
 .user-node-panel.hidden{display:none}

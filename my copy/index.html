@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ExamAI - Visual Prototype</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+    <link rel="alternate icon" href="../favicon.ico">
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Add coworker icon button -->
+      <button id="addCopilotBtn" class="copilot-plus" title="Lägg till CoWorker">+</button>
+
+      <!-- Node board (visual only) -->
+      <section id="nodeBoard" class="node-board" aria-label="Node Board">
+        <div class="nb-sections">
+          <div class="nb-sec" data-nb-id="analys">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Analys</div>
+            <div class="nb-grid" aria-hidden="true"></div>
+          </div>
+          <div class="nb-sec" data-nb-id="idéer">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Idéer</div>
+            <div class="nb-grid" aria-hidden="true"></div>
+          </div>
+          <div class="nb-sec" data-nb-id="produktion">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Produktion</div>
+            <div class="nb-grid" aria-hidden="true"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panels (visual only) -->
+      <div class="layout">
+        <main class="content">
+          <section class="panel board-section" aria-label="Teori">
+            <div class="head">
+              <h2>Teori</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+              <div class="note">Skriv något här eller koppla en ikon för att skapa text…</div>
+            </div>
+          </section>
+          <section class="panel board-section" aria-label="Exempel">
+            <div class="head">
+              <h2>Exempel</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+              <div class="note">Skriv något här eller koppla en ikon för att skapa text…</div>
+            </div>
+          </section>
+          <section class="panel board-section" aria-label="Övningsuppgifter">
+            <div class="head">
+              <h2>Övningsuppgifter</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+              <div class="note">Skriv något här eller koppla en ikon för att skapa text…</div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <!-- SVG connection layer -->
+    <svg id="connLayer" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+
+  <script src="./mini.js"></script>
+  </body>
+</html>
