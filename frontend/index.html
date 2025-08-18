@@ -3,21 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ExamAI</title>
+    <title>ExamAI - Visual Prototype</title>
     <link rel="icon" type="image/svg+xml" href="../favicon.svg">
     <link rel="alternate icon" href="../favicon.ico">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
-  <link rel="stylesheet" href="./styles.css?v=20250814-1" />
+  <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div id="app">
-  <!-- Floating controls (no app bar) -->
-  <button id="addCopilotBtn" class="copilot-plus" title="Lägg till Copilot">+</button>
-  <button id="pauseFlowBtn" class="btn" title="Pausa/återuppta konversationsflödet">Pausa flöde</button>
-  <a href="../tests/integration/test-solid.html" id="testSolidBtn" class="btn test-btn" title="Kör SOLID compliance tester" style="position: fixed; top: 10px; right: 120px; background: linear-gradient(135deg, #7c5cff 0%, #00d4ff 100%); color: white; text-decoration: none; z-index: 10000;">🧪 SOLID Tests</a>
-      <!-- Node Board: area to organize and park nodes -->
+      <!-- Add coworker icon button -->
+      <button id="addCopilotBtn" class="copilot-plus" title="Lägg till CoWorker">+</button>
+
+      <!-- Node board (visual only) -->
       <section id="nodeBoard" class="node-board" aria-label="Node Board">
         <div class="nb-sections">
           <div class="nb-sec" data-nb-id="analys">
@@ -34,99 +30,73 @@
           </div>
         </div>
       </section>
-      <!-- Main content area -->
+
+      <!-- Panels (visual only) -->
       <div class="layout">
         <main class="content">
-  <section id="teori" class="panel board-section" data-section-key="teori" aria-label="Teori">
-          <div class="head"><h2>Teori</h2></div>
-          <div class="body">
-            <div id="theoryGrid" class="grid"></div>
-            <div class="note" id="theoryEmpty">Skriv något här eller koppla en AI-nod för att skapa text…</div>
-          </div>
-        </section>
-  <section id="exempel" class="panel board-section" data-section-key="exempel" aria-label="Exempel">
-          <div class="head"><h2>Exempel</h2></div>
-          <div class="body">
-            <div id="examplesGrid" class="grid"></div>
-            <div class="note" id="examplesEmpty">Skriv något här eller koppla en AI-nod för att skapa text…</div>
-          </div>
-        </section>
-  <section id="ovningar" class="panel board-section" data-section-key="ovningar" aria-label="Övningsuppgifter">
-          <div class="head"><h2>Övningsuppgifter</h2></div>
-          <div class="body">
-            <div id="exerciseGrid" class="grid"></div>
-            <div class="note" id="exerciseEmpty">Skriv något här eller koppla en AI-nod för att skapa text…</div>
-          </div>
-        </section>
+          <section class="panel board-section" aria-label="Teori">
+            <div class="head">
+              <h2>Teori</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+              <article class="note">
+                <p>Teori beskriver begrepp, modeller och samband. Använd det här avsnittet för att sammanfatta viktiga definitioner och principer.</p>
+              </article>
+            </div>
+          </section>
+          <section class="panel board-section" aria-label="Exempel">
+            <div class="head">
+              <h2>Exempel</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+              <article class="note">
+                <p>Här kan du visa konkreta kodexempel, skärmdumpar eller korta scenarion som illustrerar teorin.</p>
+              </article>
+            </div>
+          </section>
+          <section class="panel board-section" aria-label="Övningsuppgifter">
+            <div class="head">
+              <h2>Övningsuppgifter</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+              <article class="note">
+                <ol>
+                  <li>Skriv en kort sammanfattning av ett valfritt ämne.</li>
+                  <li>Ge två exempel som belyser ämnet.</li>
+                  <li>Reflektera: vilka begränsningar finns?</li>
+                </ol>
+              </article>
+            </div>
+          </section>
         </main>
       </div>
-
-  <!-- Main copilot drawer removed: use + to add individual copilots -->
-  <!-- Left menu panel removed -->
-
-      <!-- Fullscreen modal for exam view -->
-      <section id="examModal" class="modal hidden">
-        <div class="modal-content">
-          <header class="drawer-head"><div class="brand">Tenta</div><button id="examClose" class="icon-btn">✕</button></header>
-          <div id="examViewer" class="exam"></div>
-        </div>
-      </section>
-
-      <!-- Modal: Skapa tenta / välj filer -->
-      <section id="filePickerModal" class="modal hidden">
-        <div class="modal-content">
-          <header class="drawer-head"><div class="brand">Skapa tenta</div><button id="filePickerClose" class="icon-btn">✕</button></header>
-          <div class="exam" style="padding:14px">
-            <div class="grid2">
-              <div class="card">
-                <div class="label">Föreläsningar (en eller flera)</div>
-                <input id="filesLectures" type="file" accept=".pdf,.txt,.md" multiple />
-                <div id="dzLectures" class="dropzone" aria-label="Dra & släpp föreläsningsfiler här">Dra & släpp här</div>
-                <div id="listLectures" class="file-list"></div>
-              </div>
-              <div class="card">
-                <div class="label">Tenta (en eller flera, kombineras)</div>
-                <input id="filesExams" type="file" accept=".txt,.md,.text,.pdf" multiple />
-                <div id="dzExams" class="dropzone" aria-label="Dra & släpp tentafiler här">Dra & släpp här</div>
-                <div id="listExams" class="file-list"></div>
-              </div>
-            </div>
-              <label for="examTitle" class="input-label">Titel (valfri)</label>
-              <input id="examTitle" type="text" placeholder="Ange en titel på tentan" class="text-input"/>
-            <div style="display:flex;justify-content:center;margin-top:14px">
-              <button id="confirmBuildExam" class="btn btn-primary">Skapa tenta</button>
-            </div>
-            <div id="createExamResult" class="subtle" style="margin-top:8px"></div>
-          </div>
-        </div>
-      </section>
-
-      
     </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.2/dist/markdown-it.min.js"></script>
-  
-  <!-- Non-module components that define global objects -->
-  <script src="./js/core/storage-provider.js"></script>
-  <script src="./js/core/node-interfaces.js"></script>
-  <script src="./js/core/node-connection-manager.js"></script>
-  <script src="./js/core/flow-control-manager.js"></script>
-  <script src="./js/core/graph-repository.js"></script>
-  <script src="./js/core/dom-manager.js"></script>
-  <script src="./js/core/ui-components-manager.js"></script>
-  <script src="./js/graph/section-repository.js"></script>
-  <script src="./js/graph/section-editor.js"></script>
-  <script src="./js/graph/section-io-manager.js"></script>
-  <!-- Legacy scripts - will be migrated to modules gradually -->
-  <script src="./js/graph/section-manager.js"></script>
-  <script src="./js/nodes/copilot-settings-manager.js"></script>
-  <script src="./js/nodes/copilot-chat-manager.js"></script>
-  <script src="./js/graph/fab-drag-manager.js"></script>
-  <script src="./js/graph/fab-position-manager.js"></script>
-  <script src="./js/graph/node-board-fab-controller.js"></script>
-  <script src="./js/graph/fab-utils.js"></script>
-  
-  <!-- SOLID Architecture Bootstrap -->
-  <script src="./bootstrap.js?v=20250817-12" type="module"></script>
+    <!-- SVG connection layer -->
+    <svg id="connLayer" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+
+  <!-- Klassiska skript så sidan fungerar via file:// utan moduler -->
+  <!-- Core datastrukturer -->
+  <script src="./js/port.js"></script>
+  <script src="./js/connection.js"></script>
+  <script src="./js/node.js"></script>
+  <script src="./js/graph.js"></script>
+  <!-- App state and utilities -->
+  <script src="./js/state.js"></script>
+  <script src="./js/utils.js"></script>
+  <!-- SVG layer and connection system -->
+  <script src="./js/svg-layer.js"></script>
+  <script src="./js/connect.js"></script>
+  <!-- UI: nodes and panels -->
+  <script src="./js/panels.js"></script>
+  <script src="./js/nodes-ui.js"></script>
+  <!-- Bootstrap (creates default nodes, binds handlers) -->
+  <script src="./js/main.js"></script>
   </body>
 </html>
