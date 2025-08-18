@@ -4,7 +4,7 @@
 (function(){
   const svg = () => window.svg;
   // simulation toggle
-  if (typeof window.aiSimEnabled === 'undefined') window.aiSimEnabled = true;
+  // AI-simulering borttagen
   // path helpers
   /** Ensure the gradient defs exist once per page. */
   function ensureDefs(){
@@ -132,29 +132,76 @@
     const ts = payload.ts || Date.now();
     try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, who, { via: `${conn.fromId}->${conn.toId}`, from: sourceId, ts }); }catch{}
     try{ if(window.receiveMessage) window.receiveMessage(targetId, text, who, { ts, via: `${conn.fromId}->${conn.toId}`, from: sourceId }); }catch{}
-    // If the receiving node is a coworker, trigger simulated reply from that node through its OUT cables
+    // If the receiving node is a coworker, request a real AI reply from backend
     try{
-      if (window.aiSimEnabled){
-        const host = document.querySelector(`.fab[data-id="${targetId}"]`);
-        if (host && host.dataset.type === 'coworker') simulateAIResponse(targetId, String(text), { ...payload, ts });
-      }
+      const host = document.querySelector(`.fab[data-id="${targetId}"]`);
+      if (host && host.dataset.type === 'coworker') requestAIReply(targetId, { text: String(text), sourceId, via: `${conn.fromId}->${conn.toId}` });
     }catch{}
   }
 
-  function simulateAIResponse(ownerId, incomingText, meta){
-    const delay = 400 + Math.random()*800;
-    setTimeout(()=>{
-  let author = 'CoWorker';
-  try{ const host=document.querySelector(`.fab[data-id="${ownerId}"]`); if(host) author = host.dataset.displayName || author; }catch{}
-      const reply = `Svar: ${incomingText}`;
-  // Always log in this coworker's own chat log first (captures canonical ts)
-  let ts = Date.now();
-  try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', { sim:true, inReplyTo: meta?.ts }); ts = entry?.ts || ts; } }catch{}
-  // Then render in UI if panel is open
-  try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts, sim:true, inReplyTo: meta?.ts }); }catch{}
-  // Then emit from coworker node through its OUT cables (if any)
-  try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts, sim:true, inReplyTo: meta?.ts }); }catch{}
-    }, delay);
+  // Backend integration: request an AI reply for a coworker node
+  function requestAIReply(ownerId, ctx){
+    if (!ownerId || !ctx || !ctx.text) return;
+    const apiBase = (location.protocol === 'file:') ? 'http://localhost:5000' : '';
+    // Gather settings from coworker panel if present
+    let model = 'gpt-5-mini';
+    let systemPrompt = '';
+    let apiKey = '';
+    let maxTokens = 1000;
+    try{
+      const panel = [...document.querySelectorAll('.panel-flyout')].find(p => p.dataset.ownerId === ownerId);
+      if (panel){
+        const mEl = panel.querySelector('[data-role="model"]'); if (mEl && mEl.value) model = String(mEl.value);
+        const useRole = panel.querySelector('[data-role="useRole"]');
+        const roleEl = panel.querySelector('[data-role="role"]');
+        const topicEl = panel.querySelector('[data-role="topic"]');
+        const keyEl = panel.querySelector('[data-role="apiKey"]');
+        const mtEl = panel.querySelector('[data-role="maxTokens"]');
+        if (keyEl && keyEl.value) apiKey = String(keyEl.value);
+        if (mtEl && mtEl.value) { const v = Number(mtEl.value); if (!Number.isNaN(v) && v>0) maxTokens = Math.min(30000, Math.max(256, v)); }
+        const roleText = roleEl && roleEl.value ? String(roleEl.value).trim() : '';
+        const topicText = topicEl && topicEl.value ? String(topicEl.value).trim() : '';
+        const includeRole = !!(useRole && useRole.checked);
+        if (includeRole && (roleText || topicText)){
+          systemPrompt = roleText;
+          if (topicText) systemPrompt += (systemPrompt ? '\n\n' : '') + 'Topic: ' + topicText;
+        }
+      }
+    }catch{}
+    // Build message history from Graph log for this coworker
+    let messages = [];
+    try{
+      const entries = (window.graph && typeof window.graph.getMessages==='function') ? (window.graph.getMessages(ownerId) || []) : [];
+      const mapRole = (m)=> (m?.who === 'user' ? 'user' : (m?.who === 'assistant' ? 'assistant' : 'system'));
+      const mapped = entries.map(m => ({ role: mapRole(m), content: String(m.text||'') }));
+      // Keep only last 20 messages to limit context
+      messages = mapped.slice(-20);
+      // Ensure last turn includes the just received user/assistant? The incoming to coworker was an assistant or user? In our model, payload.who was 'assistant' for received.
+      // No extra append needed because transmitOnConnection already added it to Graph before this call.
+    }catch{}
+    const body = { model, max_tokens: maxTokens };
+    if (systemPrompt) body.system = systemPrompt;
+    if (messages && messages.length) body.messages = messages;
+    if (apiKey) body.apiKey = apiKey;
+    const author = (()=>{ try{ const host=document.querySelector(`.fab[data-id="${ownerId}"]`); return (host?.dataset?.displayName)||'Assistant'; }catch{ return 'Assistant'; } })();
+    fetch(apiBase + '/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    }).then(r=>r.json()).then(data=>{
+      let reply = '';
+      try{ reply = String(data?.reply || ''); }catch{ reply = ''; }
+      if (!reply) reply = data?.error ? `Fel: ${data.error}` : 'Tomt svar från AI';
+      // Log to Graph and render in this coworker panel
+      let ts = Date.now();
+      try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant'); ts = entry?.ts || ts; } }catch{}
+      try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts }); }catch{}
+      // Route out via cables (if any)
+      try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts }); }catch{}
+    }).catch(err=>{
+      const msg = 'Fel vid AI-förfrågan: ' + (err?.message||String(err));
+      let ts = Date.now();
+      try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}
+      try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{}
+    });
   }
 
   // delete UI
