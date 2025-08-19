@@ -1,0 +1,6 @@
+bash -lc 'source ~/miniforge3/etc/profile.d/conda.sh && 
+conda activate examai && cd /home/crv/examai/ExamAI && 
+PORT=8000 python backend/app.py'
+
+bash -lc 'cd /home/crv/examai/ExamAI &&
+ python -m http.server 8080'

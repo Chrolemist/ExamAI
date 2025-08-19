@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ExamAI - Visual Prototype</title>
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+    <link rel="alternate icon" href="../favicon.ico">
+  <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Add coworker icon button -->
+      <div class="copilot-plus-wrap">
+        <button id="addCopilotBtn" class="copilot-plus" title="Lägg till nod">+</button>
+        <div id="addMenu" class="add-menu hidden" role="menu" aria-hidden="true">
+          <button type="button" data-kind="coworker">Ny CoWorker</button>
+          <button type="button" data-kind="user">Ny User</button>
+          <button type="button" data-kind="internet">Ny Internet</button>
+        </div>
+      </div>
+
+      <!-- Node board (visual only) -->
+      <section id="nodeBoard" class="node-board" aria-label="Node Board">
+        <div class="nb-sections">
+          <div class="nb-sec" data-nb-id="analys">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Analys</div>
+            <div class="nb-grid" aria-hidden="true"></div>
+          </div>
+          <div class="nb-sec" data-nb-id="idéer">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Idéer</div>
+            <div class="nb-grid" aria-hidden="true"></div>
+          </div>
+          <div class="nb-sec" data-nb-id="produktion">
+            <div class="nb-title" contenteditable="true" spellcheck="false">Produktion</div>
+            <div class="nb-grid" aria-hidden="true"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Main Content Area -->
+      <div class="layout">
+        <main class="content">
+      <section class="panel board-section" aria-label="Teori" data-section-id="s-teori">
+            <div class="head">
+        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+        <article class="note" contenteditable="true" spellcheck="false"></article>
+            </div>
+          </section>
+      <section class="panel board-section" aria-label="Exempel" data-section-id="s-exempel">
+            <div class="head">
+        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+        <article class="note" contenteditable="true" spellcheck="false"></article>
+            </div>
+          </section>
+      <section class="panel board-section" aria-label="Övningsuppgifter" data-section-id="s-ovningar">
+            <div class="head">
+        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
+              <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
+            </div>
+            <div class="body">
+              <div class="grid"></div>
+        <article class="note" contenteditable="true" spellcheck="false"></article>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <!-- SVG connection layer -->
+    <svg id="connLayer" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+
+  <!-- Klassiska skript så sidan fungerar via file:// utan moduler -->
+  <!-- Core datastrukturer -->
+  <script src="js/port.js"></script>
+  <script src="js/connection.js"></script>
+  <script src="js/node.js"></script>
+  <script src="js/graph.js"></script>
+  <!-- App state and utilities -->
+  <script src="js/state.js"></script>
+  <script src="js/utils.js"></script>
+  <!-- SVG layer and connection system -->
+  <script src="js/svg-layer.js"></script>
+  <script src="js/connect.js"></script>
+  <script src="js/markdown.js"></script>
+  <script src="js/internet-node.js"></script>
+  <script src="js/persistence.js"></script>
+  <!-- UI: nodes and panels -->
+  <script src="js/panels.js"></script>
+  <script src="js/nodes-ui.js"></script>
+  <!-- Bootstrap (creates default nodes, binds handlers) -->
+  <script src="js/main.js"></script>
+  <script>
+    // Lightweight dropdown logic
+    (function(){
+      const btn = document.getElementById('addCopilotBtn');
+      const menu = document.getElementById('addMenu');
+      if (!btn || !menu) return;
+      const show = ()=>{ menu.classList.remove('hidden'); menu.setAttribute('aria-hidden','false'); };
+      const hide = ()=>{ menu.classList.add('hidden'); menu.setAttribute('aria-hidden','true'); };
+      btn.addEventListener('click', (e)=>{ e.stopPropagation(); const vis = !menu.classList.contains('hidden'); if (vis) hide(); else show(); });
+      document.addEventListener('click', (e)=>{ if (menu.classList.contains('hidden')) return; if (!menu.contains(e.target) && e.target !== btn) hide(); });
+      menu.addEventListener('click', (e)=>{
+        const t = e.target.closest('button[data-kind]'); if (!t) return; hide();
+        const kind = t.getAttribute('data-kind');
+        const x = 40 + Math.random() * (window.innerWidth - 120);
+        const y = 80 + Math.random() * (window.innerHeight - 160);
+        if (window.createIcon) window.createIcon(kind === 'user' ? 'user' : kind === 'internet' ? 'internet' : 'coworker', x, y);
+      });
+    })();
+  </script>
+  </body>
+</html>

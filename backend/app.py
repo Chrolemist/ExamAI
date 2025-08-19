@@ -1,0 +1,426 @@
+import os
+import io
+import re
+import time
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from dotenv import load_dotenv, find_dotenv
+
+# Optional .env (robust: locate nearest .env regardless of CWD)
+try:
+    load_dotenv(find_dotenv(), override=False)
+except Exception:
+    # fall back to default search if find_dotenv fails
+    try:
+        load_dotenv()
+    except Exception:
+        pass
+
+try:
+    from openai import OpenAI  # type: ignore
+except Exception:
+    OpenAI = None  # type: ignore
+
+# Import web search helpers module (work both as package and script)
+try:
+    from . import web_search as ws  # type: ignore
+except Exception:
+    import web_search as ws  # type: ignore
+
+# Optional PDF support
+try:
+    from pypdf import PdfReader  # type: ignore
+except Exception:
+    PdfReader = None  # type: ignore
+
+
+def create_app():
+    app = Flask(__name__)
+    CORS(app)
+
+    @app.post("/chat")
+    def chat():
+        data = request.get_json(force=True, silent=True) or {}
+        # Accept both OPENAI_MODEL and legacy OPENAI_MODEL_NAME
+        model = (data.get("model") or os.getenv("OPENAI_MODEL") or os.getenv("OPENAI_MODEL_NAME") or "gpt-4o-mini").strip()
+
+        # Build base messages from either messages[] or single user input
+        incoming_messages = data.get("messages") if isinstance(data.get("messages"), list) else None
+        user_message = (data.get("prompt") or data.get("message") or "").strip()
+        has_history = bool(incoming_messages and len(incoming_messages) > 0)
+
+        if OpenAI is None:
+            return jsonify({"error": "OpenAI SDK not installed"}), 500
+        client = OpenAI()
+
+        # System prompt
+        system_prompt = (data.get("system") or "Du är en hjälpsam AI‑assistent.").strip()
+
+        # Build messages array
+        if has_history:
+            messages = incoming_messages
+            if not (isinstance(messages[0], dict) and messages[0].get("role") == "system"):
+                messages = [{"role": "system", "content": system_prompt}] + messages
+        else:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ]
+
+        citations = []
+
+        # Optional web search/crawl integration
+        web_cfg = (data.get("web") or {}) if isinstance(data.get("web"), dict) else {}
+        if web_cfg.get("enable"):
+            mode = (web_cfg.get("mode") or "auto").strip().lower()
+            use_openai_web_tool = bool(web_cfg.get("useOpenAITool", True)) and (mode in {"auto", "openai"})
+
+            # Preferred provider order: Serper -> OpenAI tool -> HTTP -> Playwright
+            tried_any = False
+            serper_available = bool(os.getenv("SERPER_API_KEY"))
+            if mode in {"serper", "auto"} and serper_available:
+                tried_any = True
+                try:
+                    # Build a query up-front for Serper path
+                    pass
+                except Exception:
+                    pass
+
+            # Legacy/search+fetch path builds web context for the model
+            try:
+                guidance = (
+                    "ANVISNING: Webbsökning är aktiv i denna session via servern. Säg inte att du saknar internet. "
+                    "Om inga källor hittas, säg kort att du inte fann relevanta källor just nu."
+                )
+                messages = ([{"role": "system", "content": system_prompt + "\n\n" + guidance}]
+                            + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)])
+            except Exception:
+                pass
+
+            # Derive a rough query from recent user messages
+            def _collect_domains(msgs):
+                doms = []
+                try:
+                    pat = re.compile(r"\b([a-z0-9][-a-z0-9\.]+\.[a-z]{2,})(?:/|\b)", re.I)
+                    for m in reversed(msgs[-8:]):
+                        txt = (m.get("content") or "")
+                        for g in pat.findall(txt):
+                            d = g.lower().strip().strip('/')
+                            if d not in doms:
+                                doms.append(d)
+                except Exception:
+                    pass
+                return doms
+
+            def _derive_query(msgs):
+                GENERIC = {"berätta mer", "beratta mer", "fortsätt", "fortsatt", "mer", "more", "go on", "tell me more"}
+                last_user = None
+                prev_user = None
+                for m in reversed(msgs):
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        txt = (m.get("content") or "").strip()
+                        if not last_user:
+                            last_user = txt
+                        else:
+                            prev_user = txt
+                            break
+                q = (last_user or "").strip()
+                ql = q.lower()
+                if (len(q) < 12) or (ql in GENERIC):
+                    if prev_user and len(prev_user) > 0:
+                        q = prev_user
+                doms = _collect_domains(msgs)
+                if doms:
+                    q = f"site:{doms[0]} {q or 'senaste nyheter'}"
+                return (q or "").strip()
+
+            query_text = _derive_query(messages)
+            sources = []
+            if query_text:
+                max_results = max(1, int(web_cfg.get("maxResults", 3)))
+                per_page_chars = int(web_cfg.get("perPageChars", 3000))
+                total_chars_cap = int(web_cfg.get("totalCharsCap", 9000))
+                search_timeout = float(web_cfg.get("searchTimeoutSec", 6.0))
+                fetch_timeout = float(web_cfg.get("fetchTimeoutSec", 8.0))
+                link_depth = int(web_cfg.get("linkDepth", 0))
+                max_pages = int(web_cfg.get("maxPages", 6))
+
+                prefer_playwright = (mode == "playwright")
+                prefer_http = (mode == "http")
+                prefer_serper = (mode == "serper") or (mode == "auto" and serper_available)
+
+                # 1) Serper (first when available)
+                if prefer_serper and not sources:
+                    tried_any = True
+                    try:
+                        loc = (web_cfg.get("user_location") or {}) if isinstance(web_cfg.get("user_location"), dict) else {}
+                        country = (loc.get("country") or os.getenv("SERPER_GL") or "").strip() or None
+                        hl = (os.getenv("SERPER_HL") or "").strip() or None
+                        city = (loc.get("city") or loc.get("region") or None)
+                        sources = ws.serper_search_and_fetch(
+                            query_text,
+                            max_results=max_results,
+                            per_page_chars=per_page_chars,
+                            total_chars_cap=total_chars_cap,
+                            country=country,
+                            hl=hl,
+                            location=city,
+                            search_timeout=search_timeout,
+                            fetch_timeout=fetch_timeout,
+                        )
+                    except Exception:
+                        sources = []
+
+                # 2) OpenAI web_search tool (if explicitly chosen or after Serper fails in auto)
+                if not sources and use_openai_web_tool and (mode in {"auto", "openai"}):
+                    tried_any = True
+                    try:
+                        reply_text, tool_citations = ws.openai_web_search_tool(client, model, messages, web_cfg)
+                        if reply_text and tool_citations:
+                            return jsonify({"reply": reply_text, "model": model, "citations": tool_citations})
+                    except Exception:
+                        pass
+
+                # 3) HTTP (fast) – supports linkDepth path
+                if not sources and (prefer_http or mode == "auto") and (link_depth > 0 or max_pages > max_results):
+                    start_links = ws.web_search_links(query_text, max_results=1, search_timeout=search_timeout)
+                    start_url = (start_links[0].get("url") if start_links else None)
+                    if start_url:
+                        pages = ws.http_crawl(start_url, link_depth=link_depth, max_pages=max_pages, fetch_timeout=fetch_timeout, per_page_chars=per_page_chars)
+                        total = 0
+                        for p in pages:
+                            txt = (p.get("text") or "")[:per_page_chars]
+                            if not txt:
+                                continue
+                            sources.append({"title": p.get("url") or "", "url": p.get("url") or "", "text": txt})
+                            total += len(txt)
+                            if total >= total_chars_cap:
+                                break
+                # 4) HTTP (generic) if still no sources
+                if not sources and (prefer_http or mode == "auto"):
+                    try:
+                        sources = ws.web_search_and_fetch(
+                            query_text,
+                            max_results=max_results,
+                            per_page_chars=per_page_chars,
+                            total_chars_cap=total_chars_cap,
+                            search_timeout=search_timeout,
+                            fetch_timeout=fetch_timeout,
+                        )
+                    except Exception:
+                        sources = []
+
+                # 5) Playwright last (only if explicitly requested or as very last auto fallback)
+                if not sources and ws.sync_playwright is not None and (prefer_playwright or mode == "auto"):
+                    try:
+                        sources = ws.web_search_and_fetch_playwright(
+                            query_text,
+                            max_results=max_results,
+                            per_page_chars=per_page_chars,
+                            total_chars_cap=total_chars_cap,
+                            search_timeout=search_timeout,
+                            fetch_timeout=fetch_timeout,
+                        )
+                    except Exception:
+                        sources = []
+
+                if sources:
+                    # Build web context
+                    lines = ["Webbkällor (sammanfattade, använd [n] som hänvisning i svaret om relevant):"]
+                    for i, s in enumerate(sources, start=1):
+                        title = s.get("title") or s.get("url") or f"Källa {i}"
+                        url = s.get("url") or ""
+                        snippet = (s.get("text") or "").strip()[:per_page_chars]
+                        title = re.sub(r"\s+", " ", title).strip()
+                        url = url.strip()
+                        lines.append(f"[{i}] {title} ({url})\n{snippet}")
+                    web_block = "\n\n".join(lines)
+                    try:
+                        ts = time.strftime("%Y-%m-%d %H:%M")
+                    except Exception:
+                        ts = "idag"
+                    web_guidance = (
+                        "ANVISNING: Du har precis hämtat aktuella webbkällor (" + ts + ") nedan. "
+                        "Svara med hjälp av dessa källor, var konkret och inkludera hänvisningar som [n] där n matchar källistan. "
+                        "Påstå inte att du saknar realtidsåtkomst när källor finns. Om källorna inte täcker frågan, säg det kort."
+                    )
+                    combined_system = system_prompt + "\n\n" + web_guidance + "\n\n" + web_block
+                    messages = [{"role": "system", "content": combined_system}] + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)]
+
+                citations = ([{"title": s.get("title"), "url": s.get("url")} for s in sources] if sources else [])
+                if not citations and query_text:
+                    try:
+                        from urllib.parse import quote_plus
+                        q_safe = quote_plus(query_text)
+                        citations = [{"title": "Sökresultat (DuckDuckGo)", "url": f"https://duckduckgo.com/?q={q_safe}"}]
+                    except Exception:
+                        citations = []
+
+        # Call chat.completions with the assembled messages
+        try:
+            max_user = data.get("max_tokens") or data.get("max_completion_tokens") or 1000
+            resp = client.chat.completions.create(model=model, messages=messages, max_tokens=max_user)
+            reply = resp.choices[0].message.content if resp.choices else ""
+            try:
+                finish_reason = resp.choices[0].finish_reason  # type: ignore[attr-defined]
+            except Exception:
+                finish_reason = None
+            truncated = bool(finish_reason == "length")
+            try:
+                usage_obj = getattr(resp, "usage", None)
+                usage = ({
+                    "input_tokens": getattr(usage_obj, "prompt_tokens", None) or getattr(usage_obj, "input_tokens", None),
+                    "output_tokens": getattr(usage_obj, "completion_tokens", None) or getattr(usage_obj, "output_tokens", None),
+                    "total_tokens": getattr(usage_obj, "total_tokens", None),
+                } if usage_obj else None)
+            except Exception:
+                usage = None
+            return jsonify({"reply": reply, "model": model, "finishReason": finish_reason, "truncated": truncated, "usage": usage, "citations": citations})
+        except Exception as e:
+            try:
+                print("/chat error:", repr(e))
+            except Exception:
+                pass
+            status = getattr(e, "status_code", 500)
+            try:
+                msg = getattr(e, "message", None) or str(e)
+            except Exception:
+                msg = "Unknown error"
+            return jsonify({"error": msg, "model": model, "hint": "Kontrollera API-nyckel och modellnamn."}), int(status) if isinstance(status, int) else 500
+
+    def _extract_text(filename: str, stream: bytes) -> str:
+        name = (filename or "").lower()
+        if name.endswith(".pdf"):
+            if PdfReader is None:
+                return "[PDF-stöd saknas: installera pypdf]"
+            try:
+                reader = PdfReader(io.BytesIO(stream))
+                parts = []
+                for page in reader.pages:
+                    try:
+                        parts.append(page.extract_text() or "")
+                    except Exception:
+                        continue
+                return "\n\n".join(parts).strip()
+            except Exception:
+                return "[Kunde inte extrahera text från PDF]"
+        try:
+            return stream.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
+
+    @app.post("/build-exam")
+    def build_exam():
+        try:
+            title = (request.form.get("examTitle") or "Tenta").strip()
+            lectures = request.files.getlist("lectures") or []
+            exams = request.files.getlist("exams") or []
+
+            lec_items = []
+            for f in lectures:
+                content = _extract_text(f.filename, f.read())
+                lec_items.append({"name": f.filename, "text": content})
+
+            ex_items = []
+            for f in exams:
+                content = _extract_text(f.filename, f.read())
+                ex_items.append({"name": f.filename, "text": content})
+
+            def _escape_html(s: str) -> str:
+                return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+            parts = [f'<div class="exam-sec-title">Titel</div><div class="chip">{_escape_html(title)}</div>']
+            if lec_items:
+                parts.append('<div class="exam-sec-title">Föreläsningar</div>')
+                for it in lec_items:
+                    preview = _escape_html((it["text"] or "").strip())
+                    parts.append(f'<div class="card-item"><div class="title">{_escape_html(it["name"])}</div><div class="html-box">{preview[:8000]}</div></div>')
+            if ex_items:
+                parts.append('<div class="exam-sec-title">Tenta</div>')
+                for it in ex_items:
+                    preview = _escape_html((it["text"] or "").strip())
+                    parts.append(f'<div class="card-item"><div class="title">{_escape_html(it["name"])}</div><div class="html-box">{preview[:8000]}</div></div>')
+
+            html = "\n".join(parts)
+            return jsonify({"html": html, "counts": {"lectures": len(lec_items), "exams": len(ex_items)}, "title": title})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.post("/upload")
+    def upload_files():
+        try:
+            files = request.files.getlist("files") or []
+            if not files:
+                return jsonify({"error": "No files provided (field 'files')"}), 400
+            try:
+                max_chars = int(request.form.get("maxChars", "50000"))
+            except Exception:
+                max_chars = 50000
+
+            items = []
+            total_chars = 0
+            for f in files:
+                raw = f.read()
+                text = _extract_text(f.filename, raw)
+                truncated = False
+                if len(text) > max_chars:
+                    text = text[:max_chars]
+                    truncated = True
+                total_chars += len(text)
+                items.append({"name": f.filename, "chars": len(text), "truncated": truncated, "text": text})
+            return jsonify({"count": len(items), "totalChars": total_chars, "items": items})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.get("/debug/fetch")
+    def debug_fetch():
+        try:
+            url = request.args.get('url') or (request.get_json(silent=True) or {}).get('url')
+            if not url:
+                return jsonify({"error": "url is required (query param or JSON body)"}), 400
+            if not url.lower().startswith(('http://', 'https://')):
+                return jsonify({"error": "url must start with http:// or https://"}), 400
+            try:
+                text = ws.fetch_readable_text(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=8.0)
+            except Exception as e:
+                return jsonify({"error": "fetch failed", "detail": str(e)}), 500
+            if not text:
+                return jsonify({"ok": True, "url": url, "text": "", "len": 0})
+            return jsonify({"ok": True, "url": url, "len": len(text), "text": text[:20000]})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.get("/debug/env")
+    def debug_env():
+        """Safe introspection: shows whether critical env vars are visible (no secrets)."""
+        try:
+            api = os.getenv("OPENAI_API_KEY") or ""
+            model = os.getenv("OPENAI_MODEL") or ""
+            return jsonify({
+                "hasApiKey": bool(api),
+                "apiKeyPreview": (api[:5] + "…" + api[-2:] if len(api) > 9 else (api[:3] + "…" if api else "")),
+                "model": model or None,
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.get("/key-status")
+    def key_status():
+        """Lightweight endpoint used by the frontend to detect if a global key exists."""
+        try:
+            api = os.getenv("OPENAI_API_KEY") or ""
+            return jsonify({
+                "hasKey": bool(api),
+                # do not leak full secret
+                "preview": (api[:4] + "…" + api[-2:] if len(api) > 8 else (api[:3] + "…" if api else "")),
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    return app
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8000"))
+    app = create_app()
+    app.run(host="0.0.0.0", port=port, debug=True)
