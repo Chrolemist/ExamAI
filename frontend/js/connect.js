@@ -242,7 +242,8 @@
           }
           if (combined.length){
             const lines = combined.map((it, i)=>`[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`);
-            const guide = 'Material för denna fråga (använd [n] i svaret där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
+            const instr = 'Viktigt: När du hänvisar till en PDF, ange även sidnumret i hakparentesen som [n p=12] där 12 är sidan du hämtade texten från. Håll dig till källorna i listan nedan och citera kort (<=12 ord) vid behov.';
+            const guide = 'Material för denna fråga (använd [n] i svaret där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n') + '\n\n' + instr;
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
             // Stash for meta to allow footnotes rendering
             requestAIReply._lastAttachments = combined;
@@ -279,7 +280,8 @@
           }
           if (combined.length){
             const lines = combined.map((it, i)=>`[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`);
-            const guide = 'Material för denna fråga (använd [n] i svaret där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
+            const instr = 'Viktigt: När du hänvisar till ett stycke. Du måste använda [n] för källor. För PDF: ange [n p=SIDNUMMER].';
+            const guide = 'Material för denna fråga (använd [n] i svaret där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n') + '\n\n' + instr;
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
             requestAIReply._lastAttachments = combined;
           } else {

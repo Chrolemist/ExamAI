@@ -1,6 +1,8 @@
+version: "3.9"
+
 # Two containers:
-# 1) backend – Flask/Gunicorn API on port 8000 (web search, AI chat, uploads)
-# 2) frontend – Nginx serving static files on port 5500
+# 1) backend - Flask/Gunicorn API on port 8000 (web search, AI chat, uploads)
+# 2) frontend - Nginx serving static files on port 5500
 
 services:
   backend:
@@ -14,14 +16,14 @@ services:
       - .env
 
     environment:
-      - PORT=8000
+      PORT: "8000"
 
     ports:
       - "8000:8000"
 
     # Healthcheck without curl (use Python available in the image)
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/key-status').getcode()==200 else 1)"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/key-status').getcode()==200 else 1)\""]
       interval: 20s
       timeout: 5s
       retries: 5

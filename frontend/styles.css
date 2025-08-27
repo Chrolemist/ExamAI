@@ -145,9 +145,13 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .badge{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;border:1px solid #2a2a35;background:rgba(255,255,255,0.04);color:#dfe3f3;font-size:11px}
 .badge-error{border-color:#673232;background:rgba(255,80,80,0.08);color:#ffd3d3}
 .subtle{color:#9aa3b2;font-size:11px}
-.attachments{display:flex;gap:6px;padding:6px 12px;border-top:1px dashed #2a2a35;background:rgba(255,255,255,0.02)}
+.attachments{display:flex;gap:6px;padding:6px 12px;border-top:1px dashed #2a2a35;background:rgba(255,255,255,0.02);overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap;max-width:100%;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:#3a3a45 transparent;scroll-snap-type:x proximity}
 .attachments.hidden{display:none}
-.attachment-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #2a2a35;border-radius:999px;padding:4px 8px;font-size:12px}
+.attachment-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #2a2a35;border-radius:999px;padding:4px 8px;font-size:12px;flex:0 0 auto;white-space:nowrap;scroll-snap-align:start}
+.attachment-chip span:first-child{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attachments::-webkit-scrollbar{height:8px}
+.attachments::-webkit-scrollbar-track{background:transparent}
+.attachments::-webkit-scrollbar-thumb{background:#2a2a35;border-radius:8px}
 .attachment-chip .rm{background:transparent;border:0;color:#a6a6b3;cursor:pointer}
 .userInput{flex:1;background:#0f0f14;border:1px solid #24242c;border-radius:12px;padding:10px 12px;color:var(--text);resize:none;min-height:40px;max-height:300px;overflow:hidden}
 .send-btn{background:linear-gradient(135deg,var(--primary),#5b38ff);border:0;border-radius:999px;color:white;padding:0 16px;cursor:pointer;align-self:flex-end;margin-bottom:6px}

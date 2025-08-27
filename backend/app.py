@@ -36,7 +36,28 @@ except Exception:
 
 def create_app():
     app = Flask(__name__)
-    CORS(app)
+    # CORS for local dev (frontend on 5500 hitting backend on 8000)
+    # Flask-CORS should handle preflight automatically; we also add an after_request
+    # to ensure headers are present on error responses.
+    CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=False)
+
+    @app.after_request
+    def _add_cors_headers(resp):  # type: ignore[override]
+        try:
+            origin = request.headers.get('Origin')
+            # Reflect origin when available, otherwise allow any
+            resp.headers['Access-Control-Allow-Origin'] = origin or '*'
+            # Help caches vary by Origin
+            prev_vary = resp.headers.get('Vary')
+            resp.headers['Vary'] = ('%s, Origin' % prev_vary) if prev_vary and 'Origin' not in prev_vary else (prev_vary or 'Origin')
+            # Allow the headers requested by the browser (e.g., Content-Type)
+            req_hdrs = request.headers.get('Access-Control-Request-Headers')
+            resp.headers['Access-Control-Allow-Headers'] = req_hdrs or 'Content-Type, Authorization'
+            # Common methods used
+            resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        except Exception:
+            pass
+        return resp
 
     # Directory to persist uploaded files for stable URLs
     UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
@@ -45,11 +66,18 @@ def create_app():
     except Exception:
         pass
 
+    @app.route("/chat", methods=["OPTIONS"])
+    def chat_options():
+        # Preflight is handled by Flask-CORS, but be explicit to be safe
+        return ("", 204)
+
     @app.post("/chat")
     def chat():
         data = request.get_json(force=True, silent=True) or {}
         # Accept both OPENAI_MODEL and legacy OPENAI_MODEL_NAME
         model = (data.get("model") or os.getenv("OPENAI_MODEL") or os.getenv("OPENAI_MODEL_NAME") or "gpt-4o-mini").strip()
+        # Support per-request API key (preferred), else fall back to env var
+        api_key = (data.get("apiKey") or os.getenv("OPENAI_API_KEY") or "").strip()
 
         # Build base messages from either messages[] or single user input
         incoming_messages = data.get("messages") if isinstance(data.get("messages"), list) else None
@@ -58,7 +86,13 @@ def create_app():
 
         if OpenAI is None:
             return jsonify({"error": "OpenAI SDK not installed"}), 500
-        client = OpenAI()
+        if not api_key:
+            # Be explicit to avoid confusing 500s due to missing credentials
+            return jsonify({
+                "error": "Ingen API-nyckel",
+                "hint": "Ange en API‑nyckel i meddelandefönstret eller sätt OPENAI_API_KEY på servern.",
+            }), 400
+        client = OpenAI(api_key=api_key)
 
         # System prompt
         system_prompt = (data.get("system") or "Du är en hjälpsam AI‑assistent.").strip()
@@ -288,12 +322,16 @@ def create_app():
                 print("/chat error:", repr(e))
             except Exception:
                 pass
-            status = getattr(e, "status_code", 500)
+            status = getattr(e, "status_code", None)
+            try:
+                code = int(status) if status is not None else 500
+            except Exception:
+                code = 500
             try:
                 msg = getattr(e, "message", None) or str(e)
             except Exception:
                 msg = "Unknown error"
-            return jsonify({"error": msg, "model": model, "hint": "Kontrollera API-nyckel och modellnamn."}), int(status) if isinstance(status, int) else 500
+            return jsonify({"error": msg, "model": model, "hint": "Kontrollera API-nyckel och modellnamn."}), code
 
     def _extract_text(filename: str, stream: bytes) -> str:
         name = (filename or "").lower()
