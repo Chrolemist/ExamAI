@@ -152,10 +152,59 @@
           return best || { page:null, q: tokens.join(' ') };
         }catch{ return { page:null, q:'' }; }
       };
-      const openAttachment = (x, opts) => {
+      // Attempt to migrate a blob-only attachment to a stable HTTP URL by re-uploading it
+      const migrateToHttp = async (x) => {
+        try{
+          if (x && !x.url && (x.origUrl || x.blobUrl)){
+            const src = x.origUrl || x.blobUrl; if (!src) return false;
+            const apiBase = detectApiBase(); if (!apiBase) return false;
+            const blob = await fetch(src).then(r=>r.blob());
+            const name = String(x.name || 'fil');
+            const type = String(x.mime || blob.type || 'application/octet-stream');
+            const file = new File([blob], name, { type });
+            const fd = new FormData(); fd.append('files', file);
+            const res = await fetch(apiBase + '/upload', { method:'POST', body: fd });
+            if (!res.ok) return false;
+            const data = await res.json();
+            const first = data && Array.isArray(data.items) ? data.items[0] : null;
+            if (first && first.url){
+              x.url = String(first.url);
+              if (Array.isArray(first.pages)) x.pages = first.pages;
+              if (typeof first.chars === 'number') x.chars = first.chars;
+              if (typeof first.truncated === 'boolean') x.truncated = first.truncated;
+              try{ savePersistedAtt(panel._attachments); }catch{}
+              try{ if (x.origUrl) URL.revokeObjectURL(x.origUrl); }catch{}
+              return true;
+            }
+          }
+        }catch{}
+        return false;
+      };
+
+      const buildPdfUrl = (base, pick)=>{
+        try{
+          if (!base) return base;
+          const hasHash = /#/.test(base);
+          const parts = [];
+          if (pick && pick.page) parts.push('page=' + encodeURIComponent(pick.page));
+          if (pick && pick.q){
+            // use first 6 words to keep it short for viewers
+            const q = String(pick.q||'').split(/\s+/).filter(Boolean).slice(0,6).join(' ');
+            if (q) parts.push('search=' + encodeURIComponent(q));
+          }
+          if (!parts.length) return base;
+          return base + (hasHash ? (base.endsWith('#') ? '' : '&') : '#') + parts.join('&');
+        }catch{ return base; }
+      };
+
+      const openAttachment = async (x, opts) => {
         try{
           let href = x.url || x.origUrl || x.blobUrl;
           if (!href){ const blob = new Blob([String(x.text||'')], { type:(x.mime||'text/plain')+';charset=utf-8' }); href = URL.createObjectURL(blob); x.blobUrl = href; }
+          // If this is a blob and we can migrate, try to upgrade to a stable HTTP URL first
+          if (/^blob:/i.test(String(href||''))){
+            try{ const ok = await migrateToHttp(x); if (ok && x.url) href = x.url; }catch{}
+          }
           // If PDF, open our viewer with the blob URL for better UX
           const usePdf = isPdf(x);
           let finalHref = href;
@@ -163,18 +212,29 @@
             try{
               const hint = (opts && typeof opts.hintText==='string') ? opts.hintText : '';
               const pick = pickSnippetAndPage(x, hint);
-              if (pick && pick.page) finalHref = href + `#page=${encodeURIComponent(pick.page)}`;
+              finalHref = buildPdfUrl(href, pick);
             }catch{}
           }
           const a = document.createElement('a'); a.href = finalHref; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
         }catch{}
       };
       items.forEach((it, idx)=>{ const chip = document.createElement('span'); chip.className = 'attachment-chip'; const name = document.createElement('span'); name.textContent = `${it.name||'fil'}${it.chars?` (${it.chars} tecken${it.truncated?', trunkerat':''})`:''}`;
-        // View/download link; route PDFs via viewer
+        // View/download link; open directly (prefer HTTP), migrate if needed
   const view = document.createElement('a'); view.href = '#'; view.textContent = '↗'; view.title = 'Öppna material'; view.style.marginLeft = '6px'; view.addEventListener('click', (e)=>{ e.preventDefault(); openAttachment(it, { hintText: panel._lastAssistantText||'' }); });
         const rm = document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Ta bort'; rm.textContent='×'; rm.addEventListener('click', ()=>{ try{ if (it.blobUrl) { try{ URL.revokeObjectURL(it.blobUrl); }catch{} } panel._attachments.splice(idx,1); savePersistedAtt(panel._attachments); renderAttachments(); }catch{} }); chip.appendChild(name); chip.appendChild(view); chip.appendChild(rm); attBar.appendChild(chip); }); savePersistedAtt(items); }catch{} };
   // Initial render so persisted attachments are visible on open
   try{ renderAttachments(); }catch{}
+  // Kick off a lazy migration of any blob-only attachments to stable HTTP URLs
+  (async()=>{
+    try{
+      const arr = Array.isArray(panel._attachments)? panel._attachments : [];
+      const needs = arr.filter(x=>x && !x.url && (x.origUrl || x.blobUrl));
+      if (!needs.length) return;
+      for (const x of needs){ try{ await migrateToHttp(x); }catch{} }
+      savePersistedAtt(panel._attachments);
+      renderAttachments();
+    }catch{}
+  })();
   const uploadFiles = async (files)=>{
       try{
         const arr = Array.from(files||[]).filter(f=>{
@@ -614,7 +674,11 @@
           if (m.who !== 'user'){
             // Attachments list
             try{
-              const items = Array.isArray(histAtt)? histAtt : [];
+              // De-duplicate by stable url or by name+chars to avoid duplicates
+              const items0 = Array.isArray(histAtt)? histAtt : [];
+              const seen = new Set();
+              const items = [];
+              for (const it of items0){ const key = (it && typeof it.url==='string' && it.url) || (`${it?.name||''}|${Number(it?.chars||0)}`); if (seen.has(key)) continue; seen.add(key); items.push(it); }
               if (items.length){
                 const foot = document.createElement('div'); foot.className='subtle'; foot.style.marginTop='6px'; foot.style.fontSize='0.85em'; foot.style.opacity='0.85';
                 const lab = document.createElement('div'); lab.textContent='Material:'; foot.appendChild(lab);
@@ -622,19 +686,10 @@
                 const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
                 items.forEach((it,i)=>{ const li=document.createElement('li'); const a=document.createElement('a');
                   try{
-                    const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
-                    let finalHref = baseHref;
-                    if (isPdf(it)){
-                      try{
-                        const hint = panel._lastAssistantText || (m.text||'');
-                        const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
-                        if (pick && pick.page) finalHref = baseHref + `#page=${encodeURIComponent(pick.page)}`;
-                      }catch{}
-                    }
-                    a.href = finalHref; a.target='_blank'; a.rel='noopener';
+                    a.href = '#'; a.addEventListener('click', (ev)=>{ ev.preventDefault(); openAttachment(it, { hintText: panel._lastAssistantText || (m.text||'') }); }); a.target='_blank'; a.rel='noopener';
                   }catch{ a.href='#'; }
                   a.textContent = (it.name||`Bilaga ${i+1}`); li.appendChild(a);
-                  try{ const u = document.createElement('code'); u.style.marginLeft='6px'; u.style.opacity='0.85'; u.textContent = (it.url || it.origUrl || it.blobUrl || ''); li.appendChild(u); }catch{}
+                  try{ const u = document.createElement('code'); u.style.marginLeft='6px'; u.style.opacity='0.85'; u.textContent = (it.url || ''); li.appendChild(u); }catch{}
                   ol.appendChild(li); });
                 foot.appendChild(ol); b.appendChild(foot);
               }
@@ -662,13 +717,11 @@
           b.addEventListener('click', (ev)=>{
             const a = ev.target && ev.target.closest && ev.target.closest('a.ref'); if (!a) return; const n=a.getAttribute('data-ref'); if(!n) return; const idx = Math.max(1, Number(n)||1);
             try{
-              const attItems = histAtt; const citItems = histCits; const total = (attItems?.length||0) + (citItems?.length||0);
+        const attItems = histAtt; const citItems = histCits; const total = (attItems?.length||0) + (citItems?.length||0);
               if (idx <= total){
                 if (idx <= (attItems?.length||0)){
-                  const it = attItems[idx-1]; const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
-                  const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
-                  const finalHref = baseHref;
-                  const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove();
+          const it = attItems[idx-1];
+          openAttachment(it, { hintText: panel._lastAssistantText || (m.text||'') });
                 } else {
                   const c = citItems[idx - (attItems?.length||0) - 1]; const href=String(c?.url||'#'); if(href && href!=='#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
                 }
@@ -754,33 +807,31 @@
   b.appendChild(textEl);
   // remember last assistant raw text for hinting page search
   if (who !== 'user'){ try{ panel._lastAssistantText = String(text||''); }catch{} }
-    // Delegate click on [n] refs: open corresponding attachment/citation, and also scroll to local footnote
+    // Delegate click on [n] refs: open corresponding attachment/citation with stable HTTP (no blob), and also scroll to local footnote
     try{
-      b.addEventListener('click', (ev)=>{
+      b.addEventListener('click', async (ev)=>{
         const a = ev.target && ev.target.closest && ev.target.closest('a.ref');
         if (!a) return;
         const n = a.getAttribute('data-ref');
         if (!n) return;
         const idx = Math.max(1, Number(n)||1);
-        // Try open: attachments first, then citations
+        // Try open: attachments first, then citations, always prefer stable HTTP via backend
         try{
           const attItems = (function(){ try{ const raw = localStorage.getItem(`nodeAttachments:${ownerId}`); return raw ? (JSON.parse(raw)||[]) : []; }catch{ return []; } })();
           const citItems = Array.isArray(meta?.citations) ? meta.citations : [];
           const total = (attItems?.length||0) + (citItems?.length||0);
+          // helpers
+          const detectApiBase = ()=>{ try{ if (window.API_BASE && typeof window.API_BASE==='string') return window.API_BASE; }catch{} try{ if (location.protocol==='file:') return 'http://localhost:8000'; if (location.port && location.port !== '8000') return 'http://localhost:8000'; }catch{} return ''; };
+          const migrateToHttp = async (x)=>{ try{ if (x && !x.url && (x.origUrl || x.blobUrl)){ const src = x.origUrl || x.blobUrl; if(!src) return false; const apiBase = detectApiBase(); if(!apiBase) return false; const blob = await fetch(src).then(r=>r.blob()); const name=String(x.name||'fil'); const type=String(x.mime||blob.type||'application/octet-stream'); const file=new File([blob], name, { type }); const fd=new FormData(); fd.append('files', file); const res=await fetch(apiBase + '/upload', { method:'POST', body: fd }); if(!res.ok) return false; const data=await res.json(); const first = data && Array.isArray(data.items) ? data.items[0] : null; if(first && first.url){ x.url=String(first.url); if(Array.isArray(first.pages)) x.pages=first.pages; if(typeof first.chars==='number') x.chars=first.chars; if(typeof first.truncated==='boolean') x.truncated=first.truncated; try{ const k=`nodeAttachments:${ownerId}`; const raw=localStorage.getItem(k); const cur=raw?JSON.parse(raw):[]; const idx = cur.findIndex((y)=>y && (y.name===x.name) && (y.chars===x.chars)); if(idx>=0){ cur[idx]=x; localStorage.setItem(k, JSON.stringify(cur)); } }catch{} try{ if (x.origUrl) URL.revokeObjectURL(x.origUrl); }catch{} return true; } } }catch{} return false; };
+          const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+          const pickSnippetAndPage = (att, hintText)=>{ try{ if (!isPdf(att) || !Array.isArray(att.pages) || !att.pages.length) return { page:null, q:'' }; const q=String(hintText||'').trim().slice(0,120); if(!q) return { page:null, q:'' }; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null, q:needle }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null, q:tokens.slice(0,5).join(' ') }; break; } } if (best) break; } return best || { page:null, q: tokens.join(' ') }; }catch{ return { page:null, q:'' }; } };
+          const buildPdfUrl = (base, pick)=>{ try{ if(!base) return base; const hasHash = /#/.test(base); const parts=[]; if(pick && pick.page) parts.push('page='+encodeURIComponent(pick.page)); if(pick && pick.q){ const q=String(pick.q||'').split(/\s+/).filter(Boolean).slice(0,6).join(' '); if(q) parts.push('search='+encodeURIComponent(q)); } if(!parts.length) return base; return base + (hasHash ? (base.endsWith('#') ? '' : '&') : '#') + parts.join('&'); }catch{ return base; } };
+          const openIt = async (it, hint)=>{ let href = it.url || it.origUrl || it.blobUrl || ''; if (!it.url && href){ try{ if (/^blob:/i.test(String(href))) await migrateToHttp(it); }catch{} href = it.url || href; } if (!it.url){ return; } let finalHref = it.url; if (isPdf(it)){ try{ const pick = pickSnippetAndPage(it, hint); finalHref = buildPdfUrl(it.url, pick); }catch{} } const tmp = document.createElement('a'); tmp.href = finalHref; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); };
           if (idx <= total){
             if (idx <= (attItems?.length||0)){
               const it = attItems[idx-1];
-              const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
-              const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
-              // compute page from nearby sentence around the [n]; fallback to last assistant text
               const hint = panel._lastAssistantText || content || '';
-              let finalHref = baseHref;
-              try{
-                const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null, q:needle }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null, q:tokens.slice(0,5).join(' ') }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
-                if (pick && pick.page) finalHref = baseHref + `#page=${encodeURIComponent(pick.page)}`;
-              }catch{}
-              const final = isPdf(it) ? finalHref : baseHref;
-              const tmp = document.createElement('a'); tmp.href = final; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove();
+              await openIt(it, hint);
             } else {
               const c = citItems[idx - (attItems?.length||0) - 1];
               const href = String(c?.url||'#'); if (href && href !== '#'){ const tmp = document.createElement('a'); tmp.href = href; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
@@ -824,27 +875,28 @@
         const ol = document.createElement('ol');
         ol.style.margin = '6px 0 0 16px';
         ol.style.padding = '0';
-        // attachments first
+        // attachments first – open via stable HTTP and page hinting
         (attItems||[]).forEach((it,i)=>{
           const idx = i+1; const li = document.createElement('li'); li.id = `fn-${idx}`;
-          const a = document.createElement('a');
+          const a = document.createElement('a'); a.href = '#'; a.target = '_blank'; a.rel = 'noopener';
           try{
-            const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
-            const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
-            let finalHref = baseHref;
-            if (isPdf(it)){
-              try{
-                const hint = panel._lastAssistantText || content || '';
-                const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
-                if (pick && pick.page) finalHref = baseHref + `#page=${encodeURIComponent(pick.page)}`;
-              }catch{}
-            }
-            a.href = finalHref; a.target = '_blank'; a.rel = 'noopener';
-          }catch{ a.href = '#'; }
+            a.addEventListener('click', async (ev2)=>{ ev2.preventDefault();
+              // local helpers (mirror above)
+              const detectApiBase = ()=>{ try{ if (window.API_BASE && typeof window.API_BASE==='string') return window.API_BASE; }catch{} try{ if (location.protocol==='file:') return 'http://localhost:8000'; if (location.port && location.port !== '8000') return 'http://localhost:8000'; }catch{} return ''; };
+              const migrateToHttp = async (x)=>{ try{ if (x && !x.url && (x.origUrl || x.blobUrl)){ const src = x.origUrl || x.blobUrl; if(!src) return false; const apiBase = detectApiBase(); if(!apiBase) return false; const blob = await fetch(src).then(r=>r.blob()); const name=String(x.name||'fil'); const type=String(x.mime||blob.type||'application/octet-stream'); const file=new File([blob], name, { type }); const fd=new FormData(); fd.append('files', file); const res=await fetch(apiBase + '/upload', { method:'POST', body: fd }); if(!res.ok) return false; const data=await res.json(); const first = data && Array.isArray(data.items) ? data.items[0] : null; if(first && first.url){ x.url=String(first.url); if(Array.isArray(first.pages)) x.pages=first.pages; if(typeof first.chars==='number') x.chars=first.chars; if(typeof first.truncated==='boolean') x.truncated=first.truncated; try{ const k=`nodeAttachments:${ownerId}`; const raw=localStorage.getItem(k); const cur=raw?JSON.parse(raw):[]; const j = cur.findIndex((y)=>y && (y.name===x.name) && (y.chars===x.chars)); if(j>=0){ cur[j]=x; localStorage.setItem(k, JSON.stringify(cur)); } }catch{} try{ if (x.origUrl) URL.revokeObjectURL(x.origUrl); }catch{} return true; } } }catch{} return false; };
+              const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+              const buildPdfUrl = (base, pick)=>{ try{ if(!base) return base; const hasHash = /#/.test(base); const parts=[]; if(pick && pick.page) parts.push('page='+encodeURIComponent(pick.page)); if(pick && pick.q){ const q=String(pick.q||'').split(/\s+/).filter(Boolean).slice(0,6).join(' '); if(q) parts.push('search='+encodeURIComponent(q)); } if(!parts.length) return base; return base + (hasHash ? (base.endsWith('#') ? '' : '&') : '#') + parts.join('&'); }catch{ return base; } };
+              const pickSnippetAndPage = (att, hintText)=>{ try{ if (!isPdf(att) || !Array.isArray(att.pages) || !att.pages.length) return { page:null, q:'' }; const q=String(hintText||'').trim().slice(0,120); if(!q) return { page:null, q:'' }; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null, q:needle }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null, q:tokens.slice(0,5).join(' ') }; break; } } if (best) break; } return best || { page:null, q: tokens.join(' ') }; }catch{ return { page:null, q:'' }; } };
+              if (!it.url){ try{ if (it.origUrl || it.blobUrl) await migrateToHttp(it); }catch{} }
+              if (!it.url) return;
+              let href = it.url; if (isPdf(it)){ const hint = panel._lastAssistantText || content || ''; const pick = pickSnippetAndPage(it, hint); href = buildPdfUrl(it.url, pick); }
+              const tmp = document.createElement('a'); tmp.href = href; tmp.target = '_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove();
+            });
+          }catch{}
           a.textContent = (it.name||`Bilaga ${idx}`);
           li.appendChild(a);
           // show URL as clickable code and small meta
-          try{ const codeWrap = document.createElement('span'); codeWrap.style.marginLeft='6px'; const u = document.createElement('a'); u.target = '_blank'; u.rel='noopener'; const rawUrl = (it.url || it.origUrl || it.blobUrl || ''); let clickUrl = rawUrl; if (/^blob:/i.test(String(rawUrl)) && isPdf(it)){ try{ const hint = panel._lastAssistantText || content || ''; const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint); if (pick && pick.page) clickUrl = rawUrl + `#page=${encodeURIComponent(pick.page)}`; }catch{} } u.href = clickUrl; const code = document.createElement('code'); code.style.opacity='0.85'; code.textContent = rawUrl; u.appendChild(code); codeWrap.appendChild(u); li.appendChild(codeWrap); }catch{}
+          try{ const codeWrap = document.createElement('span'); codeWrap.style.marginLeft='6px'; const u = document.createElement('a'); u.target = '_blank'; u.rel='noopener'; const httpUrl = (it.url || ''); u.href = httpUrl || '#'; const code = document.createElement('code'); code.style.opacity='0.85'; code.textContent = httpUrl; u.appendChild(code); codeWrap.appendChild(u); li.appendChild(codeWrap); }catch{}
           if (it.chars){ const small = document.createElement('span'); small.className='subtle'; small.style.marginLeft='6px'; small.textContent = `(${it.chars} tecken${it.truncated?', trunkerat':''})`; li.appendChild(small); }
           ol.appendChild(li);
         });
