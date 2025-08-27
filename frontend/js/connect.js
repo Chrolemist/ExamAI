@@ -152,8 +152,10 @@
       const host = document.querySelector(`.fab[data-id="${targetId}"]`);
       if (host && host.dataset.type === 'coworker') whoForTarget = 'user';
     }catch{}
-  try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, whoForTarget, { via: `${conn.fromId}->${conn.toId}`, from: sourceId, ts }); }catch{}
-  try{ if(window.receiveMessage) window.receiveMessage(targetId, text, whoForTarget, { ts, via: `${conn.fromId}->${conn.toId}`, from: sourceId, author: (author||'Incoming') }); }catch{}
+  const baseMeta = (payload && payload.meta) ? Object.assign({}, payload.meta) : {};
+  const routedMeta = Object.assign(baseMeta, { ts, via: `${conn.fromId}->${conn.toId}`, from: sourceId, author: (author||'Incoming') });
+  try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, whoForTarget, routedMeta); }catch{}
+  try{ if(window.receiveMessage) window.receiveMessage(targetId, text, whoForTarget, routedMeta); }catch{}
   // If the target is a board section, append content there as well
     try{
       const targetEl = document.querySelector(`.panel.board-section[data-section-id="${targetId}"]`);
@@ -195,7 +197,7 @@
     const apiBase = detectApiBase();
     // Gather settings from coworker panel if present, else from Graph/localStorage
   let model = 'gpt-4o-mini';
-    let systemPrompt = '';
+  let systemPrompt = '';
     let apiKey = '';
     let maxTokens = 1000;
     const readSaved = ()=>{
@@ -204,7 +206,7 @@
       try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw) s = Object.assign({}, s, JSON.parse(raw)||{}); }catch{}
       return s;
     };
-    try{
+  try{
       const panel = [...document.querySelectorAll('.panel-flyout')].find(p => p.dataset.ownerId === ownerId);
       if (panel){
   const mEl = panel.querySelector('[data-role="model"]'); if (mEl && mEl.value) model = String(mEl.value);
@@ -222,6 +224,23 @@
           systemPrompt = roleText;
           if (topicText) systemPrompt += (systemPrompt ? '\n\n' : '') + 'Topic: ' + topicText;
         }
+        // Build a materials index from both coworker and sender attachments for [n] referencing
+        try{
+          const getAtt = (id)=>{ try{ const raw = localStorage.getItem(`nodeAttachments:${id}`); return raw ? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
+          const coworkerAtt = getAtt(ownerId);
+          const senderAtt = (ctx && ctx.sourceId) ? getAtt(ctx.sourceId) : [];
+          // Merge with coworker first, then sender
+          const combined = ([]).concat(Array.isArray(coworkerAtt)?coworkerAtt:[], Array.isArray(senderAtt)?senderAtt:[]);
+          if (combined.length){
+            const lines = combined.map((it, i)=>`[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`);
+            const guide = 'Material för denna fråga (använd [n] i svaret där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
+            systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
+            // Stash for meta to allow footnotes rendering
+            requestAIReply._lastAttachments = combined;
+          } else {
+            requestAIReply._lastAttachments = [];
+          }
+        }catch{ requestAIReply._lastAttachments = []; }
       } else {
         const s = readSaved();
         if (s.model) model = s.model;
@@ -234,6 +253,21 @@
           systemPrompt = roleText;
           if (topicText) systemPrompt += (systemPrompt ? '\n\n' : '') + 'Topic: ' + topicText;
         }
+        // Also include attachments list from storage if present for both coworker and sender
+        try{
+          const getAtt = (id)=>{ try{ const raw = localStorage.getItem(`nodeAttachments:${id}`); return raw ? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
+          const coworkerAtt = getAtt(ownerId);
+          const senderAtt = (ctx && ctx.sourceId) ? getAtt(ctx.sourceId) : [];
+          const combined = ([]).concat(Array.isArray(coworkerAtt)?coworkerAtt:[], Array.isArray(senderAtt)?senderAtt:[]);
+          if (combined.length){
+            const lines = combined.map((it, i)=>`[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`);
+            const guide = 'Material för denna fråga (använd [n] i svaret där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
+            systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
+            requestAIReply._lastAttachments = combined;
+          } else {
+            requestAIReply._lastAttachments = [];
+          }
+        }catch{ requestAIReply._lastAttachments = []; }
       }
     }catch{}
     // Build message history from Graph log for this coworker
@@ -244,6 +278,12 @@
       const mapped = entries.map(m => ({ role: mapRole(m), content: String(m.text||'') }));
       // Keep only last 20 messages to limit context
       messages = mapped.slice(-20);
+      // If this was triggered from the panel, include the composed text (with attachments) as the latest user turn
+      const extra = (ctx && typeof ctx.text === 'string') ? ctx.text : '';
+      if (extra){
+        const last = messages[messages.length-1];
+        if (!last || last.content !== extra){ messages = messages.concat([{ role:'user', content: extra }]); }
+      }
       // Ensure last turn includes the just received user/assistant? The incoming to coworker was an assistant or user? In our model, payload.who was 'assistant' for received.
       // No extra append needed because transmitOnConnection already added it to Graph before this call.
     }catch{}
@@ -280,12 +320,16 @@
       let reply = '';
       try{ reply = String(data?.reply || ''); }catch{ reply = ''; }
       if (!reply) reply = data?.error ? `Fel: ${data.error}` : 'Tomt svar från AI';
+  // Collect citations (if any) from backend and wire through meta
+      const citations = (function(){ try{ return Array.isArray(data?.citations) ? data.citations : []; }catch{ return []; } })();
   // Log to Graph and render in this coworker panel
       let ts = Date.now();
-  try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant'); ts = entry?.ts || ts; } }catch{}
-  try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts }); }catch{}
+  const meta = { ts, citations };
+  try{ if (Array.isArray(requestAIReply._lastAttachments)) meta.attachments = requestAIReply._lastAttachments; }catch{}
+      try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
+      try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
       // Route out via cables (if any)
-      try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts }); }catch{}
+      try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts, citations }); }catch{}
   }).catch(err=>{
       const msg = 'Fel vid AI-förfrågan: ' + (err?.message||String(err));
       let ts = Date.now();

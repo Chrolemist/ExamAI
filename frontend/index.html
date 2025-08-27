@@ -13,7 +13,7 @@
       <!-- Add coworker icon button -->
       <div class="copilot-plus-wrap">
         <button id="addCopilotBtn" class="copilot-plus" title="Lägg till nod">+</button>
-        <div id="addMenu" class="add-menu hidden" role="menu" aria-hidden="true">
+  <div id="addMenu" class="add-menu hidden" role="menu" inert>
           <button type="button" data-kind="coworker">Ny CoWorker</button>
           <button type="button" data-kind="user">Ny User</button>
           <button type="button" data-kind="internet">Ny Internet</button>
@@ -107,16 +107,20 @@
       const btn = document.getElementById('addCopilotBtn');
       const menu = document.getElementById('addMenu');
       if (!btn || !menu) return;
-      const show = ()=>{ menu.classList.remove('hidden'); menu.setAttribute('aria-hidden','false'); };
-      const hide = ()=>{ menu.classList.add('hidden'); menu.setAttribute('aria-hidden','true'); };
+      const show = ()=>{ menu.classList.remove('hidden'); menu.removeAttribute('inert'); /* move focus into menu for a11y */ (menu.querySelector('button')||btn).focus(); };
+      const hide = ()=>{ 
+        // If a child kept focus, return focus to the trigger before hiding
+        try{ if (menu.contains(document.activeElement)) btn.focus(); }catch{}
+        menu.classList.add('hidden'); menu.setAttribute('inert',''); 
+      };
       btn.addEventListener('click', (e)=>{ e.stopPropagation(); const vis = !menu.classList.contains('hidden'); if (vis) hide(); else show(); });
       document.addEventListener('click', (e)=>{ if (menu.classList.contains('hidden')) return; if (!menu.contains(e.target) && e.target !== btn) hide(); });
       menu.addEventListener('click', (e)=>{
         const t = e.target.closest('button[data-kind]'); if (!t) return; hide();
         const kind = t.getAttribute('data-kind');
-        const x = 40 + Math.random() * (window.innerWidth - 120);
-        const y = 80 + Math.random() * (window.innerHeight - 160);
-        if (window.createIcon) window.createIcon(kind === 'user' ? 'user' : kind === 'internet' ? 'internet' : 'coworker', x, y);
+        let pos = { x: 60, y: Math.max(80, window.innerHeight - 140) };
+        try{ if (window.getNextNodePosition) pos = window.getNextNodePosition(); }catch{}
+        if (window.createIcon) window.createIcon(kind === 'user' ? 'user' : kind === 'internet' ? 'internet' : 'coworker', pos.x, pos.y);
       });
     })();
   </script>

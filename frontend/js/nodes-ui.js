@@ -1,6 +1,35 @@
 // Node icons: creation, dragging, connection points (classic)
 // Purpose: Everything related to the on-canvas node FABs (but no panel UI).
 (function(){
+  // Compute deterministic positions for newly created nodes.
+  // We place nodes along the bottom edge in a row and wrap to a new row when needed.
+  function getNextNodePosition(){
+    try{
+      const margin = 16;
+      const nodeW = 72; // approximate FAB size incl. spacing
+      const nodeH = 72;
+      const gapX = 16;
+      const gapY = 12;
+      const usableLeft = margin;
+      const usableRight = window.innerWidth - margin - nodeW;
+      const baseY = Math.max(80, window.innerHeight - (nodeH + margin));
+      // Gather existing FABs to find the bottom-most row placement that aligns left-to-right
+      const fabs = [...document.querySelectorAll('.fab')];
+      if (!fabs.length) return { x: usableLeft, y: baseY };
+      // Find last created logical position stored on window
+      const last = window.__nextNodePos || { x: usableLeft - (gapX + nodeW), y: baseY };
+      let nx = last.x + nodeW + gapX;
+      let ny = last.y;
+      if (nx > usableRight){ nx = usableLeft; ny = Math.min(baseY, last.y - (nodeH + gapY)); }
+      // Clamp inside viewport
+      nx = Math.max(usableLeft, Math.min(nx, usableRight));
+      ny = Math.max(margin, Math.min(ny, baseY));
+      window.__nextNodePos = { x: nx, y: ny };
+      return { x: nx, y: ny };
+    }catch{
+      return { x: 60, y: Math.max(80, window.innerHeight - 140) };
+    }
+  }
   /** Position a connection point at the edge of its host node. */
   function positionConnPoint(cp, host){
     const rect = host.getBoundingClientRect();
@@ -118,6 +147,7 @@
   }
   // expose
   window.createIcon = createIcon;
+  window.getNextNodePosition = getNextNodePosition;
   window.positionConnPoint = positionConnPoint;
   window.makeDraggable = makeDraggable;
 })();

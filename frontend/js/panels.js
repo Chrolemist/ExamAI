@@ -122,11 +122,59 @@
     };
     ensureSendModeUI();
     // Ensure an attachments bar exists
-    let attBar = panel.querySelector('[data-role="attachments"]');
-    if (!attBar){ attBar = document.createElement('div'); attBar.className = 'attachments hidden'; attBar.setAttribute('data-role','attachments'); attBar.setAttribute('aria-label','Bilagor (drag & släpp)'); const composerEl = panel.querySelector('.composer'); if (composerEl) panel.insertBefore(attBar, composerEl); }
-    panel._attachments = Array.isArray(panel._attachments) ? panel._attachments : [];
+  let attBar = panel.querySelector('[data-role="attachments"]');
+  if (!attBar){ attBar = document.createElement('div'); attBar.className = 'attachments hidden'; attBar.setAttribute('data-role','attachments'); attBar.setAttribute('aria-label','Bilagor (drag & släpp)'); const composerEl = panel.querySelector('.composer'); if (composerEl) panel.insertBefore(attBar, composerEl); }
+  // Load persisted attachments for this node so they survive panel close/open
+  const ownerKey = panel.dataset.ownerId || '';
+  const attKey = ownerKey ? `nodeAttachments:${ownerKey}` : '';
+  const loadPersistedAtt = ()=>{ try{ if(!attKey) return []; const raw = localStorage.getItem(attKey); return raw ? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
+  const savePersistedAtt = (arr)=>{ try{ if(attKey) localStorage.setItem(attKey, JSON.stringify(arr||[])); }catch{} };
+  panel._attachments = Array.isArray(panel._attachments) ? panel._attachments : loadPersistedAtt();
     const detectApiBase = ()=>{ try{ if (window.API_BASE && typeof window.API_BASE === 'string') return window.API_BASE; }catch{} try{ if (location.protocol === 'file:') return 'http://localhost:8000'; if (location.port && location.port !== '8000') return 'http://localhost:8000'; }catch{} return ''; };
-    const renderAttachments = ()=>{ try{ if (!attBar) return; attBar.innerHTML=''; const items = panel._attachments||[]; if (!items.length){ attBar.classList.add('hidden'); return; } attBar.classList.remove('hidden'); items.forEach((it, idx)=>{ const chip = document.createElement('span'); chip.className = 'attachment-chip'; const name = document.createElement('span'); name.textContent = `${it.name||'fil'}${it.chars?` (${it.chars} tecken${it.truncated?', trunkerat':''})`:''}`; const rm = document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Ta bort'; rm.textContent='×'; rm.addEventListener('click', ()=>{ try{ panel._attachments.splice(idx,1); renderAttachments(); }catch{} }); chip.appendChild(name); chip.appendChild(rm); attBar.appendChild(chip); }); }catch{} };
+  const renderAttachments = ()=>{ try{ if (!attBar) return; attBar.innerHTML=''; const items = panel._attachments||[]; if (!items.length){ attBar.classList.add('hidden'); savePersistedAtt([]); return; } attBar.classList.remove('hidden');
+      const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+      const pickSnippetAndPage = (att, hintText)=>{
+        try{
+          if (!isPdf(att) || !Array.isArray(att.pages) || !att.pages.length) return { page:null, q:'' };
+          const q = String(hintText||'').trim().slice(0,120);
+          if (!q) return { page:null, q:'' };
+          // naive search: find first page containing a piece of q
+          const tokens = q.split(/\s+/).filter(Boolean).slice(0,8);
+          const needle = tokens.slice(0,3).join(' ');
+          let best = null;
+          for (const p of att.pages){
+            const txt = String(p.text||''); if (!txt) continue;
+            // try longer match first
+            if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best = { page: Number(p.page)||null, q: needle }; break; }
+            for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best = { page: Number(p.page)||null, q: tokens.slice(0,5).join(' ') }; break; } }
+            if (best) break;
+          }
+          return best || { page:null, q: tokens.join(' ') };
+        }catch{ return { page:null, q:'' }; }
+      };
+      const openAttachment = (x, opts) => {
+        try{
+          let href = x.url || x.origUrl || x.blobUrl;
+          if (!href){ const blob = new Blob([String(x.text||'')], { type:(x.mime||'text/plain')+';charset=utf-8' }); href = URL.createObjectURL(blob); x.blobUrl = href; }
+          // If PDF, open our viewer with the blob URL for better UX
+          const usePdf = isPdf(x);
+          let finalHref = href;
+          if (usePdf){
+            try{
+              const hint = (opts && typeof opts.hintText==='string') ? opts.hintText : '';
+              const pick = pickSnippetAndPage(x, hint);
+              if (pick && pick.page) finalHref = href + `#page=${encodeURIComponent(pick.page)}`;
+            }catch{}
+          }
+          const a = document.createElement('a'); a.href = finalHref; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+        }catch{}
+      };
+      items.forEach((it, idx)=>{ const chip = document.createElement('span'); chip.className = 'attachment-chip'; const name = document.createElement('span'); name.textContent = `${it.name||'fil'}${it.chars?` (${it.chars} tecken${it.truncated?', trunkerat':''})`:''}`;
+        // View/download link; route PDFs via viewer
+  const view = document.createElement('a'); view.href = '#'; view.textContent = '↗'; view.title = 'Öppna material'; view.style.marginLeft = '6px'; view.addEventListener('click', (e)=>{ e.preventDefault(); openAttachment(it, { hintText: panel._lastAssistantText||'' }); });
+        const rm = document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Ta bort'; rm.textContent='×'; rm.addEventListener('click', ()=>{ try{ if (it.blobUrl) { try{ URL.revokeObjectURL(it.blobUrl); }catch{} } panel._attachments.splice(idx,1); savePersistedAtt(panel._attachments); renderAttachments(); }catch{} }); chip.appendChild(name); chip.appendChild(view); chip.appendChild(rm); attBar.appendChild(chip); }); savePersistedAtt(items); }catch{} };
+  // Initial render so persisted attachments are visible on open
+  try{ renderAttachments(); }catch{}
   const uploadFiles = async (files)=>{
       try{
         const arr = Array.from(files||[]).filter(f=>{
@@ -141,8 +189,15 @@
         if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
         const data = await res.json();
         if (data && Array.isArray(data.items)){
-          const toAdd = data.items.map(x=>({ name: x.name||'fil', text: String(x.text||''), chars: Number(x.chars||0), truncated: !!x.truncated }));
+          const toAdd = data.items.map((x,i)=>{
+            const f = arr[i];
+            let origUrl = '';
+            try{ if (f) origUrl = URL.createObjectURL(f); }catch{}
+            const httpUrl = (x && typeof x.url === 'string') ? x.url : '';
+            return { name: x.name|| (f?.name || 'fil'), text: String(x.text||''), chars: Number(x.chars||0), truncated: !!x.truncated, origUrl, url: httpUrl, mime: (f?.type||''), pages: Array.isArray(x.pages)? x.pages : [] };
+          });
           panel._attachments.push(...toAdd);
+          savePersistedAtt(panel._attachments);
           renderAttachments();
         }
       }catch(e){ console.warn('Upload error', e); }
@@ -167,7 +222,7 @@
         return parts.join('');
       }catch{ return val; }
     };
-    const clearAttachments = ()=>{ try{ panel._attachments = []; renderAttachments(); }catch{} };
+  const clearAttachments = ()=>{ try{ panel._attachments = []; savePersistedAtt([]); renderAttachments(); }catch{} };
     const doSend=()=>{ const val=(ta.value||'').trim(); if(!val) return; const ownerId=panel.dataset.ownerId||null; const authorLabel = panel.querySelector('.drawer-head .meta .name'); const author = (authorLabel?.textContent||'User').trim(); let ts=Date.now(); try{ if(ownerId && window.graph){ const entry = window.graph.addMessage(ownerId, author, val, 'user'); ts = entry?.ts || ts; } }catch{} append(val,'user', ts);
       // Determine send mode
       let mode = 'current'; try{ mode = panel._sendMode || (readSaved().sendMode||'current'); }catch{}
@@ -194,7 +249,7 @@
       if (mode === 'history-once') sendHistoryOnce();
       else if (mode === 'history-seq') sendHistorySeq();
       else sendCurrent();
-      ta.value=''; clearAttachments();
+  ta.value='';
       // If Internet panel, kick off web-enabled reply via backend
   try{ const host = document.querySelector(`.fab[data-id="${ownerId}"]`); if(host && host.dataset.type==='internet' && window.requestInternetReply){ const payload = lastSent || buildMessageWithAttachments(val); window.requestInternetReply(ownerId, { text: payload }); } }catch{}
       // If CoWorker panel, optionally kick off AI reply via backend (self chat) if enabled in settings
@@ -207,10 +262,15 @@
             const raw = localStorage.getItem(`nodeSettings:${ownerId}`);
             if (raw){ const s = JSON.parse(raw)||{}; if (typeof s.selfPanelReply === 'boolean') allow = !!s.selfPanelReply; }
           }catch{}
-          if (allow) window.requestAIReply(ownerId, { text: (mode==='current'? buildMessageWithAttachments(val) : val), sourceId: ownerId });
+          if (allow){
+            const composed = (mode==='current' ? buildMessageWithAttachments(val) : val);
+            window.requestAIReply(ownerId, { text: composed, sourceId: ownerId });
+          }
         }
       }catch{}
-    }; send.addEventListener('click', doSend); ta.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); doSend(); } }); }
+  }; send.addEventListener('click', doSend); ta.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); doSend(); } });
+  // When panel is closed, keep attachments (persisted per coworker)
+  panel.querySelector('[data-close]')?.addEventListener('click', ()=>{ /* keep attachments */ }); }
   /** Open the User panel with settings for name/fonts/colors and composer. */
   function openUserPanel(hostEl){
     const panel=document.createElement('section');
@@ -263,6 +323,12 @@
         <input type="range" min="0" max="100" step="1" data-role="alpha" />
         <span class="subtle" data-role="alphaVal">10%</span>
       </label>
+      <label>Visningsläge
+        <select data-role="renderMode">
+          <option value="raw">Rå text</option>
+          <option value="md">Snyggt (Markdown)</option>
+        </select>
+      </label>
       <div style="margin-top:10px;display:flex;justify-content:flex-end">
         <button type="button" class="btn danger" data-action="resetAll" title="Nollställ">Nollställ</button>
       </div>
@@ -280,7 +346,7 @@
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
     const clearBtn=panel.querySelector('[data-action="clear"]'); clearBtn?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
     panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true;
-    const colorToggle=panel.querySelector('[data-role="colorToggle"]'); const colorPanel=panel.querySelector('[data-role="colorPanel"]'); const colorPicker=panel.querySelector('[data-role="colorPicker"]'); const alphaEl=panel.querySelector('[data-role="alpha"]'); const alphaVal=panel.querySelector('[data-role="alphaVal"]'); const fontTextSel=panel.querySelector('[data-role="fontText"]'); const fontNameSel=panel.querySelector('[data-role="fontName"]'); const messagesEl=panel.querySelector('.messages'); const inputEl=panel.querySelector('.userInput');
+  const colorToggle=panel.querySelector('[data-role="colorToggle"]'); const colorPanel=panel.querySelector('[data-role="colorPanel"]'); const colorPicker=panel.querySelector('[data-role="colorPicker"]'); const alphaEl=panel.querySelector('[data-role="alpha"]'); const alphaVal=panel.querySelector('[data-role="alphaVal"]'); const fontTextSel=panel.querySelector('[data-role="fontText"]'); const fontNameSel=panel.querySelector('[data-role="fontName"]'); const messagesEl=panel.querySelector('.messages'); const inputEl=panel.querySelector('.userInput'); const renderSel=panel.querySelector('[data-role="renderMode"]');
     if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value=String(Math.round(panel._bubbleAlpha*100)); if(alphaVal) alphaVal.textContent=`${Math.round(panel._bubbleAlpha*100)}%`;
     panel._textFont = fontTextSel ? fontTextSel.value : 'system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont = fontNameSel ? fontNameSel.value : 'system-ui, Segoe UI, Roboto, Arial, sans-serif'; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; const headerNameElInit=panel.querySelector('.drawer-head .meta .name'); if(headerNameElInit) headerNameElInit.style.fontFamily=panel._nameFont; const userFabLabel=hostEl.querySelector('.fab-label'); if(userFabLabel) userFabLabel.style.fontFamily=panel._nameFont;
     const applyBubbleStyles=()=>{ const rgb=window.hexToRgb(panel._bubbleColorHex); if(!rgb) return; const bg=`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${panel._bgOn ? panel._bubbleAlpha : 0})`; const border=`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Math.min(1, panel._bgOn ? panel._bubbleAlpha + 0.12 : 0.08)})`; panel.querySelectorAll('.bubble.user').forEach(b=>{ b.style.backgroundColor=bg; b.style.borderColor=border; }); };
@@ -293,18 +359,29 @@
     fontNameSel?.addEventListener('change', ()=>{ panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); });
     const headerNameEl=panel.querySelector('.drawer-head .meta .name'); const nameInput=panel.querySelector('[data-role="name"]'); panel._displayName=''; const updateFabLabel=(text)=>{ const lab=hostEl.querySelector('.fab-label'); if(lab) lab.textContent=text; };
     nameInput?.addEventListener('input', ()=>{ panel._displayName=nameInput.value||''; const nameText=panel._displayName.trim()||'User'; if(headerNameEl) headerNameEl.textContent=nameText; updateFabLabel(nameText); }); if(headerNameEl) headerNameEl.textContent='User'; updateFabLabel('User');
-    panel.querySelector('[data-action="resetAll"]')?.addEventListener('click', ()=>{ panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true; const m=messagesEl; if(m) m.innerHTML=''; if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value='10'; if(alphaVal) alphaVal.textContent='10%'; if(fontTextSel){ fontTextSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; } if(fontNameSel){ fontNameSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); } applyBubbleStyles(); });
+  panel.querySelector('[data-action="resetAll"]')?.addEventListener('click', ()=>{ panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true; const m=messagesEl; if(m) m.innerHTML=''; if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value='10'; if(alphaVal) alphaVal.textContent='10%'; if(fontTextSel){ fontTextSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; } if(fontNameSel){ fontNameSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); } if(renderSel){ renderSel.value='raw'; } applyBubbleStyles(); });
   panel.querySelector('[data-close]')?.addEventListener('click', ()=>{ document.removeEventListener('click', onDocClick); panel.remove(); });
     // Render historical messages if any
   try{
       const ownerId = panel.dataset.ownerId||''; const list = panel.querySelector('.messages');
       const entries = (window.graph && ownerId) ? window.graph.getMessages(ownerId) : [];
+      // Determine render mode for user panel
+      let renderMode = 'raw';
+      try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw){ const s=JSON.parse(raw)||{}; if (s.userRenderMode) renderMode = String(s.userRenderMode); } }catch{}
+      if (renderSel){ try{ renderSel.value = renderMode; }catch{} renderSel.addEventListener('change', ()=>{ try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); const cur = raw? JSON.parse(raw):{}; const next = Object.assign({}, cur, { userRenderMode: renderSel.value }); localStorage.setItem(`nodeSettings:${ownerId}`, JSON.stringify(next)); }catch{} }); }
       for(const m of entries){
         const row=document.createElement('div'); row.className='message-row'+(m.who==='user'?' user':'');
         const group=document.createElement('div'); group.className='msg-group';
         const author=document.createElement('div'); author.className='author-label'; author.textContent = m.author || (m.who==='user'?'User':'Assistant');
         const b=document.createElement('div'); b.className='bubble '+(m.who==='user'?'user':'');
-        const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent = m.text || '';
+        const textEl=document.createElement('div'); textEl.className='msg-text';
+        const content = String(m.text||'');
+        if (renderMode === 'md' && window.mdToHtml){
+          try{ textEl.innerHTML = sanitizeHtml(window.mdToHtml(content)); }
+          catch{ textEl.textContent = content; }
+        } else {
+          textEl.textContent = content;
+        }
         b.appendChild(textEl); const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = (m.who==='user' ? 'right' : 'left'); meta.textContent = formatTime(m.ts); b.appendChild(meta); group.appendChild(author); group.appendChild(b); row.appendChild(group); list?.appendChild(row);
       }
       list && (list.scrollTop = list.scrollHeight);
@@ -502,13 +579,105 @@
     try{
       const ownerId = panel.dataset.ownerId||''; const list = panel.querySelector('.messages');
       const entries = (window.graph && ownerId) ? window.graph.getMessages(ownerId) : [];
+      // Determine render mode (saved or current control)
+      let renderMode = 'raw';
+      try{
+        const sel = panel.querySelector('[data-role="renderMode"]');
+        if (sel && sel.value) renderMode = String(sel.value);
+        else {
+          const raw = localStorage.getItem(`nodeSettings:${ownerId}`);
+          if (raw){ const s = JSON.parse(raw)||{}; if (s.renderMode) renderMode = String(s.renderMode); }
+        }
+      }catch{}
       for(const m of entries){
         const row=document.createElement('div'); row.className='message-row'+(m.who==='user'?' user':'');
         const group=document.createElement('div'); group.className='msg-group';
         const author=document.createElement('div'); author.className='author-label'; author.textContent = m.author || (m.who==='user'?'User':'Assistant');
         const b=document.createElement('div'); b.className='bubble '+(m.who==='user'?'user':'');
-        const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent = m.text || '';
-        b.appendChild(textEl); const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = (m.who==='user' ? 'right' : 'left'); meta.textContent = formatTime(m.ts); b.appendChild(meta); group.appendChild(author); group.appendChild(b); row.appendChild(group); list?.appendChild(row);
+        const textEl=document.createElement('div'); textEl.className='msg-text';
+        const content = String(m.text||'');
+  // Compute notes count for [n] linking (prefer attachments passed with the message meta)
+  let histAtt = Array.isArray(m?.meta?.attachments) ? m.meta.attachments : (function(){ try{ const rawA = localStorage.getItem(`nodeAttachments:${ownerId}`); return rawA ? (JSON.parse(rawA)||[]) : []; }catch{ return []; } })();
+        const histCits = Array.isArray(m?.meta?.citations) ? m.meta.citations : [];
+        const histTotal = (histAtt?.length||0) + (histCits?.length||0);
+        const makeLinkedHtml = (src)=>{ try{ return String(src).replace(/\[(\d+)\]/g, (mm, g)=>`<a href="javascript:void(0)" data-ref="${g}" class="ref">[${g}]<\/a>`); }catch{ return String(src||''); } };
+        if (m.who !== 'user' && renderMode === 'md' && window.mdToHtml){
+          try{ let html = sanitizeHtml(window.mdToHtml(content)); if (histTotal) html = makeLinkedHtml(html); textEl.innerHTML = html; }
+          catch{ textEl.textContent = content; }
+        } else {
+          try{ const safe = (window.escapeHtml? window.escapeHtml(content) : String(content||'')); const html = histTotal ? makeLinkedHtml(safe) : safe; textEl.innerHTML = html; }
+          catch{ textEl.textContent = content; }
+        }
+        b.appendChild(textEl);
+  // Footnotes: attachments (Material) and web citations (Källor)
+        try{
+          if (m.who !== 'user'){
+            // Attachments list
+            try{
+              const items = Array.isArray(histAtt)? histAtt : [];
+              if (items.length){
+                const foot = document.createElement('div'); foot.className='subtle'; foot.style.marginTop='6px'; foot.style.fontSize='0.85em'; foot.style.opacity='0.85';
+                const lab = document.createElement('div'); lab.textContent='Material:'; foot.appendChild(lab);
+                const ol = document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0';
+                const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+                items.forEach((it,i)=>{ const li=document.createElement('li'); const a=document.createElement('a');
+                  try{
+                    const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+                    let finalHref = baseHref;
+                    if (isPdf(it)){
+                      try{
+                        const hint = panel._lastAssistantText || (m.text||'');
+                        const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
+                        if (pick && pick.page) finalHref = baseHref + `#page=${encodeURIComponent(pick.page)}`;
+                      }catch{}
+                    }
+                    a.href = finalHref; a.target='_blank'; a.rel='noopener';
+                  }catch{ a.href='#'; }
+                  a.textContent = (it.name||`Bilaga ${i+1}`); li.appendChild(a);
+                  try{ const u = document.createElement('code'); u.style.marginLeft='6px'; u.style.opacity='0.85'; u.textContent = (it.url || it.origUrl || it.blobUrl || ''); li.appendChild(u); }catch{}
+                  ol.appendChild(li); });
+                foot.appendChild(ol); b.appendChild(foot);
+              }
+            }catch{}
+            // Web citations if present in meta
+            try{
+              const cits = Array.isArray(m?.meta?.citations) ? m.meta.citations : [];
+              if (cits.length){ const foot=document.createElement('div'); foot.className='subtle'; foot.style.marginTop='6px'; foot.style.fontSize='0.85em'; foot.style.opacity='0.85'; const lab=document.createElement('div'); lab.textContent='Källor:'; foot.appendChild(lab); const ol=document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0'; cits.forEach((c,i)=>{ const li=document.createElement('li'); const a=document.createElement('a'); a.href=String(c.url||'#'); a.target='_blank'; a.rel='noopener'; a.textContent = (c.title ? `${c.title}` : (c.url||`Källa ${i+1}`)); li.appendChild(a); ol.appendChild(li); }); foot.appendChild(ol); b.appendChild(foot); }
+            }catch{}
+          }
+        }catch{}
+        // Inline references bar if no [n] present but we have notes
+        try{
+          if (m.who !== 'user' && histTotal){
+            const hasRefs = /\[(\d+)\]/.test(textEl.innerHTML || textEl.textContent || '');
+            if (!hasRefs){
+              const refs = document.createElement('div'); refs.className='subtle'; refs.style.marginTop='6px'; refs.style.fontSize='0.9em'; refs.textContent='Referenser: ';
+              for (let i=1;i<=histTotal;i++){ const a=document.createElement('a'); a.href='javascript:void(0)'; a.setAttribute('data-ref', String(i)); a.className='ref'; a.textContent=`[${i}]`; refs.appendChild(a); if (i<histTotal) refs.appendChild(document.createTextNode(' ')); }
+              b.appendChild(refs);
+            }
+          }
+        }catch{}
+        // Delegate clicks on [n] for historical messages
+        try{
+          b.addEventListener('click', (ev)=>{
+            const a = ev.target && ev.target.closest && ev.target.closest('a.ref'); if (!a) return; const n=a.getAttribute('data-ref'); if(!n) return; const idx = Math.max(1, Number(n)||1);
+            try{
+              const attItems = histAtt; const citItems = histCits; const total = (attItems?.length||0) + (citItems?.length||0);
+              if (idx <= total){
+                if (idx <= (attItems?.length||0)){
+                  const it = attItems[idx-1]; const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+                  const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+                  const finalHref = baseHref;
+                  const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove();
+                } else {
+                  const c = citItems[idx - (attItems?.length||0) - 1]; const href=String(c?.url||'#'); if(href && href!=='#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                }
+              }
+            }catch{}
+            ev.preventDefault(); ev.stopPropagation();
+          });
+        }catch{}
+        const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = (m.who==='user' ? 'right' : 'left'); meta.textContent = formatTime(m.ts); b.appendChild(meta); group.appendChild(author); group.appendChild(b); row.appendChild(group); list?.appendChild(row);
       }
       list && (list.scrollTop = list.scrollHeight);
     }catch{}
@@ -534,8 +703,164 @@
     }catch{}
     author.textContent = authorName;
     const b=document.createElement('div'); b.className='bubble '+(who==='user'?'user':'');
-    const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent=String(text);
-  b.appendChild(textEl); const metaEl=document.createElement('div'); metaEl.className='subtle'; metaEl.style.marginTop='6px'; metaEl.style.opacity='0.8'; metaEl.style.textAlign = (who==='user' ? 'right' : 'left'); const ts = meta?.ts || Date.now(); metaEl.textContent = formatTime(ts); b.appendChild(metaEl); group.appendChild(author); group.appendChild(b); row.appendChild(group); list.appendChild(row); list.scrollTop=list.scrollHeight;
+    const textEl=document.createElement('div'); textEl.className='msg-text';
+    // Determine if this panel should render markdown for assistant messages (coworker) or for user panel mode
+    let renderMode = 'raw';
+    try{
+      const sel = panel.querySelector('[data-role="renderMode"]');
+      if (sel && sel.value) renderMode = String(sel.value);
+      else {
+        const raw = localStorage.getItem(`nodeSettings:${ownerId}`);
+        if (raw){ const s = JSON.parse(raw)||{}; if (s.renderMode) renderMode = String(s.renderMode); }
+      }
+    }catch{}
+    const content = String(text||'');
+  // Collect attachments and citations for footnote mapping (prefer provided in meta)
+  let attItems = Array.isArray(meta?.attachments) ? meta.attachments : (function(){ try{ const raw = localStorage.getItem(`nodeAttachments:${ownerId}`); return raw ? (JSON.parse(raw)||[]) : []; }catch{ return []; } })();
+    const citItems = Array.isArray(meta?.citations) ? meta.citations : [];
+    const totalNotes = (Array.isArray(attItems)?attItems.length:0) + (Array.isArray(citItems)?citItems.length:0);
+  const makeLinkedHtml = (src)=>{
+      try{
+    // Replace [n] with anchors that scroll to footnote within this panel instead of changing window hash
+    return String(src).replace(/\[(\d+)\]/g, (m,g)=>`<a href="javascript:void(0)" data-ref="${g}" class="ref">[${g}]<\/a>`);
+      }catch{ return String(src||''); }
+    };
+    const isUserPanel = panel.classList.contains('user-node-panel');
+    if (!isUserPanel && who !== 'user'){
+      if (renderMode === 'md' && window.mdToHtml){
+        try{
+          let html = sanitizeHtml(window.mdToHtml(content));
+          if (totalNotes) html = makeLinkedHtml(html);
+          textEl.innerHTML = html;
+        }catch{ textEl.textContent = content; }
+      } else {
+        // raw: escape then optionally linkify [n]
+        try{
+          const safe = (window.escapeHtml? window.escapeHtml(content) : String(content||''));
+          const html = totalNotes ? makeLinkedHtml(safe) : safe;
+          textEl.innerHTML = html;
+        }catch{ textEl.textContent = content; }
+      }
+    } else {
+      // For User panel: honor its own render mode (stored as userRenderMode)
+      let userMode = 'raw';
+      try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if (raw){ const s = JSON.parse(raw)||{}; if (s.userRenderMode) userMode = String(s.userRenderMode); } }catch{}
+      if (userMode === 'md' && window.mdToHtml){
+        try{ textEl.innerHTML = sanitizeHtml(window.mdToHtml(content)); }catch{ textEl.textContent = content; }
+      } else {
+        textEl.textContent = content;
+      }
+    }
+  b.appendChild(textEl);
+  // remember last assistant raw text for hinting page search
+  if (who !== 'user'){ try{ panel._lastAssistantText = String(text||''); }catch{} }
+    // Delegate click on [n] refs: open corresponding attachment/citation, and also scroll to local footnote
+    try{
+      b.addEventListener('click', (ev)=>{
+        const a = ev.target && ev.target.closest && ev.target.closest('a.ref');
+        if (!a) return;
+        const n = a.getAttribute('data-ref');
+        if (!n) return;
+        const idx = Math.max(1, Number(n)||1);
+        // Try open: attachments first, then citations
+        try{
+          const attItems = (function(){ try{ const raw = localStorage.getItem(`nodeAttachments:${ownerId}`); return raw ? (JSON.parse(raw)||[]) : []; }catch{ return []; } })();
+          const citItems = Array.isArray(meta?.citations) ? meta.citations : [];
+          const total = (attItems?.length||0) + (citItems?.length||0);
+          if (idx <= total){
+            if (idx <= (attItems?.length||0)){
+              const it = attItems[idx-1];
+              const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+              const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+              // compute page from nearby sentence around the [n]; fallback to last assistant text
+              const hint = panel._lastAssistantText || content || '';
+              let finalHref = baseHref;
+              try{
+                const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null, q:needle }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null, q:tokens.slice(0,5).join(' ') }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
+                if (pick && pick.page) finalHref = baseHref + `#page=${encodeURIComponent(pick.page)}`;
+              }catch{}
+              const final = isPdf(it) ? finalHref : baseHref;
+              const tmp = document.createElement('a'); tmp.href = final; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove();
+            } else {
+              const c = citItems[idx - (attItems?.length||0) - 1];
+              const href = String(c?.url||'#'); if (href && href !== '#'){ const tmp = document.createElement('a'); tmp.href = href; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+            }
+          }
+        }catch{}
+        const fn = b.querySelector(`#fn-${idx}`);
+        if (fn){ fn.scrollIntoView({ behavior:'smooth', block:'nearest' }); }
+        ev.preventDefault();
+        ev.stopPropagation();
+      });
+    }catch{}
+    // If no [n] refs exist in content but notes exist, add a compact inline references bar linking to footnotes
+    try{
+      if (who !== 'user' && totalNotes){
+        const hasRefs = /\[(\d+)\]/.test(textEl.innerHTML || textEl.textContent || '');
+        if (!hasRefs){
+          const refs = document.createElement('div');
+          refs.className = 'subtle';
+          refs.style.marginTop = '6px';
+          refs.style.fontSize = '0.9em';
+          refs.textContent = 'Referenser: ';
+          for (let i=1;i<=totalNotes;i++){
+            const a = document.createElement('a'); a.href = 'javascript:void(0)'; a.setAttribute('data-ref', String(i)); a.className='ref'; a.textContent = `[${i}]`;
+            refs.appendChild(a);
+            if (i<totalNotes){ refs.appendChild(document.createTextNode(' ')); }
+          }
+          b.appendChild(refs);
+        }
+      }
+    }catch{}
+    // Append a consolidated footnote list [1..N] combining Material (attachments) then Web citations
+    try{
+      if (who !== 'user' && totalNotes){
+        const foot = document.createElement('div');
+        foot.className = 'subtle';
+        foot.style.marginTop = '6px';
+        foot.style.fontSize = '0.85em';
+        foot.style.opacity = '0.85';
+        const lab = document.createElement('div'); lab.textContent = 'Källor:'; lab.style.marginTop = '4px';
+        const ol = document.createElement('ol');
+        ol.style.margin = '6px 0 0 16px';
+        ol.style.padding = '0';
+        // attachments first
+        (attItems||[]).forEach((it,i)=>{
+          const idx = i+1; const li = document.createElement('li'); li.id = `fn-${idx}`;
+          const a = document.createElement('a');
+          try{
+            const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+            const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+            let finalHref = baseHref;
+            if (isPdf(it)){
+              try{
+                const hint = panel._lastAssistantText || content || '';
+                const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
+                if (pick && pick.page) finalHref = baseHref + `#page=${encodeURIComponent(pick.page)}`;
+              }catch{}
+            }
+            a.href = finalHref; a.target = '_blank'; a.rel = 'noopener';
+          }catch{ a.href = '#'; }
+          a.textContent = (it.name||`Bilaga ${idx}`);
+          li.appendChild(a);
+          // show URL as clickable code and small meta
+          try{ const codeWrap = document.createElement('span'); codeWrap.style.marginLeft='6px'; const u = document.createElement('a'); u.target = '_blank'; u.rel='noopener'; const rawUrl = (it.url || it.origUrl || it.blobUrl || ''); let clickUrl = rawUrl; if (/^blob:/i.test(String(rawUrl)) && isPdf(it)){ try{ const hint = panel._lastAssistantText || content || ''; const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint); if (pick && pick.page) clickUrl = rawUrl + `#page=${encodeURIComponent(pick.page)}`; }catch{} } u.href = clickUrl; const code = document.createElement('code'); code.style.opacity='0.85'; code.textContent = rawUrl; u.appendChild(code); codeWrap.appendChild(u); li.appendChild(codeWrap); }catch{}
+          if (it.chars){ const small = document.createElement('span'); small.className='subtle'; small.style.marginLeft='6px'; small.textContent = `(${it.chars} tecken${it.truncated?', trunkerat':''})`; li.appendChild(small); }
+          ol.appendChild(li);
+        });
+        // citations continue numbering
+        (citItems||[]).forEach((c, i)=>{
+          const idx = (attItems?.length||0) + i + 1; const li = document.createElement('li'); li.id = `fn-${idx}`;
+          const a = document.createElement('a'); const href = String(c.url||'#'); a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.textContent = (c.title ? `${c.title}` : (c.url||`Källa ${idx}`)); li.appendChild(a);
+          try{ const codeWrap = document.createElement('span'); codeWrap.style.marginLeft='6px'; const u = document.createElement('a'); u.href = href; u.target='_blank'; u.rel='noopener'; const code = document.createElement('code'); code.style.opacity='0.85'; code.textContent = href; u.appendChild(code); codeWrap.appendChild(u); li.appendChild(codeWrap); }catch{}
+          ol.appendChild(li);
+        });
+        foot.appendChild(lab);
+        foot.appendChild(ol);
+        b.appendChild(foot);
+      }
+    }catch{}
+    const metaEl=document.createElement('div'); metaEl.className='subtle'; metaEl.style.marginTop='6px'; metaEl.style.opacity='0.8'; metaEl.style.textAlign = (who==='user' ? 'right' : 'left'); const ts = meta?.ts || Date.now(); metaEl.textContent = formatTime(ts); b.appendChild(metaEl); group.appendChild(author); group.appendChild(b); row.appendChild(group); list.appendChild(row); list.scrollTop=list.scrollHeight;
   }
   /** Append text content into a board section (by sectionId) with optional Markdown rendering. */
   function appendToSection(sectionId, text, opts){

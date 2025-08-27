@@ -2,7 +2,7 @@ import os
 import io
 import re
 import time
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv, find_dotenv
 
@@ -37,6 +37,13 @@ except Exception:
 def create_app():
     app = Flask(__name__)
     CORS(app)
+
+    # Directory to persist uploaded files for stable URLs
+    UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    except Exception:
+        pass
 
     @app.post("/chat")
     def chat():
@@ -359,18 +366,86 @@ def create_app():
 
             items = []
             total_chars = 0
+            # late import to avoid hard dep when unused
+            try:
+                from werkzeug.utils import secure_filename  # type: ignore
+            except Exception:
+                def secure_filename(x: str) -> str:  # type: ignore
+                    return re.sub(r"[^a-zA-Z0-9_.-]", "_", x or "file")
+
+            base_url = (request.host_url or "").rstrip("/")
+
             for f in files:
                 raw = f.read()
-                text = _extract_text(f.filename, raw)
+                name = f.filename
+                lower = (name or "").lower()
+                pages = None
+                text = ""
                 truncated = False
-                if len(text) > max_chars:
-                    text = text[:max_chars]
-                    truncated = True
+                # Persist original file to disk for a stable HTTP URL
+                try:
+                    ts = int(time.time() * 1000)
+                    fn = secure_filename(name or "file")
+                    # avoid collisions by prefixing timestamp
+                    stored_name = f"{ts}_{fn}"
+                    with open(os.path.join(UPLOAD_DIR, stored_name), "wb") as out:
+                        out.write(raw)
+                    file_url = f"{base_url}/files/{stored_name}"
+                except Exception:
+                    stored_name = None
+                    file_url = None
+                if lower.endswith(".pdf") and PdfReader is not None:
+                    try:
+                        reader = PdfReader(io.BytesIO(raw))
+                        pages = []
+                        cur_total = 0
+                        for idx, p in enumerate(reader.pages, start=1):
+                            try:
+                                t = (p.extract_text() or "")
+                            except Exception:
+                                t = ""
+                            if not t:
+                                continue
+                            if cur_total + len(t) <= max_chars:
+                                pages.append({"page": idx, "text": t})
+                                cur_total += len(t)
+                            else:
+                                remain = max_chars - cur_total
+                                if remain > 0:
+                                    pages.append({"page": idx, "text": t[:remain]})
+                                    cur_total += remain
+                                truncated = True
+                                break
+                        # Build combined text
+                        text = "\n\n".join(p.get("text", "") for p in pages) if pages else ""
+                    except Exception:
+                        text = _extract_text(name, raw)
+                        if len(text) > max_chars:
+                            text = text[:max_chars]
+                            truncated = True
+                else:
+                    text = _extract_text(name, raw)
+                    if len(text) > max_chars:
+                        text = text[:max_chars]
+                        truncated = True
                 total_chars += len(text)
-                items.append({"name": f.filename, "chars": len(text), "truncated": truncated, "text": text})
+                item = {"name": name, "chars": len(text), "truncated": truncated, "text": text}
+                if pages is not None:
+                    item["pages"] = pages
+                if file_url:
+                    item["url"] = file_url
+                items.append(item)
             return jsonify({"count": len(items), "totalChars": total_chars, "items": items})
         except Exception as e:
             return jsonify({"error": str(e)}), 400
+
+    @app.get("/files/<path:fname>")
+    def serve_file(fname: str):
+        # Serve uploaded files (read-only)
+        try:
+            return send_from_directory(UPLOAD_DIR, fname, as_attachment=False)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 404
 
     @app.get("/debug/fetch")
     def debug_fetch():
