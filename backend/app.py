@@ -49,7 +49,7 @@ def create_app():
     def chat():
         data = request.get_json(force=True, silent=True) or {}
         # Accept both OPENAI_MODEL and legacy OPENAI_MODEL_NAME
-        model = (data.get("model") or os.getenv("OPENAI_MODEL") or os.getenv("OPENAI_MODEL_NAME") or "gpt-4o-mini").strip()
+        model = (data.get("model") or os.getenv("OPENAI_MODEL") or os.getenv("OPENAI_MODEL_NAME") or "gpt-5-mini").strip()
 
         # Build base messages from either messages[] or single user input
         incoming_messages = data.get("messages") if isinstance(data.get("messages"), list) else None
@@ -75,6 +75,24 @@ def create_app():
             ]
 
         citations = []
+
+        # If the conversation contains inline attachments ("Bilaga:" blocks), instruct the model to cite [n,sida]
+        try:
+            def _has_materials(msgs):
+                for m in msgs or []:
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        if "Bilaga:" in (m.get("content") or ""):
+                            return True
+                return False
+            if _has_materials(messages):
+                mats_guidance = (
+                    "ANVISNING: Du har bilagor som material. När du hämtar fakta eller citat ur en bilaga, ange källhänvisning direkt "
+                    "efter på formen [n,sida] (t.ex. [1,7]) när PDF-sidan framgår, annars [n]. Citerar du, gör det kort."
+                )
+                messages = ([{"role": "system", "content": system_prompt + "\n\n" + mats_guidance}]
+                            + [m for m in messages if not (m.get("role") == "system" and m.get("content") == system_prompt)])
+        except Exception:
+            pass
 
         # Optional web search/crawl integration
         web_cfg = (data.get("web") or {}) if isinstance(data.get("web"), dict) else {}
@@ -298,9 +316,24 @@ def create_app():
     def _extract_text(filename: str, stream: bytes) -> str:
         name = (filename or "").lower()
         if name.endswith(".pdf"):
-            if PdfReader is None:
-                return "[PDF-stöd saknas: installera pypdf]"
+            # Först: pdfplumber
             try:
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(stream)) as pdf:
+                    parts = []
+                    for page in pdf.pages:
+                        text = page.extract_text()
+                        if text:
+                            parts.append(text)
+                    if parts:
+                        return "\n\n".join(parts).strip()
+            except Exception:
+                pass  # pdfplumber misslyckades, fortsätt med pypdf
+
+            # Fallback: pypdf
+            try:
+                if PdfReader is None:
+                    return "[PDF-stöd saknas: installera pypdf]"
                 reader = PdfReader(io.BytesIO(stream))
                 parts = []
                 for page in reader.pages:
@@ -308,9 +341,11 @@ def create_app():
                         parts.append(page.extract_text() or "")
                     except Exception:
                         continue
-                return "\n\n".join(parts).strip()
+                return "\n\n".join(parts).strip() if parts else "[Ingen text kunde extraheras]"
             except Exception:
                 return "[Kunde inte extrahera text från PDF]"
+
+        # Om inte PDF, försök bara med bytes→text
         try:
             return stream.decode("utf-8", errors="ignore")
         except Exception:
@@ -360,20 +395,34 @@ def create_app():
             if not files:
                 return jsonify({"error": "No files provided (field 'files')"}), 400
             try:
-                max_chars = int(request.form.get("maxChars", "50000"))
+                max_chars = int(request.form.get("maxChars", "1000000"))
             except Exception:
-                max_chars = 50000
+                max_chars = 1000000
 
             items = []
             total_chars = 0
-            # late import to avoid hard dep when unused
             try:
                 from werkzeug.utils import secure_filename  # type: ignore
             except Exception:
-                def secure_filename(x: str) -> str:  # type: ignore
+                def secure_filename(x: str) -> str:
                     return re.sub(r"[^a-zA-Z0-9_.-]", "_", x or "file")
 
             base_url = (request.host_url or "").rstrip("/")
+
+            # Helper: join page texts with clear page markers so LLMs can cite [n,sida]
+            def _join_pages_with_markers(pages_list):
+                try:
+                    parts = []
+                    for p in (pages_list or []):
+                        num = p.get("page")
+                        txt = p.get("text", "")
+                        parts.append(f"[Sida {num}]\n{txt}")
+                    return "\n\n".join(parts)
+                except Exception:
+                    try:
+                        return "\n\n".join((p.get("text", "") for p in (pages_list or [])))
+                    except Exception:
+                        return ""
 
             for f in files:
                 raw = f.read()
@@ -382,52 +431,78 @@ def create_app():
                 pages = None
                 text = ""
                 truncated = False
-                # Persist original file to disk for a stable HTTP URL
+
+                # Hantera PDF
+                if lower.endswith(".pdf"):
+                    # --- pdfplumber först ---
+                    try:
+                        import pdfplumber
+                        pages = []
+                        cur_total = 0
+                        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                            for idx, page in enumerate(pdf.pages, start=1):
+                                t = page.extract_text() or ""
+                                if not t:
+                                    continue
+                                if cur_total + len(t) <= max_chars:
+                                    pages.append({"page": idx, "text": t})
+                                    cur_total += len(t)
+                                else:
+                                    remain = max_chars - cur_total
+                                    if remain > 0:
+                                        pages.append({"page": idx, "text": t[:remain]})
+                                        cur_total += remain
+                                    truncated = True
+                                    break
+                        text = _join_pages_with_markers(pages) if pages else ""
+                    except Exception:
+                        pages = None
+                        # --- fallback på pypdf ---
+                        if PdfReader is not None:
+                            try:
+                                reader = PdfReader(io.BytesIO(raw))
+                                pages = []
+                                cur_total = 0
+                                for idx, p in enumerate(reader.pages, start=1):
+                                    t = p.extract_text() or ""
+                                    if not t:
+                                        continue
+                                    if cur_total + len(t) <= max_chars:
+                                        pages.append({"page": idx, "text": t})
+                                        cur_total += len(t)
+                                    else:
+                                        remain = max_chars - cur_total
+                                        if remain > 0:
+                                            pages.append({"page": idx, "text": t[:remain]})
+                                            cur_total += remain
+                                        truncated = True
+                                        break
+                                text = _join_pages_with_markers(pages) if pages else ""
+                            except Exception:
+                                text = "[Kunde inte extrahera text från PDF]"
+                        else:
+                            text = "[PDF-stöd saknas: installera pypdf]"
+                else:
+                    # Om ej PDF, försök direkt med bytes → text
+                    try:
+                        text = raw.decode("utf-8", errors="ignore")
+                    except Exception:
+                        text = ""
+
+                # Spara filen till disk för stabil URL
                 try:
                     ts = int(time.time() * 1000)
                     fn = secure_filename(name or "file")
-                    # avoid collisions by prefixing timestamp
                     stored_name = f"{ts}_{fn}"
-                    with open(os.path.join(UPLOAD_DIR, stored_name), "wb") as out:
+                    upload_dir = os.environ.get("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
+                    os.makedirs(upload_dir, exist_ok=True)
+                    with open(os.path.join(upload_dir, stored_name), "wb") as out:
                         out.write(raw)
                     file_url = f"{base_url}/files/{stored_name}"
                 except Exception:
                     stored_name = None
                     file_url = None
-                if lower.endswith(".pdf") and PdfReader is not None:
-                    try:
-                        reader = PdfReader(io.BytesIO(raw))
-                        pages = []
-                        cur_total = 0
-                        for idx, p in enumerate(reader.pages, start=1):
-                            try:
-                                t = (p.extract_text() or "")
-                            except Exception:
-                                t = ""
-                            if not t:
-                                continue
-                            if cur_total + len(t) <= max_chars:
-                                pages.append({"page": idx, "text": t})
-                                cur_total += len(t)
-                            else:
-                                remain = max_chars - cur_total
-                                if remain > 0:
-                                    pages.append({"page": idx, "text": t[:remain]})
-                                    cur_total += remain
-                                truncated = True
-                                break
-                        # Build combined text
-                        text = "\n\n".join(p.get("text", "") for p in pages) if pages else ""
-                    except Exception:
-                        text = _extract_text(name, raw)
-                        if len(text) > max_chars:
-                            text = text[:max_chars]
-                            truncated = True
-                else:
-                    text = _extract_text(name, raw)
-                    if len(text) > max_chars:
-                        text = text[:max_chars]
-                        truncated = True
+
                 total_chars += len(text)
                 item = {"name": name, "chars": len(text), "truncated": truncated, "text": text}
                 if pages is not None:
@@ -435,9 +510,11 @@ def create_app():
                 if file_url:
                     item["url"] = file_url
                 items.append(item)
+
             return jsonify({"count": len(items), "totalChars": total_chars, "items": items})
         except Exception as e:
             return jsonify({"error": str(e)}), 400
+
 
     @app.get("/files/<path:fname>")
     def serve_file(fname: str):

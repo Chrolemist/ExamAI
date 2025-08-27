@@ -196,7 +196,7 @@
     };
     const apiBase = detectApiBase();
     // Gather settings from coworker panel if present, else from Graph/localStorage
-  let model = 'gpt-4o-mini';
+  let model = 'gpt-5-mini';
   let systemPrompt = '';
     let apiKey = '';
     let maxTokens = 1000;
@@ -229,11 +229,20 @@
           const getAtt = (id)=>{ try{ const raw = localStorage.getItem(`nodeAttachments:${id}`); return raw ? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
           const coworkerAtt = getAtt(ownerId);
           const senderAtt = (ctx && ctx.sourceId) ? getAtt(ctx.sourceId) : [];
-          // Merge with coworker first, then sender
-          const combined = ([]).concat(Array.isArray(coworkerAtt)?coworkerAtt:[], Array.isArray(senderAtt)?senderAtt:[]);
+          // Merge with coworker first, then sender, then de-duplicate by url or name+chars to keep numbering stable with UI
+          const merged = ([]).concat(Array.isArray(coworkerAtt)?coworkerAtt:[], Array.isArray(senderAtt)?senderAtt:[]);
+          const seen = new Set();
+          const combined = [];
+          for (const it of (merged||[])){
+            try{
+              const key = (it && (it.url||it.origUrl||'')) || `${it?.name||''}|${it?.chars||0}`;
+              if (!key) { combined.push(it); continue; }
+              if (!seen.has(key)) { seen.add(key); combined.push(it); }
+            }catch{ combined.push(it); }
+          }
           if (combined.length){
             const lines = combined.map((it, i)=>`[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`);
-            const guide = 'Material för denna fråga (använd [n] i svaret där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
+            const guide = 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
             // Stash for meta to allow footnotes rendering
             requestAIReply._lastAttachments = combined;
@@ -258,10 +267,19 @@
           const getAtt = (id)=>{ try{ const raw = localStorage.getItem(`nodeAttachments:${id}`); return raw ? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
           const coworkerAtt = getAtt(ownerId);
           const senderAtt = (ctx && ctx.sourceId) ? getAtt(ctx.sourceId) : [];
-          const combined = ([]).concat(Array.isArray(coworkerAtt)?coworkerAtt:[], Array.isArray(senderAtt)?senderAtt:[]);
+          const merged = ([]).concat(Array.isArray(coworkerAtt)?coworkerAtt:[], Array.isArray(senderAtt)?senderAtt:[]);
+          const seen = new Set();
+          const combined = [];
+          for (const it of (merged||[])){
+            try{
+              const key = (it && (it.url||it.origUrl||'')) || `${it?.name||''}|${it?.chars||0}`;
+              if (!key) { combined.push(it); continue; }
+              if (!seen.has(key)) { seen.add(key); combined.push(it); }
+            }catch{ combined.push(it); }
+          }
           if (combined.length){
             const lines = combined.map((it, i)=>`[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`);
-            const guide = 'Material för denna fråga (använd [n] i svaret där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
+            const guide = 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
             requestAIReply._lastAttachments = combined;
           } else {

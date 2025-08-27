@@ -8,6 +8,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Install system dependencies för pdfplumber (pdfminer, Pillow etc.)
+RUN apt-get update && apt-get install -y \
+    libjpeg-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Optional Playwright install (disabled by default). Enable with build-arg ENABLE_PLAYWRIGHT=true
 ARG ENABLE_PLAYWRIGHT=false
 

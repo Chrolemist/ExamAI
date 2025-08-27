@@ -145,9 +145,13 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .badge{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;border:1px solid #2a2a35;background:rgba(255,255,255,0.04);color:#dfe3f3;font-size:11px}
 .badge-error{border-color:#673232;background:rgba(255,80,80,0.08);color:#ffd3d3}
 .subtle{color:#9aa3b2;font-size:11px}
-.attachments{display:flex;gap:6px;padding:6px 12px;border-top:1px dashed #2a2a35;background:rgba(255,255,255,0.02)}
+.attachments{display:flex;flex-direction:column;gap:6px;padding:6px 12px;border-top:1px dashed #2a2a35;background:rgba(255,255,255,0.02)}
 .attachments.hidden{display:none}
-.attachment-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #2a2a35;border-radius:999px;padding:4px 8px;font-size:12px}
+.attachments .att-toggle{background:transparent;border:1px solid #2a2a35;color:#cfd3e3;border-radius:999px;padding:2px 8px;font-size:11px;margin-right:auto}
+.att-content{display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow-y:auto;overflow-x:hidden}
+.att-content.collapsed{max-height:0; padding-top:0; padding-bottom:0; overflow:hidden}
+.attachment-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #2a2a35;border-radius:999px;padding:2px 6px;font-size:11px;line-height:1.2}
+.attachment-chip .name{max-width:clamp(120px, 30vw, 300px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .attachment-chip .rm{background:transparent;border:0;color:#a6a6b3;cursor:pointer}
 .userInput{flex:1;background:#0f0f14;border:1px solid #24242c;border-radius:12px;padding:10px 12px;color:var(--text);resize:none;min-height:40px;max-height:300px;overflow:hidden}
 .send-btn{background:linear-gradient(135deg,var(--primary),#5b38ff);border:0;border-radius:999px;color:white;padding:0 16px;cursor:pointer;align-self:flex-end;margin-bottom:6px}

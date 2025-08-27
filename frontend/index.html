@@ -17,12 +17,13 @@
           <button type="button" data-kind="coworker">Ny CoWorker</button>
           <button type="button" data-kind="user">Ny User</button>
           <button type="button" data-kind="internet">Ny Internet</button>
+          <button type="button" id="clearStorageBtn" title="Rensa all lokal data">Rensa lokal data</button>
         </div>
       </div>
 
       <!-- Node board (visual only) -->
       <section id="nodeBoard" class="node-board" aria-label="Node Board">
-        <div class="nb-sections">
+  <div class="nb-sections">
           <div class="nb-sec" data-nb-id="analys">
             <div class="nb-title" contenteditable="true" spellcheck="false">Analys</div>
             <div class="nb-grid" aria-hidden="true"></div>
@@ -101,28 +102,6 @@
   <script src="js/nodes-ui.js"></script>
   <!-- Bootstrap (creates default nodes, binds handlers) -->
   <script src="js/main.js"></script>
-  <script>
-    // Lightweight dropdown logic
-    (function(){
-      const btn = document.getElementById('addCopilotBtn');
-      const menu = document.getElementById('addMenu');
-      if (!btn || !menu) return;
-      const show = ()=>{ menu.classList.remove('hidden'); menu.removeAttribute('inert'); /* move focus into menu for a11y */ (menu.querySelector('button')||btn).focus(); };
-      const hide = ()=>{ 
-        // If a child kept focus, return focus to the trigger before hiding
-        try{ if (menu.contains(document.activeElement)) btn.focus(); }catch{}
-        menu.classList.add('hidden'); menu.setAttribute('inert',''); 
-      };
-      btn.addEventListener('click', (e)=>{ e.stopPropagation(); const vis = !menu.classList.contains('hidden'); if (vis) hide(); else show(); });
-      document.addEventListener('click', (e)=>{ if (menu.classList.contains('hidden')) return; if (!menu.contains(e.target) && e.target !== btn) hide(); });
-      menu.addEventListener('click', (e)=>{
-        const t = e.target.closest('button[data-kind]'); if (!t) return; hide();
-        const kind = t.getAttribute('data-kind');
-        let pos = { x: 60, y: Math.max(80, window.innerHeight - 140) };
-        try{ if (window.getNextNodePosition) pos = window.getNextNodePosition(); }catch{}
-        if (window.createIcon) window.createIcon(kind === 'user' ? 'user' : kind === 'internet' ? 'internet' : 'coworker', pos.x, pos.y);
-      });
-    })();
-  </script>
+  <script src="js/topbar.js"></script>
   </body>
 </html>
