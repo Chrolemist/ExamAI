@@ -3,6 +3,8 @@
 // around creating/removing connections. No node/panel creation here.
 (function(){
   const svg = () => window.svg;
+  // Track a selected connection for keyboard deletion
+  let _selectedConn = null;
   // simulation toggle
   // AI-simulering borttagen
   // path helpers
@@ -23,10 +25,10 @@
   function makeHitPath(){
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     p.setAttribute('fill', 'none');
-    p.setAttribute('stroke', 'rgba(0,0,0,0)');
+  p.setAttribute('stroke', 'rgba(0,0,0,0)');
     p.setAttribute('stroke-width', '12');
     p.setAttribute('stroke-linecap', 'round');
-    p.style.pointerEvents = 'stroke';
+  p.style.pointerEvents = 'stroke';
     p.style.cursor = 'pointer';
     svg()?.appendChild(p);
     return p;
@@ -48,6 +50,7 @@
     p.setAttribute('stroke', 'url(#flowGrad)');
     p.setAttribute('stroke-width', '3');
     p.setAttribute('stroke-linecap', 'round');
+  // Allow events for permanent paths (hover/delete), but the SVG container itself ignores events
   p.style.pointerEvents = 'stroke';
   p.style.cursor = 'pointer';
     if (animated) {
@@ -79,7 +82,16 @@
       // dash animation pulse
       const prevDash = path.getAttribute('stroke-dasharray');
       path.setAttribute('stroke-dasharray','16 12');
-      const anim = path.animate([{ strokeDashoffset: 0 }, { strokeDashoffset: -28 }], { duration: 650, iterations: 1, easing:'linear' });
+      // Choose direction: if source is fromId we flow start->end (-offset), if from toId we flow end->start (+offset)
+      let toOffset = -28;
+      try{
+        const src = opts && opts.sourceId;
+        if (src){
+          if (src === conn.toId) toOffset = 28; // reverse
+          else if (src === conn.fromId) toOffset = -28; // forward
+        }
+      }catch{}
+      const anim = path.animate([{ strokeDashoffset: 0 }, { strokeDashoffset: toOffset }], { duration: 650, iterations: 1, easing:'linear' });
       anim.addEventListener?.('finish', ()=>{
         // restore shortly after
         path.setAttribute('stroke-dasharray', prevDash || '');
@@ -108,9 +120,13 @@
   function routeMessageFrom(ownerId, text, meta){
     if(!ownerId || !text) return;
     const targets = getOutgoingTargets(ownerId);
-    targets.forEach(({targetId, via})=>{
+    // Deduplicate by targetId in case multiple cables point to the same node
+    const seen = new Set();
+    for (const {targetId, via} of targets){
+      if (!targetId || seen.has(targetId)) continue;
+      seen.add(targetId);
       transmitOnConnection(via, { sourceId: ownerId, targetId, text: String(text), author: meta?.author||'Incoming', who: (meta && meta.who) ? meta.who : 'assistant', ts: meta?.ts || Date.now(), meta });
-    });
+    }
   }
 
   /** Deliver a payload through a specific cable (no direct hops). */
@@ -313,10 +329,42 @@
       el.addEventListener('mouseenter', (e)=>{ if(!over){ over=true; _hoverConnCount++; } showBtn(e.clientX, e.clientY); });
       el.addEventListener('mousemove', (e)=>{ if (!over) return; if (isNearAnyIO(e.clientX, e.clientY, 20)) { btn.style.display='none'; return; } positionConnDeleteBtn(e.clientX, e.clientY); btn.style.display='block'; });
       el.addEventListener('mouseleave', ()=>{ if(over){ over=false; _hoverConnCount=Math.max(0,_hoverConnCount-1);} setTimeout(maybeHide, 20); });
+      // Also support click-to-select and right-click to delete
+      el.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        // clear previous selection
+        try{ if (_selectedConn && _selectedConn !== conn){ _selectedConn.pathEl.style.filter=''; _selectedConn.pathEl.setAttribute('stroke-width','3'); } }catch{}
+        _selectedConn = conn;
+        try{ conn.pathEl.setAttribute('stroke-width','5'); conn.pathEl.style.filter='drop-shadow(0 2px 10px rgba(124,92,255,0.45))'; }catch{}
+      });
+      el.addEventListener('contextmenu', (e)=>{
+        e.preventDefault(); e.stopPropagation();
+        removeConnection(conn);
+        btn.style.display='none';
+        if (_selectedConn === conn) _selectedConn = null;
+      });
     };
     bindHover(conn.hitEl || conn.pathEl);
     if (conn.hitEl && conn.pathEl && conn.hitEl !== conn.pathEl) bindHover(conn.pathEl);
   }
+
+  // Global keyboard handler: Delete/Backspace removes selected connection
+  document.addEventListener('keydown', (e)=>{
+    try{
+      if ((e.key === 'Delete' || e.key === 'Backspace') && _selectedConn){
+        e.preventDefault();
+        removeConnection(_selectedConn);
+        _selectedConn = null;
+        const btn = getConnDeleteBtn(); if (btn) btn.style.display='none';
+      }
+      // Esc clears selection
+      if (e.key === 'Escape' && _selectedConn){
+        _selectedConn.pathEl.style.filter='';
+        _selectedConn.pathEl.setAttribute('stroke-width','3');
+        _selectedConn = null;
+      }
+    }catch{}
+  });
 
   // Hide delete cross when mouse is not over any connection path
   document.addEventListener('mousemove', (e)=>{
@@ -370,7 +418,13 @@
   }
   /** Begin a live connection line from a conn-point until pointerup. */
   function startConnection(fromEl, fromCp){
-    const tmpPath = makePath(); let lastHover=null;
+  const tmpPath = makePath(); let lastHover=null;
+  // Show the cable above panels while dragging for better visibility
+  const s = svg && svg();
+  const prevZ = s ? s.style.zIndex : '';
+  if (s) s.style.zIndex = '12000';
+  // Don't intercept pointer events with the temporary path
+  try{ tmpPath.style.pointerEvents = 'none'; }catch{}
     const fromIsIn = fromCp.classList.contains('io-in'); const fromIsOut = fromCp.classList.contains('io-out');
     const fromType = fromEl?.dataset?.type; const fromIsUser = (fromType==='user'); const fromIsCoworker = (fromType==='coworker');
     const baseFilter = (cp) => cp !== fromCp && (cp.closest('.fab, .panel, .panel-flyout') !== fromEl);
@@ -379,7 +433,15 @@
       let near = findClosestConnPoint(p.x, p.y, 18, cpFilter);
       if (!near && (fromIsUser || fromIsCoworker)) near = findClosestConnPoint(p.x, p.y, 18, baseFilter);
       if (lastHover && lastHover !== near) lastHover.classList.remove('hover'); if (near && lastHover !== near) near.classList.add('hover'); lastHover = near; };
-    const up = (e)=>{ window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); finalizeConnection(fromEl, fromCp, e); tmpPath.remove(); if (lastHover) lastHover.classList.remove('hover'); };
+    const up = (e)=>{ 
+      window.removeEventListener('pointermove', move); 
+      window.removeEventListener('pointerup', up); 
+      finalizeConnection(fromEl, fromCp, e); 
+      tmpPath.remove(); 
+      if (lastHover) lastHover.classList.remove('hover'); 
+      // Restore SVG z-index after finishing the drag
+      if (s) s.style.zIndex = prevZ || '';
+    };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   }
   /** On pointerup, snap to a target conn-point (if found) and finalize path + state. */
@@ -415,6 +477,12 @@
       ensureSecId(b);
     }catch{}
   }
+
+  // Expose minimal API for other modules
+  window.makeConnPointInteractive = makeConnPointInteractive;
+  window.updateConnectionsFor = updateConnectionsFor;
+  window.routeMessageFrom = routeMessageFrom;
+  window.transmitOnConnection = transmitOnConnection;
 
   // expose
   window.ensureDefs = ensureDefs;

@@ -40,13 +40,18 @@
       try{ if (window.graph) settings = Object.assign({}, window.graph.getNodeSettings(id)); }catch{}
       nodes.push({ id, type, x, y, name, settings });
     });
-    // Connections (from Graph to ensure logical view)
+    // Connections: merge from Graph (nodes-only) and UI state (includes section I/O) and de-duplicate
     const connections = [];
     try{
+      const seen = new Set();
+      const pushConn = (fromId, toId)=>{
+        if (!fromId || !toId) return; const k = fromId+"->"+toId; if (seen.has(k)) return; seen.add(k); connections.push({ fromId, toId });
+      };
       if (window.graph && Array.isArray(window.graph.connections)){
-        window.graph.connections.forEach(c=>{ connections.push({ fromId: c.fromId, toId: c.toId }); });
-      } else if (window.state && Array.isArray(window.state.connections)){
-        window.state.connections.forEach(c=>{ connections.push({ fromId: c.fromId, toId: c.toId }); });
+        window.graph.connections.forEach(c=> pushConn(c.fromId, c.toId));
+      }
+      if (window.state && Array.isArray(window.state.connections)){
+        window.state.connections.forEach(c=> pushConn(c.fromId, c.toId));
       }
     }catch{}
     // Chat logs per node
@@ -84,30 +89,43 @@
       try{ if (window.graph && n.settings) window.graph.setNodeSettings(el.dataset.id, n.settings); }catch{}
       idMap.set(n.id, el.dataset.id);
     });
-    // Recreate connections
-    (data.connections||[]).forEach(c=>{
-      const a = document.querySelector(`.fab[data-id="${c.fromId}"]`) || document.querySelector(`.panel[data-section-id="${c.fromId}"]`);
-      const b = document.querySelector(`.fab[data-id="${c.toId}"]`) || document.querySelector(`.panel[data-section-id="${c.toId}"]`);
-      if (!a || !b) return;
-      // Choose default sides: out from right, in to left
-      const fromCp = a.querySelector('.conn-point.io-out') || a.querySelector('.conn-point');
-      const toCp = b.querySelector('.conn-point.io-in') || b.querySelector('.conn-point');
-      if (fromCp && toCp && window.finalizeConnection){
-        // Wire connection using the existing finalize logic
-        const fakeEvent = { clientX: 0, clientY: 0, __restore: true };
-        // draw path via helper
-        const path = window.makePath(false);
-        const hit = (function(){ const p = document.createElementNS('http://www.w3.org/2000/svg','path'); p.setAttribute('fill','none'); p.setAttribute('stroke','rgba(0,0,0,0)'); p.setAttribute('stroke-width','12'); p.style.pointerEvents='stroke'; window.svg?.appendChild(p); return p; })();
-        const anchor = window.anchorOf;
-        if (anchor){
-          const a1 = anchor(a, fromCp); const a2 = anchor(b, toCp);
-          window.drawPath(path, a1.x, a1.y, a2.x, a2.y); window.drawPath(hit, a1.x, a1.y, a2.x, a2.y);
-        }
-        const conn = { fromId: a.dataset.id || a.dataset.sectionId, toId: b.dataset.id || b.dataset.sectionId, pathEl: path, hitEl: hit, fromCp, toCp };
-        window.state.connections.push(conn);
-        if (window.graph) window.graph.connect(conn.fromId, conn.toId);
-      }
+    // Helpers for robust connection restoration
+  const pickOut = (el)=> el && (el.querySelector('.conn-point.io-out') || el.querySelector('.section-io[data-io="out"]') || el.querySelector('.conn-point'));
+  const pickIn  = (el)=> el && (el.querySelector('.conn-point.io-in')  || el.querySelector('.section-io[data-io="in"]')  || el.querySelector('.conn-point'));
+    const hasConn = (fromId, toId)=>{
+      try{ return (window.state?.connections||[]).some(c=>c.fromId===fromId && c.toId===toId); }catch{ return false; }
+    };
+    const waitForPortsReady = (items, tries=40)=> new Promise(resolve=>{
+      const tick=()=>{
+        const ok = items.every(c=>{
+          const a = document.querySelector(`.fab[data-id="${c.fromId}"]`) || document.querySelector(`.panel.board-section[data-section-id="${c.fromId}"]`) || document.querySelector(`.panel[data-section-id="${c.fromId}"]`);
+          const b = document.querySelector(`.fab[data-id="${c.toId}"]`) || document.querySelector(`.panel.board-section[data-section-id="${c.toId}"]`) || document.querySelector(`.panel[data-section-id="${c.toId}"]`);
+          return !!(a && b && pickOut(a) && pickIn(b));
+        });
+        if (ok || tries--<=0) return resolve();
+        requestAnimationFrame(tick);
+      };
+      tick();
     });
+    const restoreConnections = async (items)=>{
+      await waitForPortsReady(items);
+      (items||[]).forEach(c=>{
+  const a = document.querySelector(`.fab[data-id="${c.fromId}"]`) || document.querySelector(`.panel.board-section[data-section-id="${c.fromId}"]`) || document.querySelector(`.panel[data-section-id="${c.fromId}"]`);
+  const b = document.querySelector(`.fab[data-id="${c.toId}"]`) || document.querySelector(`.panel.board-section[data-section-id="${c.toId}"]`) || document.querySelector(`.panel[data-section-id="${c.toId}"]`);
+        if (!a || !b) return;
+        const fromCp = pickOut(a); const toCp = pickIn(b);
+        if (!fromCp || !toCp) return;
+        const fromId = a.dataset.id || a.dataset.sectionId; const toId = b.dataset.id || b.dataset.sectionId;
+        if (!fromId || !toId || hasConn(fromId, toId)) return;
+        // Simulate a pointerup at the target conn-point center to reuse finalizeConnection wiring
+        try{
+          const r = toCp.getBoundingClientRect();
+          const fake = { clientX: r.left + r.width/2, clientY: r.top + r.height/2 };
+          if (window.finalizeConnection) window.finalizeConnection(a, fromCp, fake);
+        }catch{}
+      });
+    };
+    restoreConnections(data.connections||[]);
     // Restore chat logs
     try{
       const chat = data.chat || {};
@@ -120,8 +138,8 @@
     }catch{}
     // Restore sections
     restoreSections(data.sections||[]);
-    // Refresh connection geometry
-    try{ window.updateConnectionsFor && document.querySelectorAll('.fab,.panel').forEach(el=> window.updateConnectionsFor(el)); }catch{}
+  // Refresh connection geometry once after a tick
+  setTimeout(()=>{ try{ window.updateConnectionsFor && document.querySelectorAll('.fab,.panel').forEach(el=> window.updateConnectionsFor(el)); }catch{} }, 0);
   }
 
   function saveSnapshot(name){

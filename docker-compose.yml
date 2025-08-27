@@ -1,0 +1,55 @@
+# Two containers:
+# 1) backend – Flask/Gunicorn API on port 8000 (web search, AI chat, uploads)
+# 2) frontend – Nginx serving static files on port 5500
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: examai-backend
+
+    # Load secrets from .env (OPENAI_API_KEY, SERPER_API_KEY, etc.)
+    env_file:
+      - .env
+
+    environment:
+      - PORT=8000
+
+    ports:
+      - "8000:8000"
+
+    # Healthcheck without curl (use Python available in the image)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/key-status').getcode()==200 else 1)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - examai-net
+    restart: unless-stopped
+
+  frontend:
+    image: nginx:1.27-alpine
+    container_name: examai-frontend
+
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./favicon.ico:/opt/icons/favicon.ico:ro
+      - ./favicon.svg:/opt/icons/favicon.svg:ro
+
+    ports:
+      - "5500:80"
+
+    depends_on:
+      - backend
+
+    networks:
+      - examai-net
+    restart: unless-stopped
+
+networks:
+  examai-net:
+    driver: bridge

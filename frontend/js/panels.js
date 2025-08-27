@@ -3,6 +3,19 @@
 // Panels are draggable/resizable and connectable via header IO points.
 (function(){
   function formatTime(ts){ try{ return new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); }catch{ return ''; } }
+  // Persist panel geometry (position + size) per ownerId
+  const geomKey = (ownerId)=> `panelGeom:${ownerId}`;
+  function clampGeom(g){
+    const pad = 8; const maxW = Math.max(280, window.innerWidth - pad*2); const maxH = Math.max(200, window.innerHeight - pad*2);
+    const w = Math.min(maxW, Math.max(280, Math.floor(g.width||360)));
+    const h = Math.min(maxH, Math.max(200, Math.floor(g.height||300)));
+    const l = Math.min(Math.max(pad, Math.floor(g.left||pad)), Math.max(pad, window.innerWidth - w - pad));
+    const t = Math.min(Math.max(pad, Math.floor(g.top||pad)), Math.max(pad, window.innerHeight - h - pad));
+    return { left:l, top:t, width:w, height:h };
+  }
+  function savePanelGeom(panel){ try{ const ownerId = panel?.dataset?.ownerId; if(!ownerId) return; const r = panel.getBoundingClientRect(); const g = clampGeom({ left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) }); localStorage.setItem(geomKey(ownerId), JSON.stringify(g)); }catch{} }
+  function loadPanelGeom(ownerId){ try{ const raw = localStorage.getItem(geomKey(ownerId)); if(!raw) return null; const g = JSON.parse(raw); return clampGeom(g||{}); }catch{ return null; } }
+  function applyPanelGeom(panel, g){ try{ if(!g) return; panel.style.left = g.left + 'px'; panel.style.top = g.top + 'px'; panel.style.width = g.width + 'px'; panel.style.height = g.height + 'px'; }catch{} }
   // Basic sanitizer for HTML mode: strip <script> and inline event handlers, and javascript: URLs
   function sanitizeHtml(html){
     try{
@@ -26,19 +39,49 @@
   /** Add 5 resize handles (br, t, b, l, r) to a panel. */
   function addResizeHandles(panel){ const mk=(cls)=>{ const h=document.createElement('div'); h.className='flyout-resize '+cls; h.dataset.resize=cls.replace(/^.*\b([a-z]{1,2})$/, '$1'); return h; }; panel.appendChild(mk('br')); panel.appendChild(mk('t')); panel.appendChild(mk('b')); panel.appendChild(mk('l')); panel.appendChild(mk('r')); }
   /** Make a panel resizable; updates connection anchors while resizing. */
-  function wirePanelResize(panel){ const minW=280, minH=200; let startX=0,startY=0,startW=0,startH=0,startL=0,startT=0,mode=''; const onMove=(e)=>{ const p=window.pointFromEvent(e); const dx=p.x-startX, dy=p.y-startY; let w=startW,h=startH,l=startL,t=startT; if(mode.includes('r')) w=Math.max(minW, startW+dx); if(mode.includes('l')){ w=Math.max(minW, startW-dx); l=startL+Math.min(dx, startW-minW);} if(mode.includes('b')) h=Math.max(minH, startH+dy); if(mode.includes('t')){ h=Math.max(minH, startH-dy); t=startT+Math.min(dy, startH-minH);} panel.style.width=w+'px'; panel.style.height=h+'px'; panel.style.left=l+'px'; panel.style.top=t+'px'; panel.querySelectorAll('.conn-point').forEach(cp=>positionPanelConn(cp,panel)); window.updateConnectionsFor && window.updateConnectionsFor(panel); }; const onUp=()=>{ window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); }; panel.querySelectorAll('.flyout-resize').forEach(h=>{ h.addEventListener('pointerdown',(e)=>{ e.preventDefault(); const r=panel.getBoundingClientRect(); startX=e.clientX; startY=e.clientY; startW=r.width; startH=r.height; startL=r.left; startT=r.top; mode=h.dataset.resize||''; window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); }); }); }
-  /** Make a panel draggable by a specific handle element. */
-  function makePanelDraggable(panel, handle){ let sx=0,sy=0,ox=0,oy=0; const down=(e)=>{ const p=window.pointFromEvent(e); const r=panel.getBoundingClientRect(); sx=p.x; sy=p.y; ox=r.left; oy=r.top; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once:true }); }; const move=(e)=>{ const p=window.pointFromEvent(e); const nx=window.clamp(ox+(p.x-sx),0,window.innerWidth-panel.offsetWidth); const ny=window.clamp(oy+(p.y-sy),0,window.innerHeight-panel.offsetHeight); panel.style.left=nx+'px'; panel.style.top=ny+'px'; panel.querySelectorAll('.conn-point').forEach(cp=>positionPanelConn(cp,panel)); window.updateConnectionsFor && window.updateConnectionsFor(panel); }; const up=()=>{ window.removeEventListener('pointermove', move); }; handle.addEventListener('pointerdown', down); }
-  /** Generic info panel (used for Internet). */
-  function openPanel(hostEl){ const panel=document.createElement('section'); panel.className='panel-flyout show'; panel.dataset.sectionId='p'+Math.random().toString(36).slice(2,7); panel.dataset.ownerId=hostEl.dataset.id||''; panel.style.left=Math.min(window.innerWidth-360, hostEl.getBoundingClientRect().right + 12)+'px'; panel.style.top=Math.max(12, hostEl.getBoundingClientRect().top - 20)+'px'; panel.innerHTML=`
+  function wirePanelResize(panel){ const minW=280, minH=200; let startX=0,startY=0,startW=0,startH=0,startL=0,startT=0,mode=''; const onMove=(e)=>{ const p=window.pointFromEvent(e); const dx=p.x-startX, dy=p.y-startY; let w=startW,h=startH,l=startL,t=startT; if(mode.includes('r')) w=Math.max(minW, startW+dx); if(mode.includes('l')){ w=Math.max(minW, startW-dx); l=startL+Math.min(dx, startW-minW);} if(mode.includes('b')) h=Math.max(minH, startH+dy); if(mode.includes('t')){ h=Math.max(minH, startH-dy); t=startT+Math.min(dy, startH-minH);} panel.style.width=w+'px'; panel.style.height=h+'px'; panel.style.left=l+'px'; panel.style.top=t+'px'; panel.querySelectorAll('.conn-point').forEach(cp=>positionPanelConn(cp,panel)); window.updateConnectionsFor && window.updateConnectionsFor(panel); }; const onUp=()=>{ window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); savePanelGeom(panel); }; panel.querySelectorAll('.flyout-resize').forEach(h=>{ h.addEventListener('pointerdown',(e)=>{ e.preventDefault(); const r=panel.getBoundingClientRect(); startX=e.clientX; startY=e.clientY; startW=r.width; startH=r.height; startL=r.left; startT=r.top; mode=h.dataset.resize||''; window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); }); }); }
+  /** Make a panel draggable by a specific handle element (saves geometry on release). */
+  function makePanelDraggable(panel, handle){
+    let sx=0,sy=0,ox=0,oy=0;
+    const down=(e)=>{
+      const p=window.pointFromEvent(e); const r=panel.getBoundingClientRect();
+      sx=p.x; sy=p.y; ox=r.left; oy=r.top;
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up, { once:true });
+    };
+    const move=(e)=>{
+      const p=window.pointFromEvent(e);
+      const nx=window.clamp(ox+(p.x-sx),0,window.innerWidth-panel.offsetWidth);
+      const ny=window.clamp(oy+(p.y-sy),0,window.innerHeight-panel.offsetHeight);
+      panel.style.left=nx+'px'; panel.style.top=ny+'px';
+      panel.querySelectorAll('.conn-point').forEach(cp=>positionPanelConn(cp,panel));
+      window.updateConnectionsFor && window.updateConnectionsFor(panel);
+    };
+    const up=()=>{ window.removeEventListener('pointermove', move); savePanelGeom(panel); };
+    handle.addEventListener('pointerdown', down);
+  }
+  /** Generic info panel (used as a simple fallback). */
+  function openPanel(hostEl){
+    const panel=document.createElement('section');
+    panel.className='panel-flyout show';
+    panel.dataset.sectionId='p'+Math.random().toString(36).slice(2,7);
+    panel.dataset.ownerId=hostEl.dataset.id||'';
+    positionPanelNear(panel, hostEl);
+    panel.innerHTML=`
     <header class="drawer-head"><div class="brand">${hostEl.dataset.type==='user'?'User':hostEl.dataset.type==='internet'?'Internet':'CoWorker'}</div><button class="icon-btn" data-close>✕</button></header>
     <div class="messages">
       <div class="bubble">Detta är bara UI. Ingen logik körs.</div>
     </div>
     <div class="composer">
-  <textarea class="userInput" rows="1" placeholder="Skriv ett meddelande…"></textarea>
+      <textarea class="userInput" rows="1" placeholder="Skriv ett meddelande…"></textarea>
       <button class="send-btn">Skicka</button>
-    </div>`; const head=panel.querySelector('.drawer-head'); makePanelDraggable(panel, head); panel.querySelector('[data-close]').addEventListener('click', ()=>panel.remove()); document.body.appendChild(panel); }
+    </div>`;
+    addResizeHandles(panel);
+    document.body.appendChild(panel);
+    makePanelDraggable(panel, panel.querySelector('.drawer-head'));
+    try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
+    panel.querySelector('[data-close]')?.addEventListener('click', ()=>panel.remove());
+  }
   /** Open the appropriate panel for a node by its data-type. */
   function openPanelForNode(hostEl){
     if (hostEl.dataset.type==='user') openUserPanel(hostEl);
@@ -46,9 +89,114 @@
     else if (hostEl.dataset.type==='internet') { if (window.openInternetPanel) window.openInternetPanel(hostEl); else openPanel(hostEl); }
   }
   /** Wire a panel's composer (textarea + send) and message rendering. */
-  function wireComposer(panel){ const ta=panel.querySelector('.userInput'); const send=panel.querySelector('.send-btn'); const list=panel.querySelector('.messages'); const append=(text, who='user', ts=Date.now())=>{ const row=document.createElement('div'); row.className='message-row'+(who==='user'?' user':''); const group=document.createElement('div'); group.className='msg-group'; const author=document.createElement('div'); author.className='author-label'; if(panel.classList.contains('user-node-panel') && who==='user'){ const name=(panel._displayName||'').trim()||'User'; author.textContent=name; } else { const nameEl=panel.querySelector('.drawer-head .meta .name'); author.textContent=(nameEl?.textContent||(who==='user'?'User':'Assistant')).trim(); } if(panel._nameFont) author.style.fontFamily=panel._nameFont; group.appendChild(author); const b=document.createElement('div'); b.className='bubble '+(who==='user'?'user':''); const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent=text; if(panel._textFont) textEl.style.fontFamily=panel._textFont; b.appendChild(textEl); const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = (who==='user' ? 'right' : 'left'); meta.textContent = formatTime(ts); b.appendChild(meta); group.appendChild(b); row.appendChild(group); list.appendChild(row); if(panel.classList.contains('user-node-panel') && who==='user'){ const rgb=window.hexToRgb(panel._bubbleColorHex||'#7c5cff'); if(rgb){ const bg=`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${panel._bgOn ? (panel._bubbleAlpha ?? 0.1) : 0})`; const border=`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Math.min(1, panel._bgOn ? (panel._bubbleAlpha ?? 0.1) + 0.12 : 0.08)})`; b.style.backgroundColor=bg; b.style.borderColor=border; } } list.scrollTop=list.scrollHeight; }; const doSend=()=>{ const val=(ta.value||'').trim(); if(!val) return; const ownerId=panel.dataset.ownerId||null; const authorLabel = panel.querySelector('.drawer-head .meta .name'); const author = (authorLabel?.textContent||'User').trim(); let ts=Date.now(); try{ if(ownerId && window.graph){ const entry = window.graph.addMessage(ownerId, author, val, 'user'); ts = entry?.ts || ts; } }catch{} append(val,'user', ts); if(ownerId && window.routeMessageFrom){ try{ window.routeMessageFrom(ownerId, val, { author, who:'user', ts }); }catch{} } ta.value='';
+  function wireComposer(panel){ const ta=panel.querySelector('.userInput'); const send=panel.querySelector('.send-btn'); const list=panel.querySelector('.messages');
+    // Send mode dropdown (default: current-only)
+    const composerEl = panel.querySelector('.composer');
+    const ownerId = panel.dataset.ownerId||'';
+    const lsKey = (id)=>`nodeSettings:${id}`;
+    const readSaved = ()=>{ let s={}; try{ if(window.graph && ownerId) s = Object.assign({}, window.graph.getNodeSettings(ownerId)||{}); }catch{} try{ const raw = localStorage.getItem(lsKey(ownerId)); if(raw){ s = Object.assign({}, s, JSON.parse(raw)||{}); } }catch{} return s; };
+    const persist = (partial)=>{ try{ if(window.graph && ownerId) window.graph.setNodeSettings(ownerId, partial||{}); }catch{} try{ const cur = readSaved(); const next = Object.assign({}, cur, partial||{}); localStorage.setItem(lsKey(ownerId), JSON.stringify(next)); }catch{} };
+    const ensureSendModeUI = ()=>{
+      if (!composerEl || !send) return;
+      // Create a small toggle button and menu
+      if (send._modeWired) return; send._modeWired = true;
+      const wrap = document.createElement('span'); wrap.style.position='relative'; wrap.style.display='inline-block'; wrap.style.marginLeft='-4px';
+      const btn = document.createElement('button'); btn.type='button'; btn.title='Sändläge'; btn.textContent='▾'; Object.assign(btn.style,{ background:'transparent', border:'1px solid #2a2a35', color:'#cfd3e3', borderRadius:'8px', padding:'0 8px', height:'28px', marginLeft:'4px', cursor:'pointer' });
+      const menu = document.createElement('div'); menu.className='send-mode-menu hidden'; Object.assign(menu.style,{ position:'absolute', right:'0', bottom:'36px', minWidth:'220px', zIndex:'10050', display:'grid', gap:'4px', padding:'6px', background:'linear-gradient(180deg,#121219,#0e0e14)', border:'1px solid #23232b', borderRadius:'8px', boxShadow:'0 12px 28px rgba(0,0,0,0.55)' });
+      menu.innerHTML = `
+        <button type="button" data-mode="current" style="text-align:left; background:rgba(255,255,255,0.03); border:1px solid #2a2a35; color:#e6e6ec; padding:6px 8px; border-radius:6px; cursor:pointer">Skicka bara nuvarande inmatning</button>
+        <button type="button" data-mode="history-once" style="text-align:left; background:rgba(255,255,255,0.03); border:1px solid #2a2a35; color:#e6e6ec; padding:6px 8px; border-radius:6px; cursor:pointer">Skicka all historik som ett meddelande</button>
+        <button type="button" data-mode="history-seq" style="text-align:left; background:rgba(255,255,255,0.03); border:1px solid #2a2a35; color:#e6e6ec; padding:6px 8px; border-radius:6px; cursor:pointer">Skicka historik en och en (äldst först)</button>
+      `;
+      const show = ()=>{ menu.classList.remove('hidden'); };
+      const hide = ()=>{ menu.classList.add('hidden'); };
+      btn.addEventListener('click', (e)=>{ e.stopPropagation(); if (menu.classList.contains('hidden')) show(); else hide(); });
+      document.addEventListener('click', (e)=>{ if (!menu.classList.contains('hidden')) hide(); });
+      menu.addEventListener('click', (e)=>{
+        const t = e.target.closest('button[data-mode]'); if (!t) return; const mode = t.getAttribute('data-mode'); panel._sendMode = mode; persist({ sendMode: mode }); hide();
+      });
+      // initialize from saved
+      try{ const saved = readSaved(); if (saved.sendMode) panel._sendMode = String(saved.sendMode); else panel._sendMode = 'current'; }catch{ panel._sendMode = 'current'; }
+      wrap.appendChild(btn); wrap.appendChild(menu);
+      send.parentElement?.insertBefore(wrap, send.nextSibling);
+    };
+    ensureSendModeUI();
+    // Ensure an attachments bar exists
+    let attBar = panel.querySelector('[data-role="attachments"]');
+    if (!attBar){ attBar = document.createElement('div'); attBar.className = 'attachments hidden'; attBar.setAttribute('data-role','attachments'); attBar.setAttribute('aria-label','Bilagor (drag & släpp)'); const composerEl = panel.querySelector('.composer'); if (composerEl) panel.insertBefore(attBar, composerEl); }
+    panel._attachments = Array.isArray(panel._attachments) ? panel._attachments : [];
+    const detectApiBase = ()=>{ try{ if (window.API_BASE && typeof window.API_BASE === 'string') return window.API_BASE; }catch{} try{ if (location.protocol === 'file:') return 'http://localhost:8000'; if (location.port && location.port !== '8000') return 'http://localhost:8000'; }catch{} return ''; };
+    const renderAttachments = ()=>{ try{ if (!attBar) return; attBar.innerHTML=''; const items = panel._attachments||[]; if (!items.length){ attBar.classList.add('hidden'); return; } attBar.classList.remove('hidden'); items.forEach((it, idx)=>{ const chip = document.createElement('span'); chip.className = 'attachment-chip'; const name = document.createElement('span'); name.textContent = `${it.name||'fil'}${it.chars?` (${it.chars} tecken${it.truncated?', trunkerat':''})`:''}`; const rm = document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Ta bort'; rm.textContent='×'; rm.addEventListener('click', ()=>{ try{ panel._attachments.splice(idx,1); renderAttachments(); }catch{} }); chip.appendChild(name); chip.appendChild(rm); attBar.appendChild(chip); }); }catch{} };
+  const uploadFiles = async (files)=>{
+      try{
+        const arr = Array.from(files||[]).filter(f=>{
+          const n = (f.name||'').toLowerCase(); const t = (f.type||'').toLowerCase();
+          return n.endsWith('.pdf') || n.endsWith('.txt') || n.endsWith('.md') || n.endsWith('.markdown') || t.includes('pdf') || t.includes('text') || t.includes('markdown');
+        });
+        if (!arr.length) return;
+    const fd = new FormData(); arr.forEach(f=>fd.append('files', f)); fd.append('maxChars','50000');
+        const apiBase = detectApiBase();
+        const url = apiBase + '/upload?maxChars=50000';
+        const res = await fetch(url, { method:'POST', body: fd });
+        if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+        const data = await res.json();
+        if (data && Array.isArray(data.items)){
+          const toAdd = data.items.map(x=>({ name: x.name||'fil', text: String(x.text||''), chars: Number(x.chars||0), truncated: !!x.truncated }));
+          panel._attachments.push(...toAdd);
+          renderAttachments();
+        }
+      }catch(e){ console.warn('Upload error', e); }
+    };
+    // Drag & drop wiring: attach only to the panel to avoid duplicate bubbling
+    panel.addEventListener('dragover', (e)=>{ try{ e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect='copy'; }catch{} });
+    panel.addEventListener('drop', (e)=>{ try{
+      e.preventDefault(); e.stopPropagation();
+      // guard: process a drop only once per event
+      if (panel._lastDropStamp === e.timeStamp) return; panel._lastDropStamp = e.timeStamp;
+      const files = e.dataTransfer?.files; if (files && files.length){ uploadFiles(files); }
+    }catch{} });
+    const append=(text, who='user', ts=Date.now())=>{ const row=document.createElement('div'); row.className='message-row'+(who==='user'?' user':''); const group=document.createElement('div'); group.className='msg-group'; const author=document.createElement('div'); author.className='author-label'; if(panel.classList.contains('user-node-panel') && who==='user'){ const name=(panel._displayName||'').trim()||'User'; author.textContent=name; } else { const nameEl=panel.querySelector('.drawer-head .meta .name'); author.textContent=(nameEl?.textContent||(who==='user'?'User':'Assistant')).trim(); } if(panel._nameFont) author.style.fontFamily=panel._nameFont; group.appendChild(author); const b=document.createElement('div'); b.className='bubble '+(who==='user'?'user':''); const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent=text; if(panel._textFont) textEl.style.fontFamily=panel._textFont; b.appendChild(textEl); const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = (who==='user' ? 'right' : 'left'); meta.textContent = formatTime(ts); b.appendChild(meta); group.appendChild(b); row.appendChild(group); list.appendChild(row); if(panel.classList.contains('user-node-panel') && who==='user'){ const rgb=window.hexToRgb(panel._bubbleColorHex||'#7c5cff'); if(rgb){ const bg=`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${panel._bgOn ? (panel._bubbleAlpha ?? 0.1) : 0})`; const border=`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Math.min(1, panel._bgOn ? (panel._bubbleAlpha ?? 0.1) + 0.12 : 0.08)})`; b.style.backgroundColor=bg; b.style.borderColor=border; } } list.scrollTop=list.scrollHeight; };
+    const buildMessageWithAttachments = (val)=>{
+      try{
+        const items = panel._attachments||[]; if (!items.length) return val;
+        const parts = [val];
+        for (const it of items){
+          const header = `\n\n---\nBilaga: ${it.name}${it.chars?` (${it.chars} tecken${it.truncated?', trunkerat':''})`:''}\n\n`;
+          parts.push(header + (it.text||''));
+        }
+        return parts.join('');
+      }catch{ return val; }
+    };
+    const clearAttachments = ()=>{ try{ panel._attachments = []; renderAttachments(); }catch{} };
+    const doSend=()=>{ const val=(ta.value||'').trim(); if(!val) return; const ownerId=panel.dataset.ownerId||null; const authorLabel = panel.querySelector('.drawer-head .meta .name'); const author = (authorLabel?.textContent||'User').trim(); let ts=Date.now(); try{ if(ownerId && window.graph){ const entry = window.graph.addMessage(ownerId, author, val, 'user'); ts = entry?.ts || ts; } }catch{} append(val,'user', ts);
+      // Determine send mode
+      let mode = 'current'; try{ mode = panel._sendMode || (readSaved().sendMode||'current'); }catch{}
+      const entries = (window.graph && ownerId) ? (window.graph.getMessages(ownerId)||[]) : [];
+      let lastSent = '';
+      const sendCurrent = ()=>{ const msg = buildMessageWithAttachments(val); lastSent = msg; if(ownerId && window.routeMessageFrom){ try{ window.routeMessageFrom(ownerId, msg, { author, who:'user', ts }); }catch{} } };
+      const sendHistoryOnce = ()=>{
+        const parts = [];
+        try{
+          for (const m of entries){ const a = m.author || (m.who==='user'?'User':'Assistant'); const t = String(m.text||''); if (t) parts.push(`${a}: ${t}`); }
+        }catch{}
+        // include current input at the end
+        if (val) parts.push(`${author}: ${val}`);
+        let combined = parts.join('\n\n');
+        combined = buildMessageWithAttachments(combined);
+        lastSent = combined;
+        if(ownerId && window.routeMessageFrom){ try{ window.routeMessageFrom(ownerId, combined, { author, who:'user', ts }); }catch{} }
+      };
+      const sendHistorySeq = ()=>{
+        try{ for (const m of entries){ const t = String(m.text||''); if (t && ownerId && window.routeMessageFrom) window.routeMessageFrom(ownerId, t, { author, who:'user', ts }); } }catch{}
+        // send current last with attachments
+        sendCurrent();
+      };
+      if (mode === 'history-once') sendHistoryOnce();
+      else if (mode === 'history-seq') sendHistorySeq();
+      else sendCurrent();
+      ta.value=''; clearAttachments();
       // If Internet panel, kick off web-enabled reply via backend
-      try{ const host = document.querySelector(`.fab[data-id="${ownerId}"]`); if(host && host.dataset.type==='internet' && window.requestInternetReply){ window.requestInternetReply(ownerId, { text: val }); } }catch{}
+  try{ const host = document.querySelector(`.fab[data-id="${ownerId}"]`); if(host && host.dataset.type==='internet' && window.requestInternetReply){ const payload = lastSent || buildMessageWithAttachments(val); window.requestInternetReply(ownerId, { text: payload }); } }catch{}
       // If CoWorker panel, optionally kick off AI reply via backend (self chat) if enabled in settings
       try{
         const host = document.querySelector(`.fab[data-id="${ownerId}"]`);
@@ -59,12 +207,19 @@
             const raw = localStorage.getItem(`nodeSettings:${ownerId}`);
             if (raw){ const s = JSON.parse(raw)||{}; if (typeof s.selfPanelReply === 'boolean') allow = !!s.selfPanelReply; }
           }catch{}
-          if (allow) window.requestAIReply(ownerId, { text: val, sourceId: ownerId });
+          if (allow) window.requestAIReply(ownerId, { text: (mode==='current'? buildMessageWithAttachments(val) : val), sourceId: ownerId });
         }
       }catch{}
     }; send.addEventListener('click', doSend); ta.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); doSend(); } }); }
   /** Open the User panel with settings for name/fonts/colors and composer. */
-  function openUserPanel(hostEl){ const panel=document.createElement('section'); panel.className='panel-flyout show user-node-panel'; panel.dataset.sectionId='u'+Math.random().toString(36).slice(2,7); positionPanelNear(panel, hostEl); panel.style.width='360px'; panel.style.height='340px'; panel.dataset.ownerId=hostEl.dataset.id||''; panel.innerHTML=`
+  function openUserPanel(hostEl){
+    const panel=document.createElement('section');
+    panel.className='panel-flyout show user-node-panel';
+    panel.dataset.sectionId='u'+Math.random().toString(36).slice(2,7);
+    positionPanelNear(panel, hostEl);
+    panel.style.width='360px'; panel.style.height='340px';
+    panel.dataset.ownerId=hostEl.dataset.id||'';
+    panel.innerHTML=`
     <header class="drawer-head" data-role="dragHandle">
       <div class="user-avatar">👤</div>
       <div class="meta"><div class="name">User</div></div>
@@ -112,12 +267,16 @@
         <button type="button" class="btn danger" data-action="resetAll" title="Nollställ">Nollställ</button>
       </div>
     </div>
-    <div class="messages"></div>
+  <div class="messages"></div>
+  <div class="attachments hidden" data-role="attachments" aria-label="Bilagor (drag & släpp)"></div>
     <div class="composer">
       <textarea class="userInput" rows="1" placeholder="Skriv som människa…"></textarea>
       <button class="send-btn" type="button">➤</button>
     </div>`;
-    addResizeHandles(panel); document.body.appendChild(panel); makePanelDraggable(panel, panel.querySelector('.drawer-head'));
+    addResizeHandles(panel);
+    document.body.appendChild(panel);
+    makePanelDraggable(panel, panel.querySelector('.drawer-head'));
+    try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
     const clearBtn=panel.querySelector('[data-action="clear"]'); clearBtn?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
     panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true;
@@ -135,7 +294,7 @@
     const headerNameEl=panel.querySelector('.drawer-head .meta .name'); const nameInput=panel.querySelector('[data-role="name"]'); panel._displayName=''; const updateFabLabel=(text)=>{ const lab=hostEl.querySelector('.fab-label'); if(lab) lab.textContent=text; };
     nameInput?.addEventListener('input', ()=>{ panel._displayName=nameInput.value||''; const nameText=panel._displayName.trim()||'User'; if(headerNameEl) headerNameEl.textContent=nameText; updateFabLabel(nameText); }); if(headerNameEl) headerNameEl.textContent='User'; updateFabLabel('User');
     panel.querySelector('[data-action="resetAll"]')?.addEventListener('click', ()=>{ panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true; const m=messagesEl; if(m) m.innerHTML=''; if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value='10'; if(alphaVal) alphaVal.textContent='10%'; if(fontTextSel){ fontTextSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; } if(fontNameSel){ fontNameSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); } applyBubbleStyles(); });
-    panel.querySelector('[data-close]')?.addEventListener('click', ()=>{ document.removeEventListener('click', onDocClick); panel.remove(); });
+  panel.querySelector('[data-close]')?.addEventListener('click', ()=>{ document.removeEventListener('click', onDocClick); panel.remove(); });
     // Render historical messages if any
   try{
       const ownerId = panel.dataset.ownerId||''; const list = panel.querySelector('.messages');
@@ -219,7 +378,8 @@
       <textarea class="userInput" rows="1" placeholder="Skriv ett meddelande..."></textarea>
       <button class="send-btn" type="button">Skicka</button>
     </div>`;
-    addResizeHandles(panel); document.body.appendChild(panel); makePanelDraggable(panel, panel.querySelector('.drawer-head'));
+  addResizeHandles(panel); document.body.appendChild(panel); makePanelDraggable(panel, panel.querySelector('.drawer-head'));
+  try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
     const clearBtn=panel.querySelector('[data-action="clear"]'); clearBtn?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
     const delBtn=panel.querySelector('[data-action="delete"]'); delBtn?.addEventListener('click', ()=>panel.remove());
@@ -382,22 +542,74 @@
     try{
       const sec = document.querySelector(`.panel.board-section[data-section-id="${sectionId}"]`)
                 || document.querySelector(`.panel.board-section:nth-of-type(${Number(sectionId?.replace(/^s/,''))||0})`);
-      const note = sec ? sec.querySelector('.note') : null;
-      if (!note) return;
-      // Determine section's own render mode
-      const readSecMode = ()=>{
+      // Determine section settings/mode first
+      const getSecSettings = ()=>{
         try{
           const id = sec?.dataset.sectionId || '';
           const raw = localStorage.getItem(`sectionSettings:${id}`);
-          const saved = raw ? JSON.parse(raw) : {};
-          return saved.renderMode || 'raw';
-        }catch{ return 'raw'; }
+          return raw ? JSON.parse(raw) : {};
+        }catch{ return {}; }
+      };
+      const settings = getSecSettings();
+      const modeNow = (sec?.dataset.mode) || settings.mode || settings.renderMode || 'raw';
+  const readSecMode = ()=> ((sec?.dataset.mode) || settings.mode || settings.renderMode || 'raw');
+      // If in exercises mode and a pending feedback index exists, store incoming text as feedback
+      if (modeNow === 'exercises'){
+        try{
+          const id = sec?.dataset.sectionId || '';
+          const idxStr = sec?.dataset.pendingFeedback;
+          if (idxStr !== undefined){
+            const idx = Math.max(0, Number(idxStr)||0);
+            const raw = localStorage.getItem(`sectionExercises:${id}`) || '[]';
+            const arr = JSON.parse(raw)||[];
+            if (arr[idx]){ arr[idx].fb = (arr[idx].fb ? (arr[idx].fb + '\n\n') : '') + String(text||''); }
+            localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(arr));
+            // clear flag and update UI if focus view is present
+            delete sec.dataset.pendingFeedback;
+            const focus = sec.querySelector('.ex-fb'); if (focus && Number(localStorage.getItem(`sectionExercisesCursor:${id}`)||'0') === idx){ focus.textContent = arr[idx].fb || ''; }
+            return; // handled
+          }
+        }catch{}
+      }
+      // Fallback to appending into the section note (non-exercises or no pending)
+      const note = sec ? sec.querySelector('.note') : null;
+      if (!note) return;
+      const ensureExercisesLayout = ()=>{
+        try{
+          const body = sec?.querySelector('.body');
+          if (body){ body.style.display = 'grid'; body.style.gridTemplateColumns = '1fr 1fr'; body.style.gap = '12px'; }
+        }catch{}
+      };
+      const importTextAsExercises = (plain)=>{
+        try{
+          if (!sec) return;
+          ensureExercisesLayout();
+          const id = sec.dataset.sectionId || '';
+          const parse = (txt)=>{ try{ return (window.__parseQuestions? window.__parseQuestions(String(txt||'')) : []); }catch{ return []; } };
+          const items = parse(String(plain||''));
+          if (!items.length) return;
+          // merge with existing
+          let cur = [];
+          try{ const raw = localStorage.getItem(`sectionExercises:${id}`); if(raw){ cur = JSON.parse(raw)||[]; } }catch{}
+          const next = cur.concat(items);
+          try{ localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(next)); }catch{}
+          try{ sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail: { id } })); }catch{}
+        }catch{}
       };
       const getSecRaw = (id)=>{ try{ return localStorage.getItem(`sectionRaw:${id}`) || ''; }catch{ return ''; } };
       const setSecRaw = (id, value)=>{ try{ localStorage.setItem(`sectionRaw:${id}`, String(value||'')); }catch{} };
       const mode = (opts && opts.mode) || readSecMode();
       const content = String(text||'');
       const id = sec?.dataset.sectionId || '';
+      if (mode === 'exercises'){
+        // In exercises mode, convert incoming content to question blocks
+        importTextAsExercises(content);
+        // Keep a raw copy as well for potential future re-render
+        const prev = getSecRaw(id);
+        const next = (prev ? (prev + '\n\n') : '') + content;
+        setSecRaw(id, next);
+        return;
+      }
       if (mode === 'md' && window.mdToHtml){
         const prev = getSecRaw(id);
         const next = (prev ? (prev + '\n\n') : '') + content;
@@ -428,6 +640,227 @@
         // Inject a simple render mode toggle if not present
         const head = sec.querySelector('.head');
         if (!head) return;
+        // Make section IO points (in/out) interactive for starting connections
+        try{
+          head.querySelectorAll('.section-io, .conn-point').forEach(io=>{
+            if (!io._wired){ window.makeConnPointInteractive && window.makeConnPointInteractive(io, sec); io._wired = true; }
+          });
+        }catch{}
+        // Exercise toolbar (Add block + Grade via cable)
+        if (!head.querySelector('[data-role="exToolbar"]')){
+          const exBar = document.createElement('div');
+          exBar.setAttribute('data-role','exToolbar');
+          exBar.style.display = 'flex';
+          exBar.style.gap = '6px';
+          exBar.style.marginLeft = '8px';
+          const btnAdd = document.createElement('button');
+          btnAdd.type = 'button'; btnAdd.textContent = 'Övningsblock +'; btnAdd.className='btn btn-ghost';
+          const btnGradeAll = document.createElement('button');
+          btnGradeAll.type = 'button'; btnGradeAll.textContent = 'Rätta alla frågor'; btnGradeAll.className='btn';
+          const btnDeleteAll = document.createElement('button');
+          btnDeleteAll.type = 'button'; btnDeleteAll.textContent = 'Ta bort alla'; btnDeleteAll.className='btn btn-ghost';
+          exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnDeleteAll);
+          // Insert before the IO point to keep layout
+          const io = head.querySelector('.section-io');
+          if (io && io.parentElement === head){ head.insertBefore(exBar, io); } else { head.appendChild(exBar); }
+          // Wire actions
+          const grid = sec.querySelector('.body .grid') || sec.querySelector('.body');
+          // Storage helpers for focus UI
+          const getExercises = ()=>{ try{ const raw = localStorage.getItem(`sectionExercises:${id}`); return raw? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
+          const setExercises = (arr)=>{ try{ localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(arr||[])); }catch{} };
+          // pending feedback target index (store transiently on section)
+          const setPendingFeedback = (idx)=>{ try{ sec.dataset.pendingFeedback = String(idx); }catch{} };
+          const clearPendingFeedback = ()=>{ try{ delete sec.dataset.pendingFeedback; }catch{} };
+          const getPendingFeedback = ()=>{ const v = sec.dataset.pendingFeedback; return (v==null||v==='') ? null : Math.max(0, Number(v)||0); };
+          const getCursor = ()=>{ try{ const n = Number(localStorage.getItem(`sectionExercisesCursor:${id}`)); const len = getExercises().length; return isNaN(n)?0: Math.max(0, Math.min(n, Math.max(0,len-1))); }catch{ return 0; } };
+          const setCursor = (i)=>{ try{ localStorage.setItem(`sectionExercisesCursor:${id}`, String(i)); }catch{} };
+      const renderExercisesFocus = ()=>{
+            try{
+              // layout
+              const body = sec.querySelector('.body');
+        if (body){ body.style.display='grid'; body.style.gridTemplateColumns='1fr 1fr'; body.style.gap='12px'; }
+        // mark mode on section for CSS (hide note)
+        sec.setAttribute('data-mode','exercises');
+              // clear old blocks view and any previous focus containers
+              sec.querySelectorAll('.exercise-block').forEach(b=>b.remove());
+              sec.querySelectorAll('.ex-focus, .ex-left, .ex-right').forEach(b=>b.remove());
+              const wrap = document.createElement('div');
+              wrap.className = 'ex-focus';
+              // Span full width and host the two panes; inner grid for equal columns
+              wrap.style.gridColumn = '1 / span 2';
+              wrap.style.display = 'grid';
+              wrap.style.gridTemplateColumns = '1fr 1fr';
+              wrap.style.gap = '12px';
+              // left
+        const left = document.createElement('div'); left.className='ex-left';
+              // right
+        const right = document.createElement('div'); right.className='ex-right';
+              // data (do not keep a stale snapshot; always read fresh via getExercises)
+              let idx = getCursor();
+              { const len = getExercises().length; if (idx >= len) idx = Math.max(0, len-1); }
+              setCursor(idx);
+              // Build left (question + nav)
+        const nav = document.createElement('div'); nav.className='ex-nav';
+              const prev = document.createElement('button'); prev.type='button'; prev.className='btn btn-ghost'; prev.textContent='←';
+              const next = document.createElement('button'); next.type='button'; next.className='btn btn-ghost'; next.textContent='→';
+              const info = document.createElement('div'); info.className='subtle';
+              const updateInfo = ()=>{ const len = getExercises().length; info.textContent = len? `Fråga ${idx+1} / ${len}` : 'Inga frågor'; };
+              nav.appendChild(prev); nav.appendChild(info); nav.appendChild(next);
+        const q = document.createElement('div'); q.className='ex-q-focus'; q.contentEditable='true'; q.spellcheck=false;
+              { 
+                const cur = getExercises(); 
+                const rawQ = cur[idx]?.q || ''; 
+                if (window.mdToHtml) {
+                  q.innerHTML = window.mdToHtml(rawQ);
+                } else {
+                  q.textContent = rawQ;
+                }
+              }
+              left.appendChild(nav); left.appendChild(q);
+              // Build right (answer + actions)
+              const a = document.createElement('textarea'); a.className='ex-a-focus'; a.rows=14; a.placeholder='Skriv ditt svar...'; { const cur = getExercises(); a.value = cur[idx]?.a || ''; }
+              const fb = document.createElement('div'); fb.className='ex-fb'; fb.setAttribute('contenteditable','true'); fb.setAttribute('spellcheck','false'); { const cur = getExercises(); fb.textContent = cur[idx]?.fb || ''; }
+              const actions = document.createElement('div'); actions.className='ex-actions';
+              const gradeOne = document.createElement('button'); gradeOne.type='button'; gradeOne.className='btn'; gradeOne.textContent='Rätta denna';
+              const del = document.createElement('button'); del.type='button'; del.className='btn btn-ghost'; del.textContent='Ta bort';
+              actions.appendChild(gradeOne); actions.appendChild(del);
+              right.appendChild(a); right.appendChild(actions); right.appendChild(fb);
+              // insert
+              wrap.appendChild(left);
+              wrap.appendChild(right);
+              grid?.appendChild(wrap);
+              updateInfo();
+              const go = (delta)=>{
+                const cur = getExercises(); const len = cur.length; if (!len) return; idx = Math.max(0, Math.min(len-1, idx+delta)); setCursor(idx);
+                const rawQ = cur[idx]?.q || '';
+                if (window.mdToHtml) {
+                  q.innerHTML = window.mdToHtml(rawQ);
+                } else {
+                  q.textContent = rawQ;
+                }
+                a.value = cur[idx]?.a || '';
+                fb.textContent = cur[idx]?.fb || '';
+                updateInfo();
+              };
+              prev.addEventListener('click', ()=>go(-1)); next.addEventListener('click', ()=>go(1));
+              q.addEventListener('input', ()=>{ const cur = getExercises(); if (cur[idx]){ cur[idx].q = String(q.textContent||'').trim(); setExercises(cur); } updateInfo(); });
+              a.addEventListener('input', ()=>{ const cur = getExercises(); if (cur[idx]){ cur[idx].a = String(a.value||'').trim(); setExercises(cur); } });
+              const saveFb = ()=>{ const cur = getExercises(); if (cur[idx]){ cur[idx].fb = String(fb.textContent||'').trim(); setExercises(cur); } };
+              fb.addEventListener('input', saveFb);
+              fb.addEventListener('blur', saveFb);
+              // delete current
+              del.addEventListener('click', ()=>{ const cur = getExercises(); if (!cur.length) return; cur.splice(idx,1); setExercises(cur); if (idx >= cur.length) idx = Math.max(0, cur.length-1); setCursor(idx); renderExercisesFocus(); });
+              // grade current
+              gradeOne.addEventListener('click', (ev)=>{
+                const btn = ev.currentTarget; const now = Date.now(); if (btn && btn._lastClick && (now - btn._lastClick) < 400) return; if (btn) btn._lastClick = now;
+                const it = getExercises()[idx]; if (!it) return;
+                const n = idx+1; const payload = `Fråga ${n}: ${it.q||''}\nSvar ${n}: ${it.a||''}`;
+                try{ const title = sec.querySelector('.head h2')?.textContent?.trim() || 'Sektion'; if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() }); }catch{}
+                // mark this index to receive incoming feedback
+                setPendingFeedback(idx);
+              });
+            }catch{}
+          };
+          sec.addEventListener('exercises-data-changed', ()=>renderExercisesFocus());
+          const renumberExercises = ()=>{
+            try{
+              const blocks = sec.querySelectorAll('.exercise-block');
+              let i = 1;
+              blocks.forEach(b=>{
+                const n = b.querySelector('.ex-num');
+                if (n) n.textContent = String(i++);
+              });
+            }catch{}
+          };
+          const createExBlock = (data)=>{
+            const box = document.createElement('div');
+            box.className = 'exercise-block';
+            box.innerHTML = `
+              <div class="ex-head" style="display:flex; align-items:center; gap:8px;">
+                <span class="ex-num" style="min-width:20px; text-align:right; color:#9aa0b4;">#</span>
+                <div class="ex-q" contenteditable="true" spellcheck="false" style="flex:1;">${(data&&data.q)?String(data.q):'Fråga...'}</div>
+              </div>
+              <textarea class="ex-a" rows="3" placeholder="Skriv ditt svar..." style="margin-top:6px;"></textarea>
+              <div class="ex-actions" style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:6px;">
+                <button type="button" data-action="grade-one" class="btn">Rätta denna</button>
+                <button type="button" data-action="del" class="btn btn-ghost">Ta bort</button>
+              </div>
+            `;
+            const a = box.querySelector('.ex-a'); if (a && data && data.a) a.value = String(data.a);
+            // Events
+            const save = ()=>saveExercises();
+            box.querySelector('.ex-q')?.addEventListener('input', save);
+            a?.addEventListener('input', save);
+            box.querySelector('[data-action="del"]')?.addEventListener('click', ()=>{ box.remove(); saveExercises(); renumberExercises(); });
+            box.querySelector('[data-action="grade-one"]')?.addEventListener('click', (ev)=>{
+              // Guard against double-trigger (e.g., event bubbling or fast double click)
+              const btn = ev.currentTarget;
+              const now = Date.now();
+              if (btn && btn._lastClick && (now - btn._lastClick) < 400) return;
+              if (btn) btn._lastClick = now;
+              const q = String(box.querySelector('.ex-q')?.textContent||'').trim();
+              const ans = String(box.querySelector('.ex-a')?.value||'').trim();
+              const n = String(box.querySelector('.ex-num')?.textContent||'').trim() || '?';
+              // Serialize a single Q/A
+              const payload = `Fråga ${n}: ${q}\nSvar ${n}: ${ans}`;
+              try{
+                const title = sec.querySelector('.head h2')?.textContent?.trim() || 'Sektion';
+                // Use the section's id to route out via cables
+                if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() });
+              }catch{}
+            });
+            grid?.appendChild(box);
+            saveExercises();
+            renumberExercises();
+          };
+          const collectExercises = ()=>{
+            const out = []; const blocks = sec.querySelectorAll('.exercise-block');
+            if (blocks.length){ blocks.forEach(b=>{ const q = String(b.querySelector('.ex-q')?.textContent||'').trim(); const a = String(b.querySelector('.ex-a')?.value||'').trim(); if (q||a) out.push({ q, a }); }); return out; }
+            return getExercises();
+          };
+          const saveExercises = ()=>{ try{ const data = collectExercises(); localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(data)); sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id } })); }catch{} };
+          const loadExercises = ()=>{ try{ const raw = localStorage.getItem(`sectionExercises:${id}`); if(!raw) return; const data = JSON.parse(raw)||[]; if (sec.querySelector('.ex-focus')){ renderExercisesFocus(); } else { data.forEach(d=>createExBlock(d)); renumberExercises(); } }catch{} };
+          btnAdd.addEventListener('click', ()=>{
+            if (sec.querySelector('.ex-focus')){
+              const arr = getExercises(); arr.push({ q:'Fråga...', a:'' }); setExercises(arr); setCursor(arr.length-1); renderExercisesFocus();
+            } else {
+              createExBlock();
+            }
+          });
+          btnGradeAll.addEventListener('click', ()=>{
+            const data = collectExercises();
+            if (!data.length){ alert('Inga övningsblock i sektionen.'); return; }
+            // Serialize to a grading-friendly text
+            const parts = [];
+            data.forEach((it, idx)=>{
+              const n = idx+1;
+              parts.push(`Fråga ${n}: ${it.q||''}`);
+              parts.push(`Svar ${n}: ${it.a||''}`);
+              parts.push('');
+            });
+            const text = parts.join('\n');
+            try{
+              const title = sec.querySelector('.head h2')?.textContent?.trim() || 'Sektion';
+              if (window.routeMessageFrom) window.routeMessageFrom(id, text, { author: title, who:'user', ts: Date.now() });
+            }catch{}
+          });
+          btnDeleteAll.addEventListener('click', ()=>{
+            if (!confirm('Ta bort alla frågor i denna sektion?')) return;
+            // Clear storage
+            try{ localStorage.setItem(`sectionExercises:${id}`, JSON.stringify([])); }catch{}
+            try{ localStorage.removeItem(`sectionExercisesCursor:${id}`); }catch{}
+            // Clear any pending feedback flag
+            try{ delete sec.dataset.pendingFeedback; }catch{}
+            // Remove UI blocks or re-render focus
+            if (sec.querySelector('.ex-focus')){
+              setExercises([]); setCursor(0);
+              try{ sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id } })); }catch{}
+            } else {
+              try{ sec.querySelectorAll('.exercise-block').forEach(b=>b.remove()); }catch{}
+            }
+          });
+          // Initial load handled later by the mode-aware renderer below
+        }
         if (!head.querySelector('[data-role="secRenderMode"]')){
           const wrap = document.createElement('div');
           wrap.style.marginLeft = 'auto';
@@ -439,14 +872,14 @@
           label.textContent = 'Visning:';
           const sel = document.createElement('select');
           sel.setAttribute('data-role','secRenderMode');
-          sel.innerHTML = '<option value="raw">Rå text</option><option value="md">Markdown</option><option value="html">HTML</option>';
+          sel.innerHTML = '<option value="raw">Rå text</option><option value="md">Markdown</option><option value="html">HTML</option><option value="exercises">Övningsblock</option>';
           // load saved
           try{
             const raw = localStorage.getItem(`sectionSettings:${id}`);
             const saved = raw ? JSON.parse(raw) : {};
             if (saved.renderMode) sel.value = saved.renderMode;
           }catch{}
-          sel.addEventListener('change', ()=>{
+    sel.addEventListener('change', ()=>{
             try{
               const raw = localStorage.getItem(`sectionSettings:${id}`);
               const cur = raw ? JSON.parse(raw) : {};
@@ -456,21 +889,35 @@
               const note = sec.querySelector('.note');
               if (note){
                 const mode = sel.value;
-                if (mode === 'md' && window.mdToHtml){
+                if (mode === 'exercises'){
+      // Render single-question focus UI
+      try{ const body = sec.querySelector('.body'); if (body){ body.style.display='grid'; body.style.gridTemplateColumns='1fr 1fr'; body.style.gap='12px'; } }catch{}
+      sec.setAttribute('data-mode','exercises');
+      try{ sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id } })); }catch{}
+                } else if (mode === 'md' && window.mdToHtml){
+      sec.removeAttribute('data-mode');
+      // remove focus UI if present
+      try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
                   const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
                   localStorage.setItem(`sectionRaw:${id}`, src);
                   note.innerHTML = window.mdToHtml(src);
                   note.dataset.rendered = '1';
                 } else if (mode === 'html'){
+      sec.removeAttribute('data-mode');
+      try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
                   const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
                   localStorage.setItem(`sectionRaw:${id}`, src);
                   note.innerHTML = sanitizeHtml(src);
                   note.dataset.rendered = '1';
                 } else {
+      sec.removeAttribute('data-mode');
+      try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
                   const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
                   localStorage.setItem(`sectionRaw:${id}`, src);
                   note.textContent = src;
                   delete note.dataset.rendered;
+                  // reset layout
+                  try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
                 }
               }
             }catch{}
@@ -485,65 +932,158 @@
         // Note focus/blur: auto MD render on blur when mode=md
         const note = sec.querySelector('.note');
         if (note){
-          note.addEventListener('focus', ()=>{
-            try{
-              const raw = localStorage.getItem(`sectionRaw:${id}`);
-              const mode = (function(){ const s = localStorage.getItem(`sectionSettings:${id}`); try{ return (s?JSON.parse(s):{}).renderMode||'raw'; }catch{ return 'raw'; } })();
-              if (mode === 'md' || mode === 'html'){
-                if (raw != null){ note.textContent = raw; delete note.dataset.rendered; }
-                else {
-                  const src = (mode === 'md') ? (note.innerText || '') : (note.innerHTML || '');
-                  localStorage.setItem(`sectionRaw:${id}`, src);
-                }
+          // Add 'Redigera' button for Markdown mode
+          let editBtn = head.querySelector('.edit-md-btn');
+          if (!editBtn) {
+            editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.textContent = 'Redigera';
+            editBtn.className = 'edit-md-btn btn btn-ghost';
+            editBtn.style.marginLeft = '8px';
+            head.appendChild(editBtn);
+          }
+          let editing = false;
+          let textarea = null;
+          const renderMarkdown = ()=>{
+            const src = localStorage.getItem(`sectionRaw:${id}`) || '';
+            note.innerHTML = window.mdToHtml ? window.mdToHtml(src) : src;
+            note.dataset.rendered = '1';
+          };
+          const startEdit = ()=>{
+            if (editing) return;
+            editing = true;
+            const src = localStorage.getItem(`sectionRaw:${id}`) || '';
+            textarea = document.createElement('textarea');
+            textarea.className = 'md-edit-area';
+            textarea.value = src;
+            textarea.style.width = '100%';
+            textarea.style.minHeight = '180px';
+            textarea.style.fontFamily = 'monospace';
+            textarea.style.fontSize = '1em';
+            textarea.style.marginTop = '8px';
+            note.innerHTML = '';
+            note.appendChild(textarea);
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+            textarea.addEventListener('keydown', (e)=>{
+              if ((e.key === 'Enter' && (e.ctrlKey || e.metaKey)) || (e.key === 'Escape')){
+                e.preventDefault(); finishEdit();
               }
-            }catch{}
-          });
-          note.addEventListener('blur', ()=>{
-            try{
-              const mode = (function(){ const s = localStorage.getItem(`sectionSettings:${id}`); try{ return (s?JSON.parse(s):{}).renderMode||'raw'; }catch{ return 'raw'; } })();
-              const alreadyRendered = note.dataset.rendered === '1';
-              const storedRaw = localStorage.getItem(`sectionRaw:${id}`) || '';
-              const src = alreadyRendered ? storedRaw : (note.textContent || '');
-              // Only update stored raw if we were editing (not already rendered)
-              if (!alreadyRendered){ localStorage.setItem(`sectionRaw:${id}`, src); }
-              if (mode === 'md' && window.mdToHtml){ note.innerHTML = window.mdToHtml(src); note.dataset.rendered = '1'; }
-              else if (mode === 'html'){ note.innerHTML = sanitizeHtml(src); note.dataset.rendered = '1'; }
-            }catch{}
-          });
-          // Ctrl+Enter: render immediately without losing focus context permanently
-          note.addEventListener('keydown', (e)=>{
-            try{
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){
-                e.preventDefault();
-                const src = note.textContent || '';
-                localStorage.setItem(`sectionRaw:${id}`, src);
-                const mode = (function(){ const s = localStorage.getItem(`sectionSettings:${id}`); try{ return (s?JSON.parse(s):{}).renderMode||'raw'; }catch{ return 'raw'; } })();
-                if (mode === 'md' && window.mdToHtml){ note.innerHTML = window.mdToHtml(src); note.dataset.rendered = '1'; }
-                else if (mode === 'html'){ note.innerHTML = sanitizeHtml(src); note.dataset.rendered = '1'; }
-                else { note.textContent = src; }
-              }
-            }catch{}
-          });
-          // Initial render if mode=md and we have stored raw
-          try{
-            const s = localStorage.getItem(`sectionSettings:${id}`);
-            const mode = s ? (JSON.parse(s).renderMode || 'raw') : 'raw';
-            if (mode === 'md' && window.mdToHtml){
-              const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
-              localStorage.setItem(`sectionRaw:${id}`, src);
-              note.innerHTML = window.mdToHtml(src);
-              note.dataset.rendered = '1';
-            } else if (mode === 'html'){
-              const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
-              localStorage.setItem(`sectionRaw:${id}`, src);
-              note.innerHTML = sanitizeHtml(src);
-              note.dataset.rendered = '1';
-            }
-          }catch{}
+            });
+            textarea.addEventListener('blur', finishEdit);
+          };
+          const finishEdit = ()=>{
+            if (!editing) return;
+            editing = false;
+            const val = textarea.value;
+            localStorage.setItem(`sectionRaw:${id}`, val);
+            renderMarkdown();
+            textarea = null;
+          };
+          editBtn.onclick = ()=>{ if (!editing) startEdit(); };
+          // Only show edit button in Markdown mode
+          const s = localStorage.getItem(`sectionSettings:${id}`);
+          const mode = s ? (JSON.parse(s).renderMode || 'raw') : 'raw';
+          editBtn.style.display = (mode === 'md') ? '' : 'none';
+          // Initial render
+          if (mode === 'exercises'){
+            try{ const body = sec.querySelector('.body'); if (body){ body.style.display='grid'; body.style.gridTemplateColumns='1fr 1fr'; body.style.gap='12px'; } }catch{}
+            sec.setAttribute('data-mode','exercises');
+            try{ sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id } })); }catch{}
+          } else if (mode === 'md' && window.mdToHtml){
+            renderMarkdown();
+          } else if (mode === 'html'){
+            const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
+            localStorage.setItem(`sectionRaw:${id}`, src);
+            note.innerHTML = sanitizeHtml(src);
+            note.dataset.rendered = '1';
+          }
         }
       });
     }catch{}
   }
+  // Utilities to import questions into a section as exercise blocks
+  (function(){
+    function parseQuestions(text){
+      try{
+        const src = String(text||'');
+        const lines = src.split(/\r?\n/);
+        const items = [];
+        let buf = [];
+        const flush = ()=>{ const q = buf.join(' ').trim(); if (q) items.push({ q }); buf = []; };
+        for (let i=0;i<lines.length;i++){
+          const line = lines[i].trim();
+          if (!line){ flush(); continue; }
+          const isNum = /^\d+[\).]\s+/.test(line);
+          const isBullet = /^[-*•]\s+/.test(line);
+          const isQ = /^(fråga|question|q[:\-\.]?)\s*/i.test(line);
+          const isA = /^(svar|answer|a[:\-\.]?)\s*/i.test(line);
+          if (isNum || (isBullet && buf.length===0) || (isQ && buf.length===0)){
+            flush();
+            const re = new RegExp('^(?:\\d+[\\)\\.]\\s+|[-*•]\\s+|(?:fråga|question|q)[:\\-\\.]?\\s*)','i');
+            const cleaned = line.replace(re, '');
+            buf.push(cleaned);
+            continue;
+          }
+          if (isA){
+            const ans = line.replace(/^(svar|answer|a)[:\-\.]?\s*/i, '');
+            if (!buf.length) { items.push({ q:'', a: ans }); }
+            else { const q = buf.join(' ').trim(); items.push({ q, a: ans }); buf = []; }
+            continue;
+          }
+          buf.push(line);
+        }
+        flush();
+        return items.filter(it => it.q || it.a);
+      }catch{ return []; }
+    }
+    function saveExercises(sec){
+      try{
+        const id = sec?.dataset.sectionId||''; if (!id) return;
+        const blocks = sec.querySelectorAll('.exercise-block');
+        const out = [];
+        blocks.forEach(b=>{ const q = String(b.querySelector('.ex-q')?.textContent||'').trim(); const a = String(b.querySelector('.ex-a')?.value||'').trim(); if (q||a) out.push({ q, a }); });
+        localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(out));
+      }catch{}
+    }
+    function renumber(sec){
+      try{ let i=1; sec.querySelectorAll('.exercise-block .ex-num').forEach(n=>n.textContent=String(i++)); }catch{}
+    }
+    function createBlock(sec, data){
+      const grid = sec.querySelector('.body .grid') || sec.querySelector('.body');
+      const box = document.createElement('div');
+      box.className = 'exercise-block';
+      box.innerHTML = `
+        <div class="ex-head" style="display:flex; align-items:center; gap:8px;">
+          <span class="ex-num" style="min-width:20px; text-align:right; color:#9aa0b4;">#</span>
+          <div class="ex-q" contenteditable="true" spellcheck="false" style="flex:1;"></div>
+        </div>
+        <textarea class="ex-a" rows="3" placeholder="Skriv ditt svar..." style="margin-top:6px;"></textarea>
+        <div class="ex-actions" style="display:flex; justify-content:flex-end; gap:8px; margin-top:6px;"><button type="button" data-action="del" class="btn btn-ghost">Ta bort</button></div>
+      `;
+      box.querySelector('.ex-q').textContent = (data&&data.q)?String(data.q):'Fråga...';
+      const a = box.querySelector('.ex-a'); if (a && data && data.a) a.value = String(data.a);
+      box.querySelector('.ex-q')?.addEventListener('input', ()=>saveExercises(sec));
+      a?.addEventListener('input', ()=>saveExercises(sec));
+      box.querySelector('[data-action="del"]')?.addEventListener('click', ()=>{ box.remove(); saveExercises(sec); renumber(sec); });
+      grid?.appendChild(box);
+    }
+    function clearBlocks(sec){
+      try{ sec.querySelectorAll('.exercise-block').forEach(b=>b.remove()); }catch{}
+    }
+    function importExercisesIntoSection(sec, text, opts){
+      try{
+        const items = parseQuestions(text);
+        if (!items.length) return;
+        if (!opts || !opts.append) clearBlocks(sec);
+        items.forEach(it=>createBlock(sec, it));
+        saveExercises(sec);
+        renumber(sec);
+      }catch{}
+    }
+    window.__importExercisesIntoSection = importExercisesIntoSection;
+    window.__parseQuestions = parseQuestions;
+  })();
   // expose
   window.openPanel = openPanel;
   window.openUserPanel = openUserPanel;

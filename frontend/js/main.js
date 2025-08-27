@@ -21,6 +21,29 @@
 				window.createIcon('internet', midX + 200, 160);
 			}
 
+			// Persist Node Board headings (Analys/Idéer/Produktion) across reloads
+			try{
+				const LS_KEY = 'nbTitles:v1';
+				const loadMap = ()=>{ try{ const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) || {} : {}; }catch{ return {}; } };
+				const saveMap = (m)=>{ try{ localStorage.setItem(LS_KEY, JSON.stringify(m||{})); }catch{} };
+				const titles = document.querySelectorAll('#nodeBoard .nb-sec');
+				const map = loadMap();
+				titles.forEach(sec => {
+					const id = sec.getAttribute('data-nb-id') || '';
+					const t = sec.querySelector('.nb-title');
+					if (!t) return;
+					if (id && map[id]) t.textContent = String(map[id]);
+					const onChange = ()=>{
+						const cur = (t.textContent||'').trim();
+						if (!id) return;
+						map[id] = cur || '';
+						saveMap(map);
+					};
+					t.addEventListener('input', onChange);
+					t.addEventListener('blur', onChange);
+				});
+			}catch{}
+
 			const addBtn = document.getElementById('addCopilotBtn');
 			// Legacy click-to-create handler removed; creation is now handled by the dropdown in index.html
 

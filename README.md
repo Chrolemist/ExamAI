@@ -55,6 +55,33 @@ python -m http.server 8080
 cd backend && python -m pytest ../tests/test_app.py -v
 ```
 
+## Run with Docker Compose
+
+Prerequisites: Docker Desktop.
+
+Steps (PowerShell):
+
+```powershell
+# optional: set keys
+Copy-Item .env.example .env -Force
+notepad .env
+
+# build and start
+docker compose up -d --build
+
+# logs (optional)
+docker compose logs -f backend
+```
+
+Open:
+- Frontend: http://localhost:5500
+- Backend API: http://localhost:8000
+
+Notes:
+- Frontend is served by nginx; it fetches the backend at localhost:8000.
+- To stop: `docker compose down`
+- To update code: edit files and run `docker compose up -d --build`
+
 ## Arkitektur
 
 Projektet följer **SOLID-principerna** med:
