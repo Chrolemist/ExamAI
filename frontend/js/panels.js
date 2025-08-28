@@ -1489,6 +1489,8 @@
       sec.removeAttribute('data-mode');
       // remove focus UI if present
       try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
+  // reset layout to single-column content area
+  try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
                   const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
                   localStorage.setItem(`sectionRaw:${id}`, src);
                   note.innerHTML = window.mdToHtml(src);
@@ -1496,6 +1498,7 @@
                 } else if (mode === 'html'){
       sec.removeAttribute('data-mode');
       try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
+  try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
                   const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
                   localStorage.setItem(`sectionRaw:${id}`, src);
                   note.innerHTML = sanitizeHtml(src);
@@ -1512,6 +1515,8 @@
                 }
                 // Update toolbars for new mode
                 try{ updateToolbarVisibility(mode); }catch{}
+        // Toggle Markdown edit button visibility
+        try{ const editBtnNow = head.querySelector('.edit-md-btn'); if (editBtnNow) editBtnNow.style.display = (mode === 'md') ? '' : 'none'; }catch{}
               }
             }catch{}
           });
@@ -1584,8 +1589,11 @@
             sec.setAttribute('data-mode','exercises');
             try{ sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id } })); }catch{}
           } else if (mode === 'md' && window.mdToHtml){
+            // ensure layout is reset to single-column
+            try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
             renderMarkdown();
           } else if (mode === 'html'){
+            try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
             const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
             localStorage.setItem(`sectionRaw:${id}`, src);
             note.innerHTML = sanitizeHtml(src);
