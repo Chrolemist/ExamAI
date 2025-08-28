@@ -42,39 +42,9 @@
       <!-- Main Content Area -->
       <div class="layout">
         <main class="content">
-  <section class="panel board-section" aria-label="Teori" data-section-id="s-teori">
-            <div class="head">
-        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
-      <div class="section-io conn-point io-out" data-io="out" data-side="l"></div>
-      <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
-            </div>
-            <div class="body">
-              <div class="grid"></div>
-        <article class="note" contenteditable="true" spellcheck="false"></article>
-            </div>
-          </section>
-  <section class="panel board-section" aria-label="Exempel" data-section-id="s-exempel">
-            <div class="head">
-        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
-      <div class="section-io conn-point io-out" data-io="out" data-side="l"></div>
-      <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
-            </div>
-            <div class="body">
-              <div class="grid"></div>
-        <article class="note" contenteditable="true" spellcheck="false"></article>
-            </div>
-          </section>
-  <section class="panel board-section" aria-label="Övningsuppgifter" data-section-id="s-ovningar">
-            <div class="head">
-        <h2 contenteditable="true" spellcheck="false">Skriv rubrik</h2>
-      <div class="section-io conn-point io-out" data-io="out" data-side="l"></div>
-      <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
-            </div>
-            <div class="body">
-              <div class="grid"></div>
-        <article class="note" contenteditable="true" spellcheck="false"></article>
-            </div>
-          </section>
+          <div class="board-sections-toolbar" aria-label="Sektioner" style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+            <button id="addBoardSectionBtn" class="btn" type="button" title="Lägg till sektion">+ Sektion</button>
+          </div>
         </main>
       </div>
     </div>
@@ -98,6 +68,7 @@
   <script src="js/internet-node.js"></script>
   <script src="js/persistence.js"></script>
   <script src="js/snapshot-panel.js"></script>
+  <script src="js/board-sections.js"></script>
   <!-- UI: nodes and panels -->
   <script src="js/panels.js"></script>
   <script src="js/nodes-ui.js"></script>
