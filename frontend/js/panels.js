@@ -1627,6 +1627,36 @@
           const btnClear = document.createElement('button');
           btnClear.type = 'button'; btnClear.textContent = 'Rensa all text'; btnClear.className='btn btn-ghost';
           tBar.appendChild(btnClear);
+          // Parking selector for non-exercises modes: choose a coworker to auto-append replies as input
+          try{
+            const parkWrap = document.createElement('label');
+            parkWrap.className = 'subtle';
+            parkWrap.style.display = 'flex';
+            parkWrap.style.alignItems = 'center';
+            parkWrap.style.gap = '6px';
+            parkWrap.style.marginLeft = '12px';
+            const span = document.createElement('span'); span.textContent = 'Inmatning:';
+            const sel = document.createElement('select'); sel.className = 'btn';
+            parkWrap.appendChild(span); parkWrap.appendChild(sel);
+            tBar.appendChild(parkWrap);
+            const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
+            const setParking = (obj)=>{ try{ localStorage.setItem(`sectionParking:${id}`, JSON.stringify(obj||{})); }catch{} };
+            const fillFromCoworkers = ()=>{
+              const opts = [{ value:'', label:'— Välj nod —' }];
+              try{
+                document.querySelectorAll('.fab[data-type="coworker"]').forEach(el=>{
+                  const value = el.dataset.id||''; const label = el.dataset.displayName || ('CoWorker '+value);
+                  if (value) opts.push({ value, label });
+                });
+              }catch{}
+              sel.innerHTML='';
+              opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); });
+              try{ const cur = getParking(); const prev = cur && cur.input ? String(cur.input) : ''; if (prev) sel.value = prev; }catch{}
+            };
+            fillFromCoworkers();
+            window.addEventListener('coworkers-changed', fillFromCoworkers);
+            sel.addEventListener('change', ()=>{ const p=getParking(); p.input = sel.value||null; setParking(p); });
+          }catch{}
           head.appendChild(tBar);
           btnClear.addEventListener('click', ()=>{
             if (!confirm('Rensa all text i denna sektion?')) return;
