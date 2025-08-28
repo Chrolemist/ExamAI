@@ -54,6 +54,11 @@
       let s = String(html||'');
       // remove scripts
       s = s.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+  // remove style tags and external stylesheets/metadata that could leak globally
+  s = s.replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '');
+  s = s.replace(/<link[^>]*>/gi, '');
+  s = s.replace(/<meta[^>]*>/gi, '');
+  s = s.replace(/<base[^>]*>/gi, '');
       // remove on*="..." attributes
       s = s.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '');
       s = s.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');
@@ -64,6 +69,7 @@
       return s;
     }catch{ return String(html||''); }
   }
+  try{ window.sanitizeHtml = sanitizeHtml; }catch{}
   /** Position a panel's I/O point at the panel edges. */
   function positionPanelConn(cp, panel){ const rect = panel.getBoundingClientRect(); const pos = { t:[rect.width/2, 0], b:[rect.width/2, rect.height], l:[0, rect.height/2], r:[rect.width, rect.height/2] }[cp.dataset.side]; cp.style.left = pos[0] + 'px'; cp.style.top = pos[1] + 'px'; }
   /** Position a flyout panel near its host node. */
@@ -92,6 +98,66 @@
     const up=()=>{ window.removeEventListener('pointermove', move); savePanelGeom(panel); };
     handle.addEventListener('pointerdown', down);
   }
+  /** Duplicate a node (clone settings, increment name, place near original). */
+  function duplicateNode(hostEl){
+    try{
+      if (!hostEl) return null;
+      const ownerId = hostEl.dataset.id||'';
+      const type = hostEl.dataset.type||'coworker';
+      const rect = hostEl.getBoundingClientRect();
+      const scrollX = window.scrollX || window.pageXOffset || 0;
+      const scrollY = window.scrollY || window.pageYOffset || 0;
+      const nx = Math.round(rect.left + scrollX + 28);
+      const ny = Math.round(rect.top + scrollY + 28);
+      // Read combined settings (Graph + localStorage)
+      const lsKey = (id)=>`nodeSettings:${id}`;
+      let saved = {};
+      try{ if (window.graph && ownerId){ saved = Object.assign({}, window.graph.getNodeSettings(ownerId)||{}); } }catch{}
+      try{ const raw = localStorage.getItem(lsKey(ownerId)); if (raw){ saved = Object.assign({}, saved, JSON.parse(raw)||{}); } }catch{}
+      const origName = (saved.name || hostEl.dataset.displayName || (type==='coworker'?'CoWorker':type==='user'?'User':'Internet')).trim();
+      const m = origName.match(/^(.*?)(?:\s+(\d+))$/);
+      const base = (m ? m[1] : origName).trim();
+      const nextNum = m ? (Number(m[2]) + 1) : 2;
+      const newName = `${base} ${nextNum}`;
+      // Create new node of same type
+      let newEl = null;
+      if (window.createIcon) newEl = window.createIcon(type, nx, ny);
+      if (!newEl) return null;
+      const newId = newEl.dataset.id||'';
+      // Persist cloned settings with updated name
+      const next = Object.assign({}, saved, { name: newName });
+      try{ if (window.graph && newId) window.graph.setNodeSettings(newId, next); }catch{}
+      try{ localStorage.setItem(lsKey(newId), JSON.stringify(next)); }catch{}
+      // Clone attachments: copy persisted list and drop ephemeral blobUrl
+      try{
+        const attOldKey = `nodeAttachments:${ownerId}`;
+        const attNewKey = `nodeAttachments:${newId}`;
+        const raw = localStorage.getItem(attOldKey);
+        if (raw){
+          const items = (JSON.parse(raw)||[]).map(it=>{
+            return {
+              name: it.name || 'fil',
+              text: String(it.text||''),
+              chars: Number(it.chars||0),
+              truncated: !!it.truncated,
+              url: it.url || '',
+              // omit blobUrl; optionally keep origUrl if present
+              origUrl: it.origUrl || '',
+              mime: it.mime || '',
+              pages: Array.isArray(it.pages)? it.pages : []
+            };
+          });
+          localStorage.setItem(attNewKey, JSON.stringify(items));
+        }
+      }catch{}
+      // Update visual label on FAB
+      try{ const lab = newEl.querySelector('.fab-label'); if (lab) lab.textContent = newName; newEl.dataset.displayName = newName; }catch{}
+      // Announce coworker list change to refresh parking dropdowns
+      try{ if (type === 'coworker') window.dispatchEvent(new CustomEvent('coworkers-changed')); }catch{}
+      return newEl;
+    }catch{ return null; }
+  }
+  try{ window.duplicateNode = duplicateNode; }catch{}
   /** Generic info panel (used as a simple fallback). */
   function openPanel(hostEl){
     const panel=document.createElement('section');
@@ -320,10 +386,11 @@
     panel.style.width='360px'; panel.style.height='340px';
     panel.dataset.ownerId=hostEl.dataset.id||'';
     panel.innerHTML=`
-    <header class="drawer-head" data-role="dragHandle">
+  <header class="drawer-head" data-role="dragHandle">
       <div class="user-avatar">👤</div>
       <div class="meta"><div class="name">User</div></div>
-      <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+  <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+  <button class="icon-btn" data-action="duplicate" title="Duplicera nod">⧉</button>
       <button class="icon-btn" data-action="clear" title="Rensa chatt">🧹</button>
   <button class="icon-btn" data-action="delete" title="Radera">🗑</button>
       <button class="icon-btn" data-close>✕</button>
@@ -385,7 +452,9 @@
     makePanelDraggable(panel, panel.querySelector('.drawer-head'));
     try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
-    const clearBtn=panel.querySelector('[data-action="clear"]');
+  const clearBtn=panel.querySelector('[data-action="clear"]');
+  // Duplicate node for User
+  try{ const dupBtn = panel.querySelector('[data-action="duplicate"]'); dupBtn?.addEventListener('click', ()=>{ try{ duplicateNode(hostEl); }catch{} }); }catch{}
     clearBtn?.addEventListener('click', ()=>{
       try{
         const m=panel.querySelector('.messages'); if(m) m.innerHTML='';
@@ -479,7 +548,8 @@
   <div class="meta"><div class="name">${headerName}</div></div>
       <span class="badge" data-role="roleBadge" title="Roll">Roll</span>
       <span class="badge badge-error" data-role="keyStatus">Ingen nyckel</span>
-      <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+  <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+  <button class="icon-btn" data-action="duplicate" title="Duplicera nod">⧉</button>
       <button class="icon-btn" data-action="clear" title="Rensa chatt">🧹</button>
       <button class="icon-btn" data-action="delete" title="Radera">🗑</button>
       <button class="icon-btn" data-close>✕</button>
@@ -536,7 +606,9 @@
   addResizeHandles(panel); document.body.appendChild(panel); makePanelDraggable(panel, panel.querySelector('.drawer-head'));
   try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
-    const clearBtn=panel.querySelector('[data-action="clear"]');
+  const clearBtn=panel.querySelector('[data-action="clear"]');
+  // Duplicate node: clone settings + name with increment
+  try{ const dupBtn = panel.querySelector('[data-action="duplicate"]'); dupBtn?.addEventListener('click', ()=>{ try{ duplicateNode(hostEl); }catch{} }); }catch{}
     clearBtn?.addEventListener('click', ()=>{
       try{
         const m=panel.querySelector('.messages'); if(m) m.innerHTML='';
@@ -1197,7 +1269,7 @@
         const prev = getSecRaw(id);
         const next = (prev ? (prev + '\n\n') : '') + content;
         setSecRaw(id, next);
-        note.innerHTML = window.mdToHtml(next);
+        note.innerHTML = sanitizeHtml(window.mdToHtml(next));
         note.dataset.rendered = '1';
       } else if (mode === 'html'){
         const prev = getSecRaw(id);
@@ -1806,7 +1878,7 @@
   try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
                   const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
                   localStorage.setItem(`sectionRaw:${id}`, src);
-                  note.innerHTML = window.mdToHtml(src);
+                  note.innerHTML = sanitizeHtml(window.mdToHtml(src));
                   note.dataset.rendered = '1';
                 } else if (mode === 'html'){
       sec.removeAttribute('data-mode');
@@ -1857,7 +1929,7 @@
           let textarea = null;
           const renderMarkdown = ()=>{
             const src = localStorage.getItem(`sectionRaw:${id}`) || '';
-            note.innerHTML = window.mdToHtml ? window.mdToHtml(src) : src;
+            note.innerHTML = window.mdToHtml ? sanitizeHtml(window.mdToHtml(src)) : sanitizeHtml(src);
             note.dataset.rendered = '1';
           };
           const startEdit = ()=>{

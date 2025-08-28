@@ -59,7 +59,8 @@
       <div class="meta"><div class="name">${headerName}</div></div>
       <span class="badge" data-role="roleBadge" title="Roll">Roll</span>
       <span class="badge badge-error" data-role="keyStatus">Ingen nyckel</span>
-      <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+    <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
+  <button class="icon-btn" data-action="duplicate" title="Duplicera nod">⧉</button>
   <button class="icon-btn" data-action="clear" title="Rensa chatt">🧹</button>
   <button class="icon-btn" data-action="delete" title="Radera">🗑</button>
   <button class="icon-btn" data-close>✕</button>
@@ -182,7 +183,9 @@
         panel.remove();
       });
     }catch{}
-    panel.querySelector('[data-action="clear"]')?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
+  panel.querySelector('[data-action="clear"]')?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
+  // Duplicate Internet node
+  try{ const dupBtn = panel.querySelector('[data-action="duplicate"]'); dupBtn?.addEventListener('click', ()=>{ try{ window.duplicateNode && window.duplicateNode(hostEl); }catch{} }); }catch{}
     // Settings toggle
     try{
       const settingsBtn = panel.querySelector('[data-action="settings"]');

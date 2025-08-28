@@ -1,4 +1,21 @@
 (function(){
+  // Local sanitizer to prevent style/script/link/meta/base leakage in full-screen page
+  function sanitizeHtmlLocal(html){
+    try{
+      let s = String(html||'');
+      s = s.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+      s = s.replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '');
+      s = s.replace(/<link[^>]*>/gi, '');
+      s = s.replace(/<meta[^>]*>/gi, '');
+      s = s.replace(/<base[^>]*>/gi, '');
+      s = s.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '');
+      s = s.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');
+      s = s.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
+      s = s.replace(/(href|src)\s*=\s*"javascript:[^"]*"/gi, '$1="#"');
+      s = s.replace(/(href|src)\s*=\s*'javascript:[^']*'/gi, "$1='#'");
+      return s;
+    }catch{ return String(html||''); }
+  }
   // Query params
   const params = new URLSearchParams(location.search);
   const id = params.get('id') || '';
@@ -45,8 +62,12 @@
           const raw = localStorage.getItem(`sectionRaw:${from}`)||'';
           const s = localStorage.getItem(`sectionSettings:${from}`);
           const mode = s ? (JSON.parse(s||'{}').renderMode || 'raw') : 'raw';
-          if (mode === 'md' && window.mdToHtml){ tEl.innerHTML = window.mdToHtml(raw); }
-          else if (mode === 'html'){ tEl.innerHTML = raw; }
+      if (mode === 'md' && window.mdToHtml){ tEl.innerHTML = sanitizeHtmlLocal(window.mdToHtml(raw)); }
+          else if (mode === 'html'){
+            try{
+        tEl.innerHTML = sanitizeHtmlLocal(raw);
+            }catch{ tEl.textContent = raw; }
+          }
           else { tEl.textContent = raw; }
         } else {
           tCard.hidden = true; tEl.innerHTML = '';
@@ -58,7 +79,7 @@
   els.empty.hidden = !!arr.length;
   if (!arr.length){ els.q.innerHTML=''; els.a.value=''; els.f.innerHTML=''; if(els.infoTop) els.infoTop.textContent=''; return; }
     const it = arr[idx] || {};
-  els.q.innerHTML = (window.mdToHtml? window.mdToHtml(it.q||'') : (it.q||''));
+  els.q.innerHTML = (window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(it.q||'')) : (it.q||''));
     els.a.value = it.a || '';
     // Render feedback grouped by rounds
     const rounds = Array.isArray(it.fbRounds) ? it.fbRounds : (it.fb ? [String(it.fb)] : []);
@@ -66,7 +87,7 @@
     else {
       const parts = rounds.map((txt, i)=>{
         const head = `<div class="subtle fb-head" style="margin:6px 0 4px; opacity:.85; display:flex; align-items:center; justify-content:space-between; gap:8px;"><span>Omgång ${i+1}</span><button type="button" class="fb-del" data-ri="${i}" title="Radera omgång">✕</button></div>`;
-        const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
+  const body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
         return head + `<div class="fb-round" data-ri="${i}">${body}</div>`;
       });
       els.f.innerHTML = parts.join('<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
