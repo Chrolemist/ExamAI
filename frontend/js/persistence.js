@@ -1,5 +1,9 @@
 // Persistence: Save/Load full board state (nodes, connections, settings, sections, chat logs)
+// Responsibility: Endast snapshot-lagring/återställning (localStorage). Ingen UI här.
 // Lightweight, localStorage-based snapshots addressed by a user-provided name.
+// SOLID hints:
+// - S: UI för snapshots bor i snapshot-panel.js. Denna fil exponerar endast window.save/load/list/delete.
+// - O: Lägg nya fält i snapshot-objektet utan att bryta API. Versionera vid stora ändringar.
 (function(){
   const LS_PREFIX = 'snapshot:';
   const LS_UI_COLLAPSED = 'snapshot:uiCollapsed';

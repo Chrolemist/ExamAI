@@ -1,5 +1,10 @@
 // Internet Node: panel UI, settings, and backend web-enabled replies (classic)
+// Responsibility: Specialiserad panel för webbsök/länkar, speglar coworker men med web-verktyg.
 // Structured separately to mirror CoWorker behavior but specialized for web tools.
+// SOLID hints:
+// - S: Håll webbspecifika inställningar/UX här; allmän panel-UI i panels.js.
+// - O: Stötta fler webbpipelines genom att lägga till alternativa branches utan att flytta logik till andra filer.
+// - D: Backend-anrop via window.API_BASE och fetch; undvik hårda beroenden.
 (function(){
   function formatTime(ts){ try{ return new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); }catch{ return ''; } }
   function sanitizeHtml(html){

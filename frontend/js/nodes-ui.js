@@ -1,5 +1,8 @@
 // Node icons: creation, dragging, connection points (classic)
-// Purpose: Everything related to the on-canvas node FABs (but no panel UI).
+// Responsibility: Allt kring FAB-noder på canvas (skapa, dra, IO-punkter) – ingen panel-UI och ingen path-drag.
+// SOLID hints:
+// - S: Paneler hanteras i panels.js/internet-node.js; kablar i connect.js. Här endast FAB:ar.
+// - D: Bero på små publika API: window.graph.addNode, window.updateConnectionsFor, window.makeConnPointInteractive.
 (function(){
   // Compute deterministic positions for newly created nodes.
   // We place nodes along the bottom edge in a row and wrap to a new row when needed.

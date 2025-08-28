@@ -1,6 +1,11 @@
 // Connection creation, path drawing, and delete UI (classic)
-// Purpose: Own all logic for drawing and maintaining SVG paths + user interaction
-// around creating/removing connections. No node/panel creation here.
+// Responsibility: Äga all logik för att rita/underhålla SVG-kablar och interaktion runt skapa/ta bort.
+// No node/panel creation here; panel-UI lever i panels.js och internet-node.js.
+// SOLID hints:
+// - S: Dela gärna i tre små delar vid refactor: (1) Geometry/Path, (2) Interaction/Drag, (3) Router/Transmit.
+// - O: Lägg nya visuella effekter som separata helpers utan att röra routing.
+// - I: Exportera ett litet API (startConnection, finalizeConnection, updateConnectionsFor, routeMessageFrom).
+// - D: requestAIReply/internet-reply bör vara injicerbara beroenden (t.ex. window.requestAIReply) i stället för direkt fetch.
 (function(){
   const svg = () => window.svg;
   // Track a selected connection for keyboard deletion

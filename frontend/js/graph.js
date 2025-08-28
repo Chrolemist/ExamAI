@@ -1,6 +1,11 @@
 // Graph-klassen: ren datamodell (ingen DOM)
-// Purpose: Hålla koll på noder, kopplingar och chatloggar. UI skriver/läser härifrån.
+// Responsibility: Hålla koll på noder, kopplingar och chatloggar. UI skriver/läser härifrån.
 // Klassisk variant (ingen import/export) – exponeras på window.Graph
+// SOLID hints:
+// - S: Endast modell/logik (skapa noder, koppla, loggar, settings). Ingen DOM eller rendering här.
+// - O: Nya fält i Node/Connection kan stödjas utan att ändra publika metoder.
+// - I: Om API:t växer, separera sub-ansvar (LogsStore, SettingsStore) med små interfaces.
+// - D: UI (panels/nodes-ui) bör bero på abstrakta metoder (addMessage/getMessages) i stället för direkt struktur.
 (function(){
   class Graph {
     constructor() {

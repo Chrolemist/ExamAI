@@ -1,5 +1,8 @@
 // Startar appen – klassisk variant (ingen import/export).
+// Responsibility: Bootstrap/uppstart, skapar standardnoder och kopplar baslyssnare.
 // Påverkar inte mini.js; du kan ladda båda vid behov.
+// SOLID hints:
+// - S: Håll endast uppstart här; flytta affärslogik till respektive modul.
 (function(){
 	// Skapa en global graf-instans om Graph finns
 	if (window.Graph) {

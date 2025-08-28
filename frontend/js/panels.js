@@ -1,6 +1,11 @@
 // Flyout panels and chat UI (classic)
-// Purpose: Owns the flyout panel UIs for User/CoWorker/Internet and the chat composer.
+// Responsibility: Flyout-paneler för User/CoWorker/Internet och chat-kompositör (textarea+send).
 // Panels are draggable/resizable and connectable via header IO points.
+// SOLID hints:
+// - S: Panel-UI och render; ingen kabelgeometri (connect.js) och ingen datamodell (graph.js).
+// - O: Nya paneltyper kan läggas som egna openXPanel()-funktioner, bevara wireComposer generisk.
+// - I: Bryt ut underrubriker (attachments/footnotes/exercises) till små helpers för ökad läsbarhet.
+// - D: Bero på små window-APIs (routeMessageFrom, requestAIReply, requestInternetReply) istället för att anropa fetch här.
 (function(){
   // Open URLs safely: HEAD-check http(s) targets to avoid blank tabs if the file is missing (404)
   function openIfExists(url){

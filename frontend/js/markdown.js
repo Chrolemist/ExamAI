@@ -1,6 +1,11 @@
 // Minimal Markdown to HTML converter (safe-ish) for classic usage
+// Responsibility: Konvertera markdown till sanerad HTML för paneler/sektioner.
 // Supports: headings (#..######), bold **text**, italics *text*, inline code `code`,
 // code fences ```lang\n...\n```, unordered lists (-, *), and paragraphs. Escapes HTML first.
+// SOLID hints:
+// - S: Endast text->HTML; ingen DOM-append här.
+// - O: Lägg fler regler via nya regex-steg utan att röra existerande.
+// - I: Håll API litet: mdToHtml/escapeHtml.
 (function(){
   function escapeHtml(s){
     return String(s||'')

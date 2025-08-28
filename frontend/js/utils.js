@@ -1,7 +1,11 @@
 // Utils (classic, no modules)
-// Purpose: Small, reusable helpers used across UI and connection code.
+// Responsibility: Små, återanvändbara hjälpfunktioner som inte har UI-koppling.
 // Exposes functions on window to avoid module imports (works via file://):
 // - pointFromEvent, clamp, hexToRgb, cssToRgb, ROLE_COLORS, getColorForRole
+// SOLID hints:
+// - S: Lägg endast generiska helpers här (inga DOM-specifika beroenden annat än getComputedStyle vid färger).
+// - I: Håll API:t litet; splitta i fler filer om verktygen växer (color-utils, dom-utils, math-utils).
+// - D: Konsumenter bör inte känna till implementationsdetaljer; exponera små, stabila funktioner.
 (function(){
   /** Convert Mouse/Pointers events into a simple point. */
   function pointFromEvent(e){ return { x: e.clientX, y: e.clientY }; }

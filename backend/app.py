@@ -1,3 +1,6 @@
+
+# --- IMPORTS ---
+# Standardbibliotek och tredjepartsmoduler
 import os
 import io
 import re
@@ -6,37 +9,46 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv, find_dotenv
 
-# Optional .env (robust: locate nearest .env regardless of CWD)
+ # --- Ladda miljövariabler från .env ---
+# Robust: hittar .env oavsett CWD
 try:
     load_dotenv(find_dotenv(), override=False)
 except Exception:
-    # fall back to default search if find_dotenv fails
+    # fallback om find_dotenv misslyckas
     try:
         load_dotenv()
     except Exception:
         pass
 
+
+# --- OpenAI-klient (kan mockas för test) ---
 try:
     from openai import OpenAI  # type: ignore
 except Exception:
     OpenAI = None  # type: ignore
 
-# Import web search helpers module (work both as package and script)
+ # --- Web search helpers (importeras både som paket och script) ---
 try:
     from . import web_search as ws  # type: ignore
 except Exception:
     import web_search as ws  # type: ignore
 
-# Optional PDF support
+ # --- PDF-stöd (valfritt) ---
 try:
     from pypdf import PdfReader  # type: ignore
 except Exception:
     PdfReader = None  # type: ignore
 
 
+
 def create_app():
+    """
+    Skapar och konfigurerar Flask-applikationen.
+    SOLID: Här kan Single Responsibility Principle (SRP) tillämpas genom att dela upp konfiguration och routes i separata moduler.
+    """
     app = Flask(__name__)
-    # Explicit CORS to allow local frontends (5500 = nginx, 127.0.0.1 variants, common dev ports)
+    # --- CORS-inställningar ---
+    # Tillåter frontend på vanliga dev-portar att anropa backend
     try:
         CORS(
             app,
@@ -57,7 +69,7 @@ def create_app():
             supports_credentials=False,
         )
     except Exception:
-        # Fallback
+        # Fallback om explicit CORS misslyckas
         try:
             CORS(app)
         except Exception:

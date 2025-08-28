@@ -1,4 +1,8 @@
 // Node-klassen (ren datamodell) – klassisk variant på window.Node
+// Responsibility: Hålla id, typ, position och kopplingsrelationer; samt lätta settings.
+// SOLID hints:
+// - S: Ingen DOM och inga panel-fält här; UI/flygpaneler lever i panels.js/internet-node.js.
+// - O: Lägg ny metadata i settings för att undvika brytande ändringar.
 (function(){
   class Node {
     /**
