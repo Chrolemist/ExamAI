@@ -1231,11 +1231,22 @@
           btnGradeAll.type = 'button'; btnGradeAll.textContent = 'Rätta alla frågor'; btnGradeAll.className='btn';
           const btnDeleteAll = document.createElement('button');
           btnDeleteAll.type = 'button'; btnDeleteAll.textContent = 'Ta bort alla'; btnDeleteAll.className='btn btn-ghost';
-          exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnDeleteAll);
+          const btnFullscreen = document.createElement('button');
+          btnFullscreen.type = 'button'; btnFullscreen.textContent = 'Öppna helskärm'; btnFullscreen.className='btn';
+          exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnDeleteAll); exBar.appendChild(btnFullscreen);
           // Insert toolbar near title; inline IO is no longer present
           head.appendChild(exBar);
           // Wire actions
           const grid = sec.querySelector('.body .grid') || sec.querySelector('.body');
+          btnFullscreen.addEventListener('click', ()=>{
+            try{
+              const title = (sec.querySelector('.head h2')?.textContent||'').trim();
+              const url = new URL(location.origin + location.pathname.replace(/[^\/]*$/, 'exercises-full.html'));
+              url.searchParams.set('id', id);
+              if (title) url.searchParams.set('title', title);
+              window.open(url.toString(), '_blank');
+            }catch{}
+          });
           // Storage helpers for focus UI
           const getExercises = ()=>{ try{ const raw = localStorage.getItem(`sectionExercises:${id}`); return raw? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
           const setExercises = (arr)=>{ try{ localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(arr||[])); }catch{} };
@@ -1245,7 +1256,7 @@
           const getPendingFeedback = ()=>{ const v = sec.dataset.pendingFeedback; return (v==null||v==='') ? null : Math.max(0, Number(v)||0); };
           const getCursor = ()=>{ try{ const n = Number(localStorage.getItem(`sectionExercisesCursor:${id}`)); const len = getExercises().length; return isNaN(n)?0: Math.max(0, Math.min(n, Math.max(0,len-1))); }catch{ return 0; } };
           const setCursor = (i)=>{ try{ localStorage.setItem(`sectionExercisesCursor:${id}`, String(i)); }catch{} };
-      const renderExercisesFocus = ()=>{
+          const renderExercisesFocus = ()=>{
             try{
               // layout
               const body = sec.querySelector('.body');
@@ -1333,6 +1344,16 @@
             }catch{}
           };
           sec.addEventListener('exercises-data-changed', ()=>renderExercisesFocus());
+          // Cross-tab: re-render when exercises data or cursor changes in another tab
+          const onStorage = (e)=>{
+            try{
+              if (!e || !e.key) return;
+              if (e.key === `sectionExercises:${id}` || e.key === `sectionExercisesCursor:${id}` || e.key === '__exercises_changed__'){
+                renderExercisesFocus();
+              }
+            }catch{}
+          };
+          window.addEventListener('storage', onStorage);
           const renumberExercises = ()=>{
             try{
               const blocks = sec.querySelectorAll('.exercise-block');
