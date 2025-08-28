@@ -83,13 +83,35 @@
     }catch{}
     // Recreate nodes first
     const idMap = new Map();
-    (data.nodes||[]).forEach(n=>{
+  (data.nodes||[]).forEach(n=>{
       const el = window.createIcon ? window.createIcon(n.type, n.x, n.y) : null;
       if (!el) return;
       // Force id for consistency
       try{ if (n.id){ el.dataset.id = String(n.id); if (window.graph){ const gnode = window.graph.nodes.get(el.dataset.id); if(gnode){ gnode.id = String(n.id); gnode.type = n.type; gnode.x = n.x; gnode.y = n.y; } } } }catch{}
-      // Display name and per-node settings
-      try{ el.dataset.displayName = n.name || el.dataset.displayName; const lab = el.querySelector('.fab-label'); if(lab && n.name) lab.textContent = n.name; }catch{}
+      // Display name: prefer saved settings then snapshot name, then fallback
+      try{
+        let displayName = '';
+        // read saved settings for this node type
+        const ownerId = el.dataset.id;
+        let saved = {};
+        try{ const raw = ownerId ? localStorage.getItem(`nodeSettings:${ownerId}`) : null; if (raw) saved = JSON.parse(raw)||{}; }catch{}
+        if (el.dataset.type === 'coworker'){
+          displayName = (typeof saved.name==='string' && saved.name.trim()) ? saved.name : (n.name||'');
+        } else if (el.dataset.type === 'user'){
+          displayName = (typeof saved.userDisplayName==='string' && saved.userDisplayName.trim()) ? saved.userDisplayName : (n.name||'');
+        } else if (el.dataset.type === 'internet'){
+          displayName = n.name || 'Internet';
+        } else {
+          displayName = n.name || '';
+        }
+        if (!displayName){
+          if (el.dataset.type === 'coworker') displayName = `CoWorker ${ownerId||''}`.trim();
+          else if (el.dataset.type === 'user') displayName = 'User';
+          else if (el.dataset.type === 'internet') displayName = 'Internet';
+        }
+        el.dataset.displayName = displayName;
+        const lab = el.querySelector('.fab-label'); if(lab) lab.textContent = displayName;
+      }catch{}
       try{ if (window.graph && n.settings) window.graph.setNodeSettings(el.dataset.id, n.settings); }catch{}
       idMap.set(n.id, el.dataset.id);
     });

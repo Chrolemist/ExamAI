@@ -404,7 +404,7 @@
       }catch{}
       panel.remove();
     });
-    panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true;
+  panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true;
   const colorToggle=panel.querySelector('[data-role="colorToggle"]'); const colorPanel=panel.querySelector('[data-role="colorPanel"]'); const colorPicker=panel.querySelector('[data-role="colorPicker"]'); const alphaEl=panel.querySelector('[data-role="alpha"]'); const alphaVal=panel.querySelector('[data-role="alphaVal"]'); const fontTextSel=panel.querySelector('[data-role="fontText"]'); const fontNameSel=panel.querySelector('[data-role="fontName"]'); const messagesEl=panel.querySelector('.messages'); const inputEl=panel.querySelector('.userInput'); const renderSel=panel.querySelector('[data-role="renderMode"]');
     if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value=String(Math.round(panel._bubbleAlpha*100)); if(alphaVal) alphaVal.textContent=`${Math.round(panel._bubbleAlpha*100)}%`;
     panel._textFont = fontTextSel ? fontTextSel.value : 'system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont = fontNameSel ? fontNameSel.value : 'system-ui, Segoe UI, Roboto, Arial, sans-serif'; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; const headerNameElInit=panel.querySelector('.drawer-head .meta .name'); if(headerNameElInit) headerNameElInit.style.fontFamily=panel._nameFont; const userFabLabel=hostEl.querySelector('.fab-label'); if(userFabLabel) userFabLabel.style.fontFamily=panel._nameFont;
@@ -416,8 +416,19 @@
     alphaEl?.addEventListener('input', ()=>{ const v=Math.max(0, Math.min(100, Number(alphaEl.value)||0)); panel._bubbleAlpha=v/100; if(alphaVal) alphaVal.textContent=`${v}%`; applyBubbleStyles(); });
     fontTextSel?.addEventListener('change', ()=>{ panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; });
     fontNameSel?.addEventListener('change', ()=>{ panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); });
-    const headerNameEl=panel.querySelector('.drawer-head .meta .name'); const nameInput=panel.querySelector('[data-role="name"]'); panel._displayName=''; const updateFabLabel=(text)=>{ const lab=hostEl.querySelector('.fab-label'); if(lab) lab.textContent=text; };
-    nameInput?.addEventListener('input', ()=>{ panel._displayName=nameInput.value||''; const nameText=panel._displayName.trim()||'User'; if(headerNameEl) headerNameEl.textContent=nameText; updateFabLabel(nameText); }); if(headerNameEl) headerNameEl.textContent='User'; updateFabLabel('User');
+  // Persist and initialize User display name (align with coworker persistence)
+  const headerNameEl=panel.querySelector('.drawer-head .meta .name');
+  const nameInput=panel.querySelector('[data-role="name"]');
+  panel._displayName='';
+  const ownerIdU = panel.dataset.ownerId||'';
+  const lsKeyU = (id)=>`nodeSettings:${id}`;
+  const readSavedU = ()=>{ try{ const raw = ownerIdU ? localStorage.getItem(lsKeyU(ownerIdU)) : null; return raw ? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
+  const persistU = (partial)=>{ try{ if(!ownerIdU) return; const cur = readSavedU(); const next = Object.assign({}, cur, partial||{}); localStorage.setItem(lsKeyU(ownerIdU), JSON.stringify(next)); }catch{} };
+  const updateFabLabel=(text)=>{ const lab=hostEl.querySelector('.fab-label'); if(lab) lab.textContent=text; };
+  const applyUserName = (val)=>{ const txt=(val||'').trim()||'User'; if(headerNameEl) headerNameEl.textContent=txt; updateFabLabel(txt); try{ hostEl.dataset.displayName = txt; }catch{} };
+  // Initialize from saved userDisplayName if present
+  try{ const saved = readSavedU(); const initName = (typeof saved.userDisplayName==='string' && saved.userDisplayName.trim()) ? saved.userDisplayName : (hostEl.dataset.displayName||'User'); if(nameInput) nameInput.value = initName; applyUserName(initName); }catch{ applyUserName(hostEl.dataset.displayName||'User'); }
+  nameInput?.addEventListener('input', ()=>{ panel._displayName=(nameInput.value||''); const nameText=panel._displayName.trim()||'User'; applyUserName(nameText); persistU({ userDisplayName: nameText }); });
   panel.querySelector('[data-action="resetAll"]')?.addEventListener('click', ()=>{ panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true; const m=messagesEl; if(m) m.innerHTML=''; if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value='10'; if(alphaVal) alphaVal.textContent='10%'; if(fontTextSel){ fontTextSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; } if(fontNameSel){ fontNameSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); } if(renderSel){ renderSel.value='md'; } applyBubbleStyles(); });
   panel.querySelector('[data-close]')?.addEventListener('click', ()=>{ document.removeEventListener('click', onDocClick); panel.remove(); });
     // Render historical messages if any
@@ -1183,6 +1194,16 @@
         // Inject a simple render mode toggle if not present
         const head = sec.querySelector('.head');
         if (!head) return;
+        // Helper: toggle toolbars depending on render mode
+        const updateToolbarVisibility = (mode)=>{
+          try{
+            const exTb = head.querySelector('[data-role="exToolbar"]');
+            const txtTb = head.querySelector('[data-role="textToolbar"]');
+            const isEx = mode === 'exercises';
+            if (exTb) exTb.style.display = isEx ? 'flex' : 'none';
+            if (txtTb) txtTb.style.display = isEx ? 'none' : 'flex';
+          }catch{}
+        };
         // Make section IO points (in/out) interactive for starting connections
         try{
           head.querySelectorAll('.section-io, .conn-point').forEach(io=>{
@@ -1203,9 +1224,8 @@
           const btnDeleteAll = document.createElement('button');
           btnDeleteAll.type = 'button'; btnDeleteAll.textContent = 'Ta bort alla'; btnDeleteAll.className='btn btn-ghost';
           exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnDeleteAll);
-          // Insert before the IO point to keep layout
-          const io = head.querySelector('.section-io');
-          if (io && io.parentElement === head){ head.insertBefore(exBar, io); } else { head.appendChild(exBar); }
+          // Insert toolbar near title; inline IO is no longer present
+          head.appendChild(exBar);
           // Wire actions
           const grid = sec.querySelector('.body .grid') || sec.querySelector('.body');
           // Storage helpers for focus UI
@@ -1404,6 +1424,32 @@
           });
           // Initial load handled later by the mode-aware renderer below
         }
+        // Text toolbar for non-exercises modes
+        if (!head.querySelector('[data-role="textToolbar"]')){
+          const tBar = document.createElement('div');
+          tBar.setAttribute('data-role','textToolbar');
+          tBar.style.display = 'flex';
+          tBar.style.gap = '6px';
+          tBar.style.marginLeft = '8px';
+          const btnClear = document.createElement('button');
+          btnClear.type = 'button'; btnClear.textContent = 'Rensa all text'; btnClear.className='btn btn-ghost';
+          tBar.appendChild(btnClear);
+          head.appendChild(tBar);
+          btnClear.addEventListener('click', ()=>{
+            if (!confirm('Rensa all text i denna sektion?')) return;
+            try{
+              const note = sec.querySelector('.note');
+              const sel = head.querySelector('[data-role="secRenderMode"]');
+              const mode = sel ? sel.value : 'raw';
+              // Clear stored raw and DOM content
+              try{ localStorage.setItem(`sectionRaw:${id}`, ''); }catch{}
+              if (note){
+                if (mode === 'html' || mode === 'md'){ note.innerHTML = ''; note.dataset.rendered = '1'; }
+                else { note.textContent = ''; delete note.dataset.rendered; }
+              }
+            }catch{}
+          });
+        }
         if (!head.querySelector('[data-role="secRenderMode"]')){
           const wrap = document.createElement('div');
           wrap.style.marginLeft = 'auto';
@@ -1422,6 +1468,8 @@
             const saved = raw ? JSON.parse(raw) : {};
             if (saved.renderMode) sel.value = saved.renderMode;
           }catch{}
+          // Sync toolbar visibility on load
+          try{ updateToolbarVisibility(sel.value || 'raw'); }catch{}
     sel.addEventListener('change', ()=>{
             try{
               const raw = localStorage.getItem(`sectionSettings:${id}`);
@@ -1462,6 +1510,8 @@
                   // reset layout
                   try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
                 }
+                // Update toolbars for new mode
+                try{ updateToolbarVisibility(mode); }catch{}
               }
             }catch{}
           });

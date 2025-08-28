@@ -59,7 +59,8 @@
       const name = (document.getElementById('snapName')?.value || '').trim();
       if (!name){ alert('Ange ett namn innan du sparar.'); return; }
       const res = window.saveSnapshot ? window.saveSnapshot(name) : { ok:false, error:'saknas saveSnapshot' };
-      if (!res.ok) alert('Kunde inte spara: '+res.error);
+      if (!res.ok) { alert('Kunde inte spara: '+res.error); return; }
+      alert(`Sparat: ${name}`);
       refreshList();
     });
     document.getElementById('btnLoadSnap')?.addEventListener('click', ()=>{

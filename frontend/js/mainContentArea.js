@@ -17,11 +17,9 @@
     sec.className = 'panel board-section';
     sec.setAttribute('aria-label', title || 'Sektion');
     sec.dataset.sectionId = id;
-    sec.innerHTML = `
+  sec.innerHTML = `
       <div class="head">
         <h2 contenteditable="true" spellcheck="false">${title || 'Skriv rubrik'}</h2>
-        <div class="section-io conn-point io-out" data-io="out" data-side="l"></div>
-        <div class="section-io conn-point io-in" data-io="in" data-side="r"></div>
       </div>
       <div class="body">
         <div class="grid"></div>
@@ -51,17 +49,19 @@
     try{ localStorage.removeItem(`sectionSettings:${id}`); }catch{}
     try{ localStorage.removeItem(`sectionRaw:${id}`); }catch{}
     try{ localStorage.removeItem(`sectionExercises:${id}`); }catch{}
-    try{ localStorage.removeItem(`sectionExercisesCursor:${id}`); }catch{}
-    refreshAllConnections();
+  try{ localStorage.removeItem(`sectionExercisesCursor:${id}`); }catch{}
+  refreshAllConnections();
+  try{ window.sectionIOBoard && window.sectionIOBoard.remove(id); }catch{}
   }
 
   function wireSection(sec){
-    try{ sec.querySelectorAll('.section-io').forEach(io=>{ if (!io._wired && window.makeConnPointInteractive){ window.makeConnPointInteractive(io, sec); io._wired = true; } }); }catch{}
+  // Remove legacy inline section IO (we use Section IO Board now)
+  try{ sec.querySelectorAll('.section-io, .conn-point').forEach(io=> io.remove()); }catch{}
     try{
       const h2 = sec.querySelector('.head h2');
       if (h2){
         const id = sec.dataset.sectionId || '';
-        const onChange = ()=>{ try{ localStorage.setItem(LS_KEY_TITLE(id), (h2.textContent||'').trim()); }catch{} };
+  const onChange = ()=>{ try{ const name=(h2.textContent||'').trim(); localStorage.setItem(LS_KEY_TITLE(id), name); if (window.sectionIOBoard) window.sectionIOBoard.rename(id, name); }catch{} };
         h2.addEventListener('input', onChange);
         h2.addEventListener('blur', onChange);
       }
@@ -85,15 +85,23 @@
     try{ window.updateConnectionsFor && window.updateConnectionsFor(sec); }catch{}
   }
 
+  function nextSequentialTitle(){
+    const list = loadList();
+    const n = (list?.length || 0) + 1;
+    return `Sektion ${n}`;
+  }
+
   function addSection(title){
     const id = uid();
-    const sec = createSectionDom(id, title);
+    const name = title && title.trim() ? title.trim() : nextSequentialTitle();
+    const sec = createSectionDom(id, name);
     const main = document.querySelector('.layout .content');
     if (!main) return null;
     const toolbar = main.querySelector('.board-sections-toolbar');
     if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
     wireSection(sec);
-    const list = loadList(); list.push({ id, title: title||'' }); saveList(list);
+    const list = loadList(); list.push({ id, title: name }); saveList(list);
+    try{ window.sectionIOBoard && window.sectionIOBoard.add(id, name); }catch{}
     return sec;
   }
 
@@ -112,6 +120,7 @@
           list.push({ id, title: (h2.textContent||'').trim() });
         }
         wireSection(sec);
+        try{ window.sectionIOBoard && window.sectionIOBoard.add(id, (h2?.textContent||'').trim() || id); }catch{}
       });
       saveList(list);
       return;
@@ -124,9 +133,10 @@
         const toolbar = main?.querySelector('.board-sections-toolbar');
         if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
         wireSection(sec);
+        try{ window.sectionIOBoard && window.sectionIOBoard.add(it.id, title); }catch{}
       });
     } else {
-      addSection('Teori');
+      addSection('Sektion 1');
     }
   }
 
@@ -134,13 +144,34 @@
   window.addBoardSection = addSection;
   window.removeBoardSection = (id)=>{
     const sec = document.querySelector(`.board-section[data-section-id="${CSS.escape(id)}"]`);
-    if (sec) removeSection(sec);
+  if (sec) removeSection(sec);
   };
 
   window.addEventListener('DOMContentLoaded', ()=>{
     try{
       const btn = document.getElementById('addBoardSectionBtn');
-      if (btn){ btn.addEventListener('click', ()=> addSection('Ny sektion')); }
+  if (btn){ btn.addEventListener('click', ()=> addSection('')); }
+      const rmAllBtn = document.getElementById('removeAllSectionsBtn');
+      if (rmAllBtn){
+        rmAllBtn.addEventListener('click', ()=>{
+          if (!confirm('Ta bort ALLA sektioner?')) return;
+          // Remove DOM sections first
+          document.querySelectorAll('.board-section').forEach(sec=>{ try{ sec.remove(); }catch{} });
+          // Clear persisted list and per-section keys best-effort
+          try{ const list = loadList(); (list||[]).forEach(it=>{
+            try{ localStorage.removeItem(LS_KEY_TITLE(it.id)); }catch{}
+            try{ localStorage.removeItem(`sectionSettings:${it.id}`); }catch{}
+            try{ localStorage.removeItem(`sectionRaw:${it.id}`); }catch{}
+            try{ localStorage.removeItem(`sectionExercises:${it.id}`); }catch{}
+            try{ localStorage.removeItem(`sectionExercisesCursor:${it.id}`); }catch{}
+          }); }catch{}
+          try{ saveList([]); }catch{}
+          // Clear IO board
+          try{ if (window.sectionIOBoard) window.sectionIOBoard.syncAll(); }catch{}
+          // Refresh cables
+          try{ const svg = document.getElementById('connLayer'); if (svg){ svg.querySelectorAll('path').forEach(p=>p.remove()); } }catch{}
+        });
+      }
       restoreExisting();
     }catch{}
   });

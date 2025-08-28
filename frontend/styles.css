@@ -60,6 +60,18 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 .panel .head .section-io[data-io="in"]:hover::after{content:'Input'; position:absolute; top:-26px; left:50%; transform:translateX(-50%); background:linear-gradient(180deg,#14141a,#0f0f13); border:1px solid #2a2a35; color:#cfd3e3; font-size:11px; padding:3px 6px; border-radius:6px; white-space:nowrap; pointer-events:none; box-shadow:0 8px 20px rgba(0,0,0,0.45); z-index:9100}
 .panel .head .section-io[data-io="out"]:hover::after{content:'Output'; position:absolute; top:-26px; left:50%; transform:translateX(-50%); background:linear-gradient(180deg,#14141a,#0f0f13); border:1px solid #2a2a35; color:#cfd3e3; font-size:11px; padding:3px 6px; border-radius:6px; white-space:nowrap; pointer-events:none; box-shadow:0 8px 20px rgba(0,0,0,0.45); z-index:9100}
 
+/* Section IO Board */
+#sectionIoBoard{position:relative; z-index:1800; padding:10px 16px; margin:6px 18px; border:1px solid #23232b; border-radius:12px; background:linear-gradient(180deg,#121219,#0e0e14); box-shadow:var(--shadow)}
+#sectionIoBoard .sib-head{display:flex; align-items:center; justify-content:space-between; padding:8px 6px 6px}
+#sectionIoBoard .sib-head h2{margin:0; font-size:14px; color:#cfd3e3; letter-spacing:.2px}
+#sectionIoBoard .sib-list{display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px}
+#sectionIoBoard .sib-item{border:1px solid #23232b; border-radius:10px; background:linear-gradient(180deg,#111118,#0d0d13)}
+#sectionIoBoard .sib-item .head{padding:8px 54px 8px 10px}
+#sectionIoBoard .sib-item .sib-title{margin:0; font-size:13px; color:#e6e6ec}
+#sectionIoBoard .sib-item .conn-point{top:50%; transform:translateY(-50%)}
+#sectionIoBoard .sib-item .conn-point.io-out{right:36px}
+#sectionIoBoard .sib-item .conn-point.io-in{right:12px}
+
 /* Buttons */
 .btn{background:var(--glass);backdrop-filter:blur(6px);border:1px solid var(--glass-border);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}
 .copilot-plus{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:7000;width:40px;height:40px;border-radius:999px;border:1px dashed #2a2a35;background:#0f0f14;color:#cfd3e3;box-shadow:var(--shadow);cursor:pointer}
