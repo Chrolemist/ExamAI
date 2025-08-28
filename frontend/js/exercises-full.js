@@ -104,6 +104,28 @@
   document.getElementById('fxNext').addEventListener('click', ()=>{ const arr=getList(); const n=Math.min(Math.max(0, arr.length-1), getCursor()+1); setCursor(n); render(); });
   document.getElementById('fxClose').addEventListener('click', ()=>{ window.close(); });
   if (els.btnLayout){ els.btnLayout.addEventListener('click', toggleLayout); }
+  // Grade current question via backend /chat
+  (function(){
+    const btn = document.getElementById('fxGrade'); if (!btn) return;
+    const detectApiBase = ()=>{ try{ if (window.API_BASE && typeof window.API_BASE === 'string') return window.API_BASE; }catch{} try{ if (location.protocol==='file:') return 'http://localhost:8000'; if (location.port && location.port !== '8000') return 'http://localhost:8000'; }catch{} return ''; };
+    const renderFb = (s)=>{ try{ els.f.innerHTML = (window.mdToHtml? window.mdToHtml(s||'') : String(s||'')); }catch{ els.f.textContent = String(s||''); } };
+    btn.addEventListener('click', async ()=>{
+      try{
+        const arr = getList(); const i = getCursor(); const it = arr[i]; if (!it){ alert('Ingen fråga vald.'); return; }
+        const n = i+1;
+        const payloadText = `Fråga ${n}: ${it.q||''}\nSvar ${n}: ${it.a||''}`;
+        const apiBase = detectApiBase();
+        const body = { model: 'gpt-5-mini', messages: [ { role:'system', content:'Du är en lärare. Ge kort, konstruktiv feedback på svaret. Om relevant, föreslå förbättringar. Svara på svenska. Använd Markdown.' }, { role:'user', content: payloadText } ], max_completion_tokens: 600 };
+        btn.disabled = true; const prevTxt = btn.textContent; btn.textContent = 'Rättar…';
+        const r = await fetch(apiBase + '/chat', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+        if (!r.ok){ const t = await r.text().catch(()=>'' ); throw new Error(`Rätta misslyckades (${r.status}): ${t.slice(0,200)}`); }
+        const data = await r.json(); const reply = String(data?.reply||'');
+        it.fb = reply; setList(arr);
+        renderFb(reply);
+      }catch(e){ alert(String(e?.message||e)); }
+      finally{ btn.disabled=false; btn.textContent='Rätta'; }
+    });
+  })();
 
   // Edits -> persist
   els.a.addEventListener('input', ()=>{ const arr=getList(); const i=getCursor(); if(arr[i]){ arr[i].a = els.a.value; setList(arr); }});

@@ -13,7 +13,8 @@
   .fx-wrap.free { max-width: 100vw; margin: 0; padding-left: 0; padding-right: 0; }
   .fx-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; position:relative; }
       .fx-title { font-size: 20px; font-weight: 600; }
-  .fx-counter { position:absolute; left:50%; transform:translateX(-50%); text-align:center; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; color: var(--text); pointer-events:none; opacity:0.95; }
+  .fx-center { position:absolute; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; z-index:1; }
+  .fx-counter { text-align:center; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; color: var(--text); pointer-events:none; opacity:0.95; }
       .fx-controls { display:flex; gap:8px; align-items:center; }
   .fx-main { display:grid; grid-template-columns: 1fr 1.2fr 0.9fr; gap: 12px; min-height: 70vh; position:relative; }
   .fx-wrap.free .fx-main { display:block; min-height: calc(100vh - 120px); }
@@ -23,7 +24,7 @@
         background:linear-gradient(135deg,transparent 50%, rgba(124,92,255,.4) 50%); clip-path:polygon(0 100%, 100% 0, 100% 100%); opacity:.7 }
       .fx-resize:hover{ opacity:1 }
       .fx-q { min-height: 200px; white-space:pre-wrap; }
-      .fx-a { width:100%; height:58vh; resize:vertical; color:var(--text); background:#0f0f14; border:1px solid #24242c; border-radius:10px; padding:10px; }
+  .fx-a { width:100%; height:58vh; resize:vertical; color:var(--text); background:#0f0f14; border:1px solid #24242c; border-radius:10px; padding:10px; }
       .fx-a::placeholder{ color:#8f93a3 }
       .fx-fb { min-height: 120px; white-space:pre-wrap; }
       .fx-nav { display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:12px; }
@@ -31,16 +32,22 @@
       .btn { cursor: pointer; }
       .fx-empty { opacity:.8; padding:16px; text-align:center; }
       .drag-handle{ cursor:move; }
+  /* Answer card footer action pinned at bottom of that card */
+  #cardA { display:flex; flex-direction:column; }
+  #cardA .fx-a { flex: 1 1 auto; resize: none; }
+  #cardA .fx-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; padding-right:18px; }
     </style>
   </head>
   <body>
     <div class="fx-wrap">
       <header class="fx-head">
         <div class="fx-title" id="fxTitle">Övningar</div>
-  <div class="fx-counter" id="fxInfoTop"></div>
+        <div class="fx-center">
+          <button class="btn" id="fxPrev" aria-label="Föregående" title="Föregående">◀</button>
+          <div class="fx-counter" id="fxInfoTop"></div>
+          <button class="btn" id="fxNext" aria-label="Nästa" title="Nästa">▶</button>
+        </div>
         <div class="fx-controls">
-          <button class="btn" id="fxPrev">◀ Föregående</button>
-          <button class="btn" id="fxNext">Nästa ▶</button>
           <button class="btn btn-ghost" id="fxLayout">Layoutläge</button>
           <button class="btn btn-ghost" id="fxClose">Stäng</button>
         </div>
@@ -54,6 +61,7 @@
         <div class="fx-card" id="cardA">
           <div class="fx-meta drag-handle" id="fxMetaA">Ditt svar</div>
           <textarea class="fx-a" id="fxA" placeholder="Skriv ditt svar..."></textarea>
+          <div class="fx-actions"><button class="btn" id="fxGrade">Rätta</button></div>
           <div class="fx-resize" title="Ändra storlek"></div>
         </div>
         <div class="fx-card" id="cardF">

@@ -69,7 +69,34 @@
     }catch{}
     // Sections (title + html)
     const sections = collectSections();
-    return { version: 1, createdAt: Date.now(), nodes, connections, chat, sections };
+    // Per-section state (render mode/settings, exercises list, cursor, full-screen layout)
+    const sectionState = {};
+    try{
+      document.querySelectorAll('.panel.board-section').forEach(sec=>{
+        const id = sec.dataset.sectionId || '';
+        if (!id) return;
+        const readJSON = (k, def)=>{ try{ const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) : def; }catch{ return def; } };
+        const readStr  = (k, def)=>{ try{ const v = localStorage.getItem(k); return (v==null? def: v); }catch{ return def; } };
+        const readNum  = (k, def)=>{ try{ const v = Number(localStorage.getItem(k)); return Number.isFinite(v)? v : def; }catch{ return def; } };
+        const settings = readJSON(`sectionSettings:${id}`, null);
+        const exercises = readJSON(`sectionExercises:${id}`, null);
+        const cursor = readNum(`sectionExercisesCursor:${id}`, null);
+        const layout = readJSON(`sectionExercisesLayout:${id}`, null);
+        sectionState[id] = { settings, exercises, cursor, layout };
+      });
+    }catch{}
+    // Per-node attachments and flyout panel geometry
+    const nodeAttachments = {};
+    const panelGeom = {};
+    try{
+      nodes.forEach(n=>{
+        const id = n.id;
+        if (!id) return;
+        try{ const rawAtt = localStorage.getItem(`nodeAttachments:${id}`); if (rawAtt) nodeAttachments[id] = JSON.parse(rawAtt)||[]; }catch{}
+        try{ const rawGeom = localStorage.getItem(`panelGeom:${id}`); if (rawGeom) panelGeom[id] = JSON.parse(rawGeom)||null; }catch{}
+      });
+    }catch{}
+    return { version: 2, createdAt: Date.now(), nodes, connections, chat, sections, sectionState, nodeAttachments, panelGeom };
   }
 
   function restore(data){
@@ -162,7 +189,26 @@
         });
       });
     }catch{}
-    // Restore sections
+    // Restore section-related localStorage-backed state first (so UI can pick it up)
+    try{
+      const sectionState = data.sectionState || {};
+      Object.keys(sectionState||{}).forEach(id=>{
+        const st = sectionState[id]||{};
+        const write = (k, v)=>{ try{ if (v===null || v===undefined) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); }catch{} };
+        if ('settings' in st) write(`sectionSettings:${id}`, st.settings);
+        if ('exercises' in st) write(`sectionExercises:${id}`, st.exercises);
+        if ('cursor' in st){ try{ if (st.cursor==null) localStorage.removeItem(`sectionExercisesCursor:${id}`); else localStorage.setItem(`sectionExercisesCursor:${id}`, String(st.cursor)); }catch{} }
+        if ('layout' in st) write(`sectionExercisesLayout:${id}`, st.layout);
+      });
+    }catch{}
+    // Restore per-node attachments and flyout panel geometry to localStorage
+    try{
+      const at = data.nodeAttachments || {};
+      Object.keys(at||{}).forEach(id=>{ try{ localStorage.setItem(`nodeAttachments:${id}`, JSON.stringify(at[id]||[])); }catch{} });
+      const pg = data.panelGeom || {};
+      Object.keys(pg||{}).forEach(id=>{ try{ if (pg[id]) localStorage.setItem(`panelGeom:${id}`, JSON.stringify(pg[id])); }catch{} });
+    }catch{}
+    // Restore sections (DOM content)
     restoreSections(data.sections||[]);
   // Refresh connection geometry once after a tick
   setTimeout(()=>{ try{ window.updateConnectionsFor && document.querySelectorAll('.fab,.panel').forEach(el=> window.updateConnectionsFor(el)); }catch{} }, 0);
