@@ -505,6 +505,10 @@
         <input type="range" min="1000" max="30000" step="64" value="1000" data-role="maxTokens" />
         <div class="subtle"><span data-role="maxTokensValue">1000</span></div>
       </label>
+      <label>Sidor per steg (bilageläsning)
+        <input type="range" min="1" max="5" step="1" value="1" data-role="pagesPerStep" />
+        <div class="subtle"><span data-role="pagesPerStepValue">1</span></div>
+      </label>
       <label>Skrivhastighet
         <input type="range" min="0" max="100" step="1" value="10" data-role="typingSpeed" />
         <div class="subtle">(<span data-role="typingSpeedValue">Snabb</span>)</div>
@@ -585,6 +589,8 @@
   const selfReplyEl = by('[data-role="selfReply"]');
       const maxTokEl = by('[data-role="maxTokens"]');
       const maxTokVal = by('[data-role="maxTokensValue"]');
+  const ppsEl = by('[data-role="pagesPerStep"]');
+  const ppsVal = by('[data-role="pagesPerStepValue"]');
       const typeSpdEl = by('[data-role="typingSpeed"]');
       const typeSpdVal = by('[data-role="typingSpeedValue"]');
       const renderEl = by('[data-role="renderMode"]');
@@ -643,6 +649,7 @@
       if (typeof saved.useRole === 'boolean' && useRoleEl) useRoleEl.checked = !!saved.useRole;
   if (typeof saved.selfPanelReply === 'boolean' && selfReplyEl) selfReplyEl.checked = !!saved.selfPanelReply; else if (selfReplyEl && saved.selfPanelReply === undefined) selfReplyEl.checked = true;
       if (saved.maxTokens && maxTokEl) { maxTokEl.value = String(saved.maxTokens); if(maxTokVal) maxTokVal.textContent = String(saved.maxTokens); }
+  if (saved.pagesPerStep && ppsEl) { const v = Math.max(1, Math.min(5, Number(saved.pagesPerStep)||1)); ppsEl.value = String(v); if (ppsVal) ppsVal.textContent = String(v); }
       if (typeof saved.typingSpeed === 'number' && typeSpdEl) { typeSpdEl.value = String(saved.typingSpeed); if(typeSpdVal) typeSpdVal.textContent = (saved.typingSpeed>=66?'Snabb':saved.typingSpeed<=33?'Långsam':'Medel'); }
       if (saved.renderMode && renderEl) renderEl.value = saved.renderMode;
   // no web settings for coworker anymore
@@ -657,6 +664,7 @@
       useRoleEl?.addEventListener('change', ()=>{ persist({ useRole: !!useRoleEl.checked }); updateRoleBadge(); });
   selfReplyEl?.addEventListener('change', ()=>{ persist({ selfPanelReply: !!selfReplyEl.checked }); });
       maxTokEl?.addEventListener('input', ()=>{ const v=Math.max(256, Math.min(30000, Number(maxTokEl.value)||1000)); if(maxTokVal) maxTokVal.textContent=String(v); persist({ maxTokens: v }); });
+  ppsEl?.addEventListener('input', ()=>{ const v=Math.max(1, Math.min(5, Number(ppsEl.value)||1)); if(ppsVal) ppsVal.textContent=String(v); persist({ pagesPerStep: v }); });
       typeSpdEl?.addEventListener('input', ()=>{ const v = Math.max(0, Math.min(100, Number(typeSpdEl.value)||10)); if(typeSpdVal) typeSpdVal.textContent = (v>=66?'Snabb':v<=33?'Långsam':'Medel'); persist({ typingSpeed: v }); });
       renderEl?.addEventListener('change', ()=>persist({ renderMode: renderEl.value }));
   // removed web listeners

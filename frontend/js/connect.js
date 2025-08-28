@@ -359,6 +359,40 @@
       // Ensure last turn includes the just received user/assistant? The incoming to coworker was an assistant or user? In our model, payload.who was 'assistant' for received.
       // No extra append needed because transmitOnConnection already added it to Graph before this call.
     }catch{}
+    // After building history, inject materials block if attachments exist and not already present
+    try{
+      const combined = Array.isArray(requestAIReply._lastAttachments) ? requestAIReply._lastAttachments : [];
+      if (combined.length){
+        const hasMaterials = (Array.isArray(messages)?messages:[]).some(m => m && m.role==='user' && /Bilaga:/i.test(String(m.content||'')));
+        if (!hasMaterials){
+          const joinSep = '\n\n---\n\n';
+          const blocks = combined.map((it, i)=>{
+            const head = `[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`;
+            const body = String(it.text||'');
+            return head + (body ? `\n${body}` : '');
+          }).filter(Boolean);
+          const materials = 'Bilaga:\n' + blocks.join(joinSep);
+          if (Array.isArray(messages) && messages.length){
+            const lastIdx = messages.length - 1;
+            if (messages[lastIdx] && messages[lastIdx].role === 'user') messages.splice(lastIdx, 0, { role:'user', content: materials });
+            else messages.push({ role:'user', content: materials });
+          } else {
+            messages = [{ role:'user', content: materials }];
+          }
+        }
+      }
+    }catch{}
+    // If user explicitly asks to show/quote a template/structure, guide the model to include short quotes with [n,sida]
+    let quoteMode = false;
+    try{
+      const lastUserMsg = [...(Array.isArray(messages)?messages:[])].reverse().find(m=>m && m.role==='user' && !/^\s*Bilaga:/i.test(String(m.content||'')));
+      const q = String(lastUserMsg?.content||'').toLowerCase();
+      if (q && (q.includes('visa') || q.includes('återge') || q.includes('aterge')) && (q.includes('mall') || q.includes('struktur'))) quoteMode = true;
+    }catch{}
+    if (quoteMode){
+      const extraGuide = 'ANVISNING: När användaren ber att visa/återge hur en mall/struktur ser ut enligt bilagan, gör så här: 1) Ge en kort punktlista över sektioner (sammanfattade i egna ord), 2) Lägg in korta ordagranna citat ≤ 200 tecken med [n,sida] där relevant, 3) Om du behöver fler sidor, skriv exakt MER_SIDOR.';
+      systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + extraGuide;
+    }
     // Coerce unsupported/legacy model aliases to a safe default, but preserve gpt-5* defaults
     try{
       const ml = (model||'').toLowerCase();
@@ -370,6 +404,18 @@
     }catch{}
   // No client-side clipping
   const body = { model, max_tokens: maxTokens, noClip: true };
+  // If we have attachments, enable simple pagewise mode (one page per step)
+  let hasMaterials = false;
+  try { hasMaterials = Array.isArray(requestAIReply._lastAttachments) && requestAIReply._lastAttachments.length > 0; } catch {}
+  let _pgStart = 1;
+  // Read saved pagesPerStep from settings; default 1, bump to >=2 in quote mode
+  let pagesPerStep = 1;
+  try{
+    const raw = localStorage.getItem(`nodeSettings:${ownerId}`);
+    if (raw){ const s = JSON.parse(raw)||{}; if (typeof s.pagesPerStep === 'number') pagesPerStep = Math.max(1, Math.min(5, Number(s.pagesPerStep)||1)); }
+  }catch{}
+  if (typeof quoteMode === 'boolean' && quoteMode) pagesPerStep = Math.max(pagesPerStep, 2);
+  if (hasMaterials) body.pgwise = { enable: true, startPage: _pgStart, pagesPerStep };
   if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
     if (apiKey) body.apiKey = apiKey;
@@ -414,24 +460,38 @@
     }
     throw err;
   });
-  tryRequest(body).then(data=>{
-      let reply = '';
-      try{ reply = String(data?.reply || ''); }catch{ reply = ''; }
-      if (!reply) reply = data?.error ? `Fel: ${data.error}` : 'Tomt svar från AI';
-  // Collect citations (if any) from backend and wire through meta
-      const citations = (function(){ try{ return Array.isArray(data?.citations) ? data.citations : []; }catch{ return []; } })();
-  // Log to Graph and render in this coworker panel
-      let ts = Date.now();
-  const meta = { ts, citations };
-  try{ if (Array.isArray(requestAIReply._lastAttachments)) meta.attachments = requestAIReply._lastAttachments; }catch{}
-      try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
-      try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
-      // Route out via cables (if any). Do not include attachments; citations are fine for footnotes
-      try{
-        const routedMeta = { author, who:'assistant', ts, citations };
-        if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, routedMeta);
-      }catch{}
-  }).catch(err=>{
+  // Pagewise auto-continue: if model asks for MER_SIDOR and backend indicates more pages, request next window.
+  const handleFinal = (data)=>{
+    let reply = '';
+    try{ reply = String(data?.reply || ''); }catch{ reply = ''; }
+    if (!reply) reply = data?.error ? `Fel: ${data.error}` : 'Tomt svar från AI';
+    // Remove any stray MER_SIDOR token from final display
+    try{ reply = reply.replace(/\bMER_SIDOR\b/g, '').trim(); }catch{}
+    const citations = (function(){ try{ return Array.isArray(data?.citations) ? data.citations : []; }catch{ return []; } })();
+    let ts = Date.now();
+    const meta = { ts, citations };
+    try{ if (Array.isArray(requestAIReply._lastAttachments)) meta.attachments = requestAIReply._lastAttachments; }catch{}
+    try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
+    try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
+    try{ const routedMeta = { author, who:'assistant', ts, citations }; if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, routedMeta); }catch{}
+  };
+  const doStep = (pgStart, step)=>{
+    const payload = Object.assign({}, body);
+    if (payload.pgwise && typeof pgStart === 'number') payload.pgwise.startPage = pgStart;
+    return tryRequest(payload).then(data=>{
+      const pw = data && data.pagewise;
+      const wantsMore = !!(pw && pw.enabled && pw.modelRequestedMore && pw.hasMore);
+      if (wantsMore && step < 5){
+        // Don't show this intermediate reply (likely contains MER_SIDOR); immediately fetch next window.
+        const nextStart = Number(pw.nextStartPage)|| (pgStart+1);
+        return doStep(nextStart, step+1);
+      }
+      // Final step: render normally
+      handleFinal(data);
+      return data;
+    });
+  };
+  doStep(_pgStart, 0).catch(err=>{
       const msg = 'Fel vid AI-förfrågan: ' + (err?.message||String(err));
       // Show a toast with the error and a tip to increase tokens
       try{
