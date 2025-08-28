@@ -145,23 +145,25 @@ def create_app():
                 {"role": "user", "content": user_message},
             ]
 
-        # Defensive clipping: cap number of messages and content length to avoid oversized payloads
+        # Defensive clipping (skippable): cap messages/length unless client requests noClip
         try:
-            MAX_MSGS = 20
-            MAX_CHARS = 12000
-            def _clip_text(x: str) -> str:
-                try:
-                    x = x or ""
-                    return x if len(x) <= MAX_CHARS else x[:MAX_CHARS]
-                except Exception:
-                    return str(x)[:MAX_CHARS]
-            if isinstance(messages, list):
-                # Keep most recent messages; ensure dict shape and clip content
-                messages = [
-                    {"role": (m.get("role") or "user"), "content": _clip_text(m.get("content") or "")}
-                    for m in messages[-MAX_MSGS:]
-                    if isinstance(m, dict)
-                ]
+            no_clip = bool(data.get("noClip"))
+            if not no_clip:
+                MAX_MSGS = 20
+                MAX_CHARS = 12000
+                def _clip_text(x: str) -> str:
+                    try:
+                        x = x or ""
+                        return x if len(x) <= MAX_CHARS else x[:MAX_CHARS]
+                    except Exception:
+                        return str(x)[:MAX_CHARS]
+                if isinstance(messages, list):
+                    # Keep most recent messages; ensure dict shape and clip content
+                    messages = [
+                        {"role": (m.get("role") or "user"), "content": _clip_text(m.get("content") or "")}
+                        for m in messages[-MAX_MSGS:]
+                        if isinstance(m, dict)
+                    ]
         except Exception:
             pass
 

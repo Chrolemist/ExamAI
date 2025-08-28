@@ -266,11 +266,10 @@
             requestAIReply._lastAttachments = combined;
             // Also include attachment contents as a dedicated user message marked with 'Bilaga:' so backend guidance is enabled
             try{
-              const PER_ATT_CAP = 4000; // soft cap per attachment text
               const joinSep = '\n\n---\n\n';
               const blocks = combined.map((it, i)=>{
                 const head = `[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`;
-                const body = String(it.text||'').slice(0, PER_ATT_CAP);
+                const body = String(it.text||'');
                 return head + (body ? `\n${body}` : '');
               }).filter(Boolean);
               const materials = 'Bilaga:\n' + blocks.join(joinSep);
@@ -321,11 +320,10 @@
             requestAIReply._lastAttachments = combined;
             // Include attachment contents as a 'Bilaga:' message so backend sees materials
             try{
-              const PER_ATT_CAP = 4000;
               const joinSep = '\n\n---\n\n';
               const blocks = combined.map((it, i)=>{
                 const head = `[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`;
-                const body = String(it.text||'').slice(0, PER_ATT_CAP);
+                const body = String(it.text||'');
                 return head + (body ? `\n${body}` : '');
               }).filter(Boolean);
               const materials = 'Bilaga:\n' + blocks.join(joinSep);
@@ -349,16 +347,14 @@
       const entries = (window.graph && typeof window.graph.getMessages==='function') ? (window.graph.getMessages(ownerId) || []) : [];
       const mapRole = (m)=> (m?.who === 'user' ? 'user' : (m?.who === 'assistant' ? 'assistant' : 'system'));
       const mapped = entries.map(m => ({ role: mapRole(m), content: String(m.text||'') }));
-      // Keep only last 16 messages to limit context and clip each message content
-      const MAX_MSGS = 16, MAX_CHARS_PER_MSG = 6000;
-      messages = mapped.slice(-MAX_MSGS).map(x => ({ role: x.role, content: String(x.content||'').slice(0, MAX_CHARS_PER_MSG) }));
+      // No client-side clipping: include full history and content
+      messages = mapped;
       // If this was triggered from the panel, include the composed text (with attachments) as the latest user turn
       const extra = (ctx && typeof ctx.text === 'string') ? ctx.text : '';
       if (extra){
         const last = messages[messages.length-1];
-        const EXTRA_MAX = 8000;
-        const clipped = String(extra).slice(0, EXTRA_MAX);
-        if (!last || last.content !== clipped){ messages = messages.concat([{ role:'user', content: clipped }]); }
+        const raw = String(extra);
+        if (!last || last.content !== raw){ messages = messages.concat([{ role:'user', content: raw }]); }
       }
       // Ensure last turn includes the just received user/assistant? The incoming to coworker was an assistant or user? In our model, payload.who was 'assistant' for received.
       // No extra append needed because transmitOnConnection already added it to Graph before this call.
@@ -372,9 +368,8 @@
       else if (ml === '3o' || ml === 'o3') model = 'gpt-5-mini';
       // Otherwise, leave user-selected models untouched
     }catch{}
-  // Clip system prompt defensively
-  if (systemPrompt && systemPrompt.length > 12000) systemPrompt = systemPrompt.slice(0, 12000);
-  const body = { model, max_tokens: maxTokens };
+  // No client-side clipping
+  const body = { model, max_tokens: maxTokens, noClip: true };
   if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
     if (apiKey) body.apiKey = apiKey;
@@ -438,6 +433,24 @@
       }catch{}
   }).catch(err=>{
       const msg = 'Fel vid AI-förfrågan: ' + (err?.message||String(err));
+      // Show a toast with the error and a tip to increase tokens
+      try{
+        (function(){
+          const txt = String(msg + '\nTips: Höj "Max tokens" i CoWorker-inställningarna om svaret klipps.');
+          let cont = document.getElementById('toastContainer');
+          if (!cont){
+            cont = document.createElement('div'); cont.id='toastContainer';
+            Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' });
+            document.body.appendChild(cont);
+          }
+          const t = document.createElement('div');
+          t.className='toast';
+          Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'10px 12px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', maxWidth:'420px', fontSize:'14px', whiteSpace:'pre-wrap' });
+          t.textContent = txt;
+          cont.appendChild(t);
+          setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 300ms'; setTimeout(()=>{ t.remove(); if (cont && !cont.children.length) cont.remove(); }, 320); }catch{} }, 3500);
+        })();
+      }catch{}
       let ts = Date.now();
       try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, msg.startsWith('Fel')?author:senderName, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}
       try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{}
