@@ -8,6 +8,7 @@
   const key = (s)=> `sectionExercises:${s}`;
   const cursorKey = (s)=> `sectionExercisesCursor:${s}`;
   const layoutKey = (s)=> `sectionExercisesLayout:${s}`;
+  const roundKey = (s)=> `sectionExercisesRound:${s}`;
 
   const els = {
     q: document.getElementById('fxQ'),
@@ -44,7 +45,7 @@
     if (!rounds.length){ els.f.innerHTML = '<div class="subtle">Ingen feedback ännu.</div>'; }
     else {
       const parts = rounds.map((txt, i)=>{
-        const head = `<div class="subtle" style="margin:6px 0 4px; opacity:.85;">Omgång ${i+1}</div>`;
+        const head = `<div class="subtle fb-head" style="margin:6px 0 4px; opacity:.85; display:flex; align-items:center; justify-content:space-between; gap:8px;"><span>Omgång ${i+1}</span><button type="button" class="fb-del" data-ri="${i}" title="Radera omgång">✕</button></div>`;
         const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
         return head + `<div class="fb-round" data-ri="${i}">${body}</div>`;
       });
@@ -70,9 +71,32 @@
           el.addEventListener('blur', saveNow);
         });
       }catch{}
+      // Wire delete per round
+      try{
+        const dels = els.f.querySelectorAll('button.fb-del');
+        dels.forEach(btn=>{
+          btn.addEventListener('click', ()=>{
+            try{
+              const ri = Math.max(0, Number(btn.getAttribute('data-ri')||'0')||0);
+              const arr2 = getList(); const i2 = Math.min(getCursor(), Math.max(0, arr2.length-1));
+              const it2 = arr2[i2] || {};
+              if (Array.isArray(it2.fbRounds)){
+                it2.fbRounds.splice(ri, 1);
+                arr2[i2] = it2; setList(arr2);
+                dispatchChanged();
+                render();
+              }
+            }catch{}
+          });
+        });
+      }catch{}
     }
   const counter = `${idx+1} / ${arr.length}`;
   if (els.infoTop) els.infoTop.textContent = counter;
+  // Update round label
+  try{
+    const rb = document.getElementById('fxRoundBtn'); if (rb){ const n = Math.max(1, Number(localStorage.getItem(roundKey(id))||'1')||1); rb.textContent = `Omgång ${n} ▾`; }
+  }catch{}
   }
 
   // ---- Layout mode (drag/resize, persisted) ----
@@ -134,6 +158,14 @@
   document.getElementById('fxPrev').addEventListener('click', ()=>{ const arr=getList(); const n=Math.max(0, getCursor()-1); setCursor(n); render(); });
   document.getElementById('fxNext').addEventListener('click', ()=>{ const arr=getList(); const n=Math.min(Math.max(0, arr.length-1), getCursor()+1); setCursor(n); render(); });
   document.getElementById('fxClose').addEventListener('click', ()=>{ window.close(); });
+  // Round dropdown wiring
+  (function(){
+    const btn = document.getElementById('fxRoundBtn'); const menu = document.getElementById('fxRoundMenu'); const reset = document.getElementById('fxRoundReset'); if(!btn||!menu||!reset) return;
+    const show=()=>menu.classList.remove('hidden'); const hide=()=>menu.classList.add('hidden');
+    btn.addEventListener('click', (e)=>{ e.stopPropagation(); if(menu.classList.contains('hidden')) show(); else hide(); });
+    document.addEventListener('click', ()=>hide());
+    reset.addEventListener('click', ()=>{ try{ localStorage.setItem(roundKey(id), '1'); localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{} hide(); render(); });
+  })();
   // Clear all answers in this section and increment round
   (function(){ const btn = document.getElementById('fxClearAns'); if (!btn) return; btn.addEventListener('click', ()=>{
     if (!confirm('Rensa alla svar och påbörja ny omgång?')) return;
@@ -239,7 +271,7 @@
   window.addEventListener('storage', (e)=>{
     try{
       if (!e) return;
-      if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === '__exercises_changed__')){
+  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === '__exercises_changed__')){
         render();
       }
     }catch{}

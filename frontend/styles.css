@@ -42,6 +42,17 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
   flex:1; min-height:0; overflow:auto; outline:none; white-space:pre-wrap; line-height:1.5; font-size:14px; color:#e6e6ec;
   background:transparent; border:1px dashed #2a2a35; border-radius:8px; padding:8px;
 }
+/* Normalize markdown inside question so size doesn’t jump between items */
+.panel.board-section .ex-q-focus h1,
+.panel.board-section .ex-q-focus h2,
+.panel.board-section .ex-q-focus h3,
+.panel.board-section .ex-q-focus h4,
+.panel.board-section .ex-q-focus h5,
+.panel.board-section .ex-q-focus h6{ font-size:1em; line-height:inherit; margin:0.5em 0 0.4em; font-weight:600 }
+.panel.board-section .ex-q-focus p{ margin:0.4em 0; font-size:inherit; line-height:inherit }
+.panel.board-section .ex-q-focus ul,
+.panel.board-section .ex-q-focus ol{ margin:0.4em 0 0.4em 1.2em }
+.panel.board-section .ex-q-focus li{ margin:0.25em 0 }
 .panel.board-section .ex-a-focus{
   flex:1; min-height:0; resize:vertical; width:100%; color:#e6e6ec;
   background:#0f0f14; border:1px solid #24242c; border-radius:10px; padding:10px;
@@ -50,7 +61,30 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 .panel.board-section .ex-fb{
   flex:1; min-height:0; resize:vertical; width:100%; color:#e6e6ec; margin-top:8px;
   background:#0f0f14; border:1px solid #24242c; border-radius:10px; padding:10px; white-space:pre-wrap; overflow:auto;
+  /* Limit height so panel doesn’t keep growing; allow internal scroll */
+  max-height:50vh; height:40vh; /* fixed viewport-based height to ensure scroll */
 }
+.panel.board-section .ex-fb .fb-head{display:flex; align-items:center; justify-content:space-between; gap:8px}
+.panel.board-section .ex-fb .fb-del{appearance:none; background:transparent; border:1px solid #2a2a35; color:#a6a6b3; border-radius:6px; padding:0 6px; height:20px; cursor:pointer; opacity:0.7}
+.panel.board-section .ex-fb .fb-del:hover{opacity:1; border-color:#3a3a45}
+ .fx-card#cardF{ display:flex; flex-direction:column }
+ .fx-card#cardF .fx-fb{ flex:1 1 auto; min-height:0; overflow:auto; max-height:58vh; height:58vh; }
+
+/* Full-screen round dropdown: ensure it opens downward and stays visible */
+#fxRoundWrap{ position:relative }
+#fxRoundMenu{ position:absolute; left:auto; right:0; top:36px; bottom:auto; }
+
+/* Full-screen: normalize markdown in question card as well */
+.fx-q h1,
+.fx-q h2,
+.fx-q h3,
+.fx-q h4,
+.fx-q h5,
+.fx-q h6{ font-size:1em; line-height:inherit; margin:0.5em 0 0.4em; font-weight:600 }
+.fx-q p{ margin:0.4em 0; font-size:inherit; line-height:inherit }
+.fx-q ul,
+.fx-q ol{ margin:0.4em 0 0.4em 1.2em }
+.fx-q li{ margin:0.25em 0 }
 
 /* Section IO points: position left for output, right for input */
 .panel .head .section-io{position:absolute;top:50%;transform:translateY(-50%);display:inline-block;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 30% 30%, #fff, #cde, #79f);z-index:9050;cursor:crosshair}

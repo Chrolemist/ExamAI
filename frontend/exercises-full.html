@@ -48,6 +48,12 @@
         <div class="fx-center">
           <button class="btn" id="fxPrev" aria-label="Föregående" title="Föregående">◀</button>
           <div class="fx-counter" id="fxInfoTop"></div>
+          <div id="fxRoundWrap" style="position:relative; display:inline-block; margin-left:8px;">
+            <button class="btn btn-ghost" id="fxRoundBtn" title="Omgång">Omgång 1 ▾</button>
+            <div id="fxRoundMenu" class="hidden" style="position:absolute; right:0; bottom:36px; min-width:220px; z-index:10100; display:grid; gap:4px; padding:6px; background:linear-gradient(180deg,#121219,#0e0e14); border:1px solid #23232b; border-radius:8px; box-shadow:0 12px 28px rgba(0,0,0,0.55)">
+              <button type="button" id="fxRoundReset" style="text-align:left; background:rgba(255,255,255,0.03); border:1px solid #2a2a35; color:#e6e6ec; padding:6px 8px; border-radius:6px; cursor:pointer">Starta om till omgång 1</button>
+            </div>
+          </div>
           <button class="btn" id="fxNext" aria-label="Nästa" title="Nästa">▶</button>
         </div>
         <div class="fx-controls">

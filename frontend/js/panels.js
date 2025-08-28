@@ -1332,8 +1332,24 @@
               const prev = document.createElement('button'); prev.type='button'; prev.className='btn btn-ghost'; prev.textContent='←';
               const next = document.createElement('button'); next.type='button'; next.className='btn btn-ghost'; next.textContent='→';
               const info = document.createElement('div'); info.className='subtle';
-              const updateInfo = ()=>{ const len = getExercises().length; info.textContent = len? `Fråga ${idx+1} / ${len}` : 'Inga frågor'; };
-              nav.appendChild(prev); nav.appendChild(info); nav.appendChild(next);
+              // Round UI: clickable label with tiny dropdown to reset round counter to 1
+              const roundBtn = document.createElement('button'); roundBtn.type='button'; roundBtn.className='btn btn-ghost'; roundBtn.textContent='Omgång 1 ▾'; roundBtn.style.marginLeft='8px';
+              const roundMenu = document.createElement('div'); roundMenu.className='hidden'; Object.assign(roundMenu.style,{ position:'absolute', zIndex:'10060', marginTop:'4px', right:'0', minWidth:'220px', display:'grid', gap:'4px', padding:'6px', background:'linear-gradient(180deg,#121219,#0e0e14)', border:'1px solid #23232b', borderRadius:'8px', boxShadow:'0 12px 28px rgba(0,0,0,0.55)'});
+              const resetBtn = document.createElement('button'); resetBtn.type='button'; resetBtn.textContent='Starta om till omgång 1'; Object.assign(resetBtn.style,{ textAlign:'left', background:'rgba(255,255,255,0.03)', border:'1px solid #2a2a35', color:'#e6e6ec', padding:'6px 8px', borderRadius:'6px', cursor:'pointer' });
+              roundMenu.appendChild(resetBtn);
+              const infoWrap = document.createElement('div'); infoWrap.style.position='relative'; infoWrap.style.display='inline-block';
+              infoWrap.appendChild(info);
+              infoWrap.appendChild(roundBtn);
+              infoWrap.appendChild(roundMenu);
+              const showRoundMenu = ()=>{ roundMenu.classList.remove('hidden'); };
+              const hideRoundMenu = ()=>{ roundMenu.classList.add('hidden'); };
+              roundBtn.addEventListener('click', (e)=>{ e.stopPropagation(); if (roundMenu.classList.contains('hidden')) showRoundMenu(); else hideRoundMenu(); });
+              document.addEventListener('click', ()=>{ hideRoundMenu(); });
+              const resetRound = ()=>{ try{ localStorage.setItem(`sectionExercisesRound:${id}`, '1'); localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{} hideRoundMenu(); updateRoundLabel(); };
+              resetBtn.addEventListener('click', resetRound);
+              const updateRoundLabel = ()=>{ try{ const n=getRound(); roundBtn.textContent = `Omgång ${n} ▾`; }catch{ roundBtn.textContent='Omgång 1 ▾'; } };
+              const updateInfo = ()=>{ const len = getExercises().length; info.textContent = len? `Fråga ${idx+1} / ${len}` : 'Inga frågor'; updateRoundLabel(); };
+              nav.appendChild(prev); nav.appendChild(infoWrap); nav.appendChild(next);
         const q = document.createElement('div'); q.className='ex-q-focus'; q.contentEditable='true'; q.spellcheck=false;
               { 
                 const cur = getExercises(); 
@@ -1356,7 +1372,7 @@
                   const cur = getExercises(); const it = cur[idx]||{}; const rounds = Array.isArray(it.fbRounds)? it.fbRounds : (it.fb? [String(it.fb)] : []);
                   if (!rounds.length){ fb.innerHTML = '<div class="subtle">Ingen feedback ännu.</div>'; return; }
                   const parts = rounds.map((txt, i)=>{
-                    const head = `<div class=\"subtle\" style=\"margin:6px 0 4px; opacity:.85;\">Omgång ${i+1}</div>`;
+                    const head = `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span><button type=\"button\" class=\"fb-del\" data-ri=\"${i}\" title=\"Radera omgång\">✕</button></div>`;
                     const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
                     return head + `<div class=\"fb-round\" data-ri=\"${i}\">${body}</div>`;
                   });
@@ -1380,6 +1396,24 @@
                       // Debounce input saves to avoid excessive writes
                       let t=null; el.addEventListener('input', ()=>{ try{ if (t) clearTimeout(t); t=setTimeout(saveNow, 500); }catch{} });
                       el.addEventListener('blur', saveNow);
+                    });
+                  }catch{}
+                  // Wire delete buttons per round
+                  try{
+                    const dels = fb.querySelectorAll('button.fb-del');
+                    dels.forEach(btn=>{
+                      btn.addEventListener('click', ()=>{
+                        try{
+                          const ri = Math.max(0, Number(btn.getAttribute('data-ri')||'0')||0);
+                          const cur2 = getExercises(); const it2 = cur2[idx]||{};
+                          if (Array.isArray(it2.fbRounds)){
+                            it2.fbRounds.splice(ri, 1);
+                            cur2[idx] = it2; setExercises(cur2);
+                            try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+                            renderFb();
+                          }
+                        }catch{}
+                      });
                     });
                   }catch{}
                 }catch{ fb.textContent=''; }
