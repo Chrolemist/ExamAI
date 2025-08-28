@@ -1118,11 +1118,18 @@
             const idx = Math.max(0, Number(idxStr)||0);
             const raw = localStorage.getItem(`sectionExercises:${id}`) || '[]';
             const arr = JSON.parse(raw)||[];
-            if (arr[idx]){ arr[idx].fb = (arr[idx].fb ? (arr[idx].fb + '\n\n') : '') + String(text||''); }
+            if (arr[idx]){
+              // store incoming feedback into current round bucket
+              let round = 1; try{ round = Math.max(1, Number(localStorage.getItem(`sectionExercisesRound:${id}`)||'1')||1); }catch{}
+              try{ if (!Array.isArray(arr[idx].fbRounds)) arr[idx].fbRounds = []; if (arr[idx].fb && !arr[idx].fbRounds.length){ arr[idx].fbRounds = [ String(arr[idx].fb||'') ]; delete arr[idx].fb; } }catch{}
+              const rIndex = round - 1; while (arr[idx].fbRounds.length <= rIndex) arr[idx].fbRounds.push('');
+              const prev = String(arr[idx].fbRounds[rIndex]||'');
+              arr[idx].fbRounds[rIndex] = prev ? (prev + '\n\n' + String(text||'')) : String(text||'');
+            }
             localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(arr));
             // clear flag and update UI if focus view is present
             delete sec.dataset.pendingFeedback;
-            const focus = sec.querySelector('.ex-fb'); if (focus && Number(localStorage.getItem(`sectionExercisesCursor:${id}`)||'0') === idx){ focus.textContent = arr[idx].fb || ''; }
+            const focus = sec.querySelector('.ex-fb'); if (focus && Number(localStorage.getItem(`sectionExercisesCursor:${id}`)||'0') === idx){ try{ const it = arr[idx]||{}; const rounds = Array.isArray(it.fbRounds)? it.fbRounds : []; const parts = rounds.map((txt,i)=>{ const head = `<div class=\"subtle\" style=\"margin:6px 0 4px; opacity:.85;\">Omgång ${i+1}</div>`; const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||''); return head + `<div class=\"fb-round\">${body}</div>`; }); focus.innerHTML = parts.join('<hr style=\"border:none; border-top:1px solid #252532; margin:8px 0;\">'); }catch{ focus.textContent=''; } }
             return; // handled
           }
         }catch{}
@@ -1229,9 +1236,11 @@
           btnGradeAll.type = 'button'; btnGradeAll.textContent = 'Rätta alla frågor'; btnGradeAll.className='btn';
           const btnDeleteAll = document.createElement('button');
           btnDeleteAll.type = 'button'; btnDeleteAll.textContent = 'Ta bort alla'; btnDeleteAll.className='btn btn-ghost';
+      const btnClearAnswers = document.createElement('button');
+      btnClearAnswers.type = 'button'; btnClearAnswers.textContent = 'Rensa alla svar'; btnClearAnswers.className='btn btn-ghost';
           const btnFullscreen = document.createElement('button');
           btnFullscreen.type = 'button'; btnFullscreen.textContent = 'Öppna helskärm'; btnFullscreen.className='btn';
-    exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnDeleteAll); exBar.appendChild(btnFullscreen);
+    exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnClearAnswers); exBar.appendChild(btnDeleteAll); exBar.appendChild(btnFullscreen);
     // Parking slots for exercises: choose coworker nodes to act as Grader and Improver
     const parkWrap = document.createElement('div');
     parkWrap.style.display='flex'; parkWrap.style.gap='8px'; parkWrap.style.alignItems='center'; parkWrap.style.marginLeft='12px';
@@ -1291,6 +1300,8 @@
           const getPendingFeedback = ()=>{ const v = sec.dataset.pendingFeedback; return (v==null||v==='') ? null : Math.max(0, Number(v)||0); };
           const getCursor = ()=>{ try{ const n = Number(localStorage.getItem(`sectionExercisesCursor:${id}`)); const len = getExercises().length; return isNaN(n)?0: Math.max(0, Math.min(n, Math.max(0,len-1))); }catch{ return 0; } };
           const setCursor = (i)=>{ try{ localStorage.setItem(`sectionExercisesCursor:${id}`, String(i)); }catch{} };
+          const getRound = ()=>{ try{ const n = Number(localStorage.getItem(`sectionExercisesRound:${id}`)||'1'); return Math.max(1, n||1); }catch{ return 1; } };
+          const incRound = ()=>{ try{ const n = getRound(); localStorage.setItem(`sectionExercisesRound:${id}`, String(n+1)); }catch{} };
           const renderExercisesFocus = ()=>{
             try{
               // layout
@@ -1336,7 +1347,20 @@
               left.appendChild(nav); left.appendChild(q);
               // Build right (answer + actions)
               const a = document.createElement('textarea'); a.className='ex-a-focus'; a.rows=14; a.placeholder='Skriv ditt svar...'; { const cur = getExercises(); a.value = cur[idx]?.a || ''; }
-              const fb = document.createElement('div'); fb.className='ex-fb'; fb.setAttribute('contenteditable','true'); fb.setAttribute('spellcheck','false'); { const cur = getExercises(); fb.textContent = cur[idx]?.fb || ''; }
+              const fb = document.createElement('div'); fb.className='ex-fb'; fb.setAttribute('aria-live','polite');
+              const renderFb = ()=>{
+                try{
+                  const cur = getExercises(); const it = cur[idx]||{}; const rounds = Array.isArray(it.fbRounds)? it.fbRounds : (it.fb? [String(it.fb)] : []);
+                  if (!rounds.length){ fb.innerHTML = '<div class="subtle">Ingen feedback ännu.</div>'; return; }
+                  const parts = rounds.map((txt, i)=>{
+                    const head = `<div class=\"subtle\" style=\"margin:6px 0 4px; opacity:.85;\">Omgång ${i+1}</div>`;
+                    const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
+                    return head + `<div class=\"fb-round\">${body}</div>`;
+                  });
+                  fb.innerHTML = parts.join('<hr style=\"border:none; border-top:1px solid #252532; margin:8px 0;\">');
+                }catch{ fb.textContent=''; }
+              };
+              renderFb();
               const actions = document.createElement('div'); actions.className='ex-actions';
               const gradeOne = document.createElement('button'); gradeOne.type='button'; gradeOne.className='btn'; gradeOne.textContent='Rätta denna';
               const del = document.createElement('button'); del.type='button'; del.className='btn btn-ghost'; del.textContent='Ta bort';
@@ -1356,15 +1380,13 @@
                   q.textContent = rawQ;
                 }
                 a.value = cur[idx]?.a || '';
-                fb.textContent = cur[idx]?.fb || '';
+                renderFb();
                 updateInfo();
               };
               prev.addEventListener('click', ()=>go(-1)); next.addEventListener('click', ()=>go(1));
               q.addEventListener('input', ()=>{ const cur = getExercises(); if (cur[idx]){ cur[idx].q = String(q.textContent||'').trim(); setExercises(cur); } updateInfo(); });
               a.addEventListener('input', ()=>{ const cur = getExercises(); if (cur[idx]){ cur[idx].a = String(a.value||'').trim(); setExercises(cur); } });
-              const saveFb = ()=>{ const cur = getExercises(); if (cur[idx]){ cur[idx].fb = String(fb.textContent||'').trim(); setExercises(cur); } };
-              fb.addEventListener('input', saveFb);
-              fb.addEventListener('blur', saveFb);
+              // Feedback är nu läsbar (renderas per omgång)
               // delete current
               del.addEventListener('click', ()=>{ const cur = getExercises(); if (!cur.length) return; cur.splice(idx,1); setExercises(cur); if (idx >= cur.length) idx = Math.max(0, cur.length-1); setCursor(idx); renderExercisesFocus(); });
               // grade current
@@ -1495,6 +1517,17 @@
             } else {
               try{ sec.querySelectorAll('.exercise-block').forEach(b=>b.remove()); }catch{}
             }
+          });
+          btnClearAnswers.addEventListener('click', ()=>{
+            if (!confirm('Rensa alla svar och påbörja ny omgång?')) return;
+            try{
+              const arr = getExercises().map(it=> Object.assign({}, it, { a: '' }));
+              setExercises(arr);
+              incRound();
+              // notify both same-tab and cross-tab
+              try{ sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id } })); }catch{}
+              try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+            }catch{}
           });
           // Initial load handled later by the mode-aware renderer below
         }

@@ -39,7 +39,17 @@
     const it = arr[idx] || {};
   els.q.innerHTML = (window.mdToHtml? window.mdToHtml(it.q||'') : (it.q||''));
     els.a.value = it.a || '';
-  els.f.innerHTML = (window.mdToHtml? window.mdToHtml(it.fb||'') : (it.fb||''));
+    // Render feedback grouped by rounds
+    const rounds = Array.isArray(it.fbRounds) ? it.fbRounds : (it.fb ? [String(it.fb)] : []);
+    if (!rounds.length){ els.f.innerHTML = '<div class="subtle">Ingen feedback ännu.</div>'; }
+    else {
+      const parts = rounds.map((txt, i)=>{
+        const head = `<div class="subtle" style="margin:6px 0 4px; opacity:.85;">Omgång ${i+1}</div>`;
+        const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
+        return head + `<div class="fb-round">${body}</div>`;
+      });
+      els.f.innerHTML = parts.join('<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
+    }
   const counter = `${idx+1} / ${arr.length}`;
   if (els.infoTop) els.infoTop.textContent = counter;
   }
@@ -103,6 +113,17 @@
   document.getElementById('fxPrev').addEventListener('click', ()=>{ const arr=getList(); const n=Math.max(0, getCursor()-1); setCursor(n); render(); });
   document.getElementById('fxNext').addEventListener('click', ()=>{ const arr=getList(); const n=Math.min(Math.max(0, arr.length-1), getCursor()+1); setCursor(n); render(); });
   document.getElementById('fxClose').addEventListener('click', ()=>{ window.close(); });
+  // Clear all answers in this section and increment round
+  (function(){ const btn = document.getElementById('fxClearAns'); if (!btn) return; btn.addEventListener('click', ()=>{
+    if (!confirm('Rensa alla svar och påbörja ny omgång?')) return;
+    try{
+      const arr = getList().map(it=> Object.assign({}, it, { a: '' }));
+      setList(arr);
+      try{ const keyR = `sectionExercisesRound:${id}`; const n = Math.max(1, Number(localStorage.getItem(keyR)||'1')||1); localStorage.setItem(keyR, String(n+1)); }catch{}
+      dispatchChanged();
+      render();
+    }catch{}
+  }); })();
   if (els.btnLayout){ els.btnLayout.addEventListener('click', toggleLayout); }
   // Question improver mini-chat
   (function(){

@@ -526,7 +526,15 @@
           const key = `sectionExercises:${sid}`;
           const arr = JSON.parse(localStorage.getItem(key)||'[]')||[];
           if (arr[idx]){
-            arr[idx].fb = (arr[idx].fb ? (arr[idx].fb + '\n\n') : '') + String(reply||'');
+            // compute current round counter (1-based), default 1
+            let round = 1; try{ round = Math.max(1, Number(localStorage.getItem(`sectionExercisesRound:${sid}`)||'1')||1); }catch{}
+            // Ensure fbRounds is an array and migrate legacy fb
+            try{ if (!Array.isArray(arr[idx].fbRounds)) arr[idx].fbRounds = []; if (arr[idx].fb && !arr[idx].fbRounds.length){ arr[idx].fbRounds = [ String(arr[idx].fb||'') ]; delete arr[idx].fb; } }catch{}
+            const rIndex = round - 1; // zero-based
+            // Ensure array length
+            while (arr[idx].fbRounds.length <= rIndex) arr[idx].fbRounds.push('');
+            const prev = String(arr[idx].fbRounds[rIndex]||'');
+            arr[idx].fbRounds[rIndex] = prev ? (prev + '\n\n' + String(reply||'')) : String(reply||'');
             localStorage.setItem(key, JSON.stringify(arr));
             try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
             try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
