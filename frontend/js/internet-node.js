@@ -361,8 +361,11 @@
     try{
       const entries = (window.graph && typeof window.graph.getMessages==='function') ? (window.graph.getMessages(ownerId) || []) : [];
       const mapRole = (m)=> (m?.who === 'user' ? 'user' : (m?.who === 'assistant' ? 'assistant' : 'system'));
-      messages = entries.map(m => ({ role: mapRole(m), content: String(m.text||'') })).slice(-20);
+      const mapped = entries.map(m => ({ role: mapRole(m), content: String(m.text||'') }));
+      const MAX_MSGS = 16, MAX_CHARS_PER_MSG = 6000;
+      messages = mapped.slice(-MAX_MSGS).map(x => ({ role: x.role, content: String(x.content||'').slice(0, MAX_CHARS_PER_MSG) }));
     }catch{}
+    if (systemPrompt && systemPrompt.length > 12000) systemPrompt = systemPrompt.slice(0, 12000);
     const body = { model, max_tokens: maxTokens, web: webCfg };
     if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
@@ -370,10 +373,16 @@
     const author = (()=>{ try{ const host=document.querySelector(`.fab[data-id="${ownerId}"]`); return (host?.dataset?.displayName)||'Internet'; }catch{ return 'Internet'; } })();
     setThinking(ownerId, true);
     fetch(apiBase + '/chat', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-      .then(r=>{
+      .then(async r=>{
         const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
-        if (!r.ok) throw new Error('HTTP '+r.status);
-      if (!/application\/json/i.test(String(ct||''))) return r.text().then(t=>{ throw new Error('Oväntat svar (ej JSON)'); });
+        if (!r.ok) {
+          // try to log body for debugging
+          let text = '';
+          try{ text = await r.text(); }catch{};
+          console.error('[internet-node] /chat non-OK', r.status, text);
+          throw new Error('HTTP '+r.status+': '+String((text||'')).slice(0,200));
+        }
+        if (!/application\/json/i.test(String(ct||''))) { const _ = await r.text().catch(()=>null); throw new Error('Oväntat svar (ej JSON)'); }
         return r.json();
       }).then(data=>{
         let reply=''; try{ reply=String(data?.reply||''); }catch{ reply=''; }

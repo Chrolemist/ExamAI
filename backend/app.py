@@ -133,6 +133,26 @@ def create_app():
                 {"role": "user", "content": user_message},
             ]
 
+        # Defensive clipping: cap number of messages and content length to avoid oversized payloads
+        try:
+            MAX_MSGS = 20
+            MAX_CHARS = 12000
+            def _clip_text(x: str) -> str:
+                try:
+                    x = x or ""
+                    return x if len(x) <= MAX_CHARS else x[:MAX_CHARS]
+                except Exception:
+                    return str(x)[:MAX_CHARS]
+            if isinstance(messages, list):
+                # Keep most recent messages; ensure dict shape and clip content
+                messages = [
+                    {"role": (m.get("role") or "user"), "content": _clip_text(m.get("content") or "")}
+                    for m in messages[-MAX_MSGS:]
+                    if isinstance(m, dict)
+                ]
+        except Exception:
+            pass
+
         citations = []
 
         # If the conversation contains inline attachments ("Bilaga:" blocks), instruct the model to cite [n,sida]
@@ -340,37 +360,61 @@ def create_app():
                     except Exception:
                         citations = []
 
-        # Call chat.completions with the assembled messages
+        # Call chat.completions with the assembled messages (with safe fallback for model errors)
+        def _invoke(mdl: str):
+            max_user_local = data.get("max_tokens") or data.get("max_completion_tokens") or 1000
+            return client.chat.completions.create(model=mdl, messages=messages, max_tokens=max_user_local, timeout=30)
+
         try:
-            max_user = data.get("max_tokens") or data.get("max_completion_tokens") or 1000
-            resp = client.chat.completions.create(model=model, messages=messages, max_tokens=max_user, timeout=30)
-            reply = resp.choices[0].message.content if resp.choices else ""
-            try:
-                finish_reason = resp.choices[0].finish_reason  # type: ignore[attr-defined]
-            except Exception:
-                finish_reason = None
-            truncated = bool(finish_reason == "length")
-            try:
-                usage_obj = getattr(resp, "usage", None)
-                usage = ({
-                    "input_tokens": getattr(usage_obj, "prompt_tokens", None) or getattr(usage_obj, "input_tokens", None),
-                    "output_tokens": getattr(usage_obj, "completion_tokens", None) or getattr(usage_obj, "output_tokens", None),
-                    "total_tokens": getattr(usage_obj, "total_tokens", None),
-                } if usage_obj else None)
-            except Exception:
-                usage = None
-            return jsonify({"reply": reply, "model": model, "finishReason": finish_reason, "truncated": truncated, "usage": usage, "citations": citations})
+            resp = _invoke(model)
         except Exception as e:
+            # Try a safer fallback model once if the error looks model-related (or 400 Bad Request)
             try:
-                print("/chat error:", repr(e))
+                status = getattr(e, "status_code", None)
             except Exception:
-                pass
-            status = getattr(e, "status_code", 500)
+                status = None
+            em = None
             try:
-                msg = getattr(e, "message", None) or str(e)
+                em = (getattr(e, "message", None) or str(e) or "").lower()
             except Exception:
-                msg = "Unknown error"
-            return jsonify({"error": msg, "model": model, "hint": "Kontrollera API-nyckel och modellnamn."}), int(status) if isinstance(status, int) else 500
+                em = ""
+            should_fallback = bool((status == 400) or ("model" in (em or "")) or ("not found" in (em or "")) or ("invalid" in (em or "")))
+            if should_fallback:
+                fb = os.getenv("FALLBACK_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+                if fb and fb != model:
+                    try:
+                        resp = _invoke(fb)
+                        model = fb  # report the model actually used
+                    except Exception as e2:
+                        # If fallback also fails, bubble original error below
+                        e = e2
+                        raise e
+                else:
+                    # No usable fallback configured
+                    raise e
+            else:
+                # Not a model-related error
+                raise e
+
+        try:
+            reply = resp.choices[0].message.content if resp.choices else ""
+        except Exception:
+            reply = ""
+        try:
+            finish_reason = resp.choices[0].finish_reason  # type: ignore[attr-defined]
+        except Exception:
+            finish_reason = None
+        truncated = bool(finish_reason == "length")
+        try:
+            usage_obj = getattr(resp, "usage", None)
+            usage = ({
+                "input_tokens": getattr(usage_obj, "prompt_tokens", None) or getattr(usage_obj, "input_tokens", None),
+                "output_tokens": getattr(usage_obj, "completion_tokens", None) or getattr(usage_obj, "output_tokens", None),
+                "total_tokens": getattr(usage_obj, "total_tokens", None),
+            } if usage_obj else None)
+        except Exception:
+            usage = None
+        return jsonify({"reply": reply, "model": model, "finishReason": finish_reason, "truncated": truncated, "usage": usage, "citations": citations})
 
     def _extract_text(filename: str, stream: bytes) -> str:
         name = (filename or "").lower()

@@ -164,7 +164,8 @@
       if (host && host.dataset.type === 'coworker') whoForTarget = 'user';
     }catch{}
   const baseMeta = (payload && payload.meta) ? Object.assign({}, payload.meta) : {};
-  // Ensure attachments/citations are preserved in routed meta
+  // Never propagate attachments out of a node; keep only safe metadata like citations
+  if (baseMeta && baseMeta.attachments) delete baseMeta.attachments;
   const routedMeta = Object.assign(baseMeta, { ts, via: `${conn.fromId}->${conn.toId}`, from: sourceId, author: (author||'Incoming') });
   try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, whoForTarget, routedMeta); }catch{}
   try{ if(window.receiveMessage) window.receiveMessage(targetId, text, whoForTarget, routedMeta); }catch{}
@@ -306,13 +307,16 @@
       const entries = (window.graph && typeof window.graph.getMessages==='function') ? (window.graph.getMessages(ownerId) || []) : [];
       const mapRole = (m)=> (m?.who === 'user' ? 'user' : (m?.who === 'assistant' ? 'assistant' : 'system'));
       const mapped = entries.map(m => ({ role: mapRole(m), content: String(m.text||'') }));
-      // Keep only last 20 messages to limit context
-      messages = mapped.slice(-20);
+      // Keep only last 16 messages to limit context and clip each message content
+      const MAX_MSGS = 16, MAX_CHARS_PER_MSG = 6000;
+      messages = mapped.slice(-MAX_MSGS).map(x => ({ role: x.role, content: String(x.content||'').slice(0, MAX_CHARS_PER_MSG) }));
       // If this was triggered from the panel, include the composed text (with attachments) as the latest user turn
       const extra = (ctx && typeof ctx.text === 'string') ? ctx.text : '';
       if (extra){
         const last = messages[messages.length-1];
-        if (!last || last.content !== extra){ messages = messages.concat([{ role:'user', content: extra }]); }
+        const EXTRA_MAX = 8000;
+        const clipped = String(extra).slice(0, EXTRA_MAX);
+        if (!last || last.content !== clipped){ messages = messages.concat([{ role:'user', content: clipped }]); }
       }
       // Ensure last turn includes the just received user/assistant? The incoming to coworker was an assistant or user? In our model, payload.who was 'assistant' for received.
       // No extra append needed because transmitOnConnection already added it to Graph before this call.
@@ -326,8 +330,10 @@
       else if (ml === '3o' || ml === 'o3') model = 'gpt-5-mini';
       // Otherwise, leave user-selected models untouched
     }catch{}
-    const body = { model, max_tokens: maxTokens };
-    if (systemPrompt) body.system = systemPrompt;
+  // Clip system prompt defensively
+  if (systemPrompt && systemPrompt.length > 12000) systemPrompt = systemPrompt.slice(0, 12000);
+  const body = { model, max_tokens: maxTokens };
+  if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
     if (apiKey) body.apiKey = apiKey;
   // Author label used for replies from this coworker
@@ -335,8 +341,14 @@
   // Determine sender display name for the inbound (user) message from ctx.sourceId
   const senderName = (()=>{ try{ const src = ctx?.sourceId ? document.querySelector(`.fab[data-id="${ctx.sourceId}"]`) : null; return (src?.dataset?.displayName)|| (src?.dataset?.type==='user'?'User':'Incoming'); }catch{ return 'Incoming'; } })();
   setThinking(ownerId, true);
-  fetch(apiBase + '/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  // Debug: log request metadata (DO NOT log API keys) to help diagnose 400/5xx responses
+  try{
+    const redacted = Object.assign({}, body);
+    if (redacted.apiKey) redacted.apiKey = '<REDACTED>';
+    console.debug('[requestAIReply] apiBase=%s payload=%o', apiBase || '<auto>', redacted);
+  }catch(e){}
+  const sendOnce = (payload)=> fetch(apiBase + '/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     }).then(async r=>{
       const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
       if (!r.ok) {
@@ -350,7 +362,22 @@
       }
       if (!/application\/json/i.test(String(ct||''))) { const _ = await r.text().catch(()=>null); throw new Error('Oväntat svar (ej JSON)'); }
       return r.json();
-    }).then(data=>{
+  });
+  let triedFallback = false;
+  const tryRequest = (payload)=> sendOnce(payload).catch(err=>{
+    const em = String(err?.message||'').toLowerCase();
+    // Heuristic: if the error seems model-related, try a safer fallback once
+    if (!triedFallback && (em.includes('model') || em.includes('invalid') || em.includes('not found'))){
+      triedFallback = true;
+      try{
+        const fallbackBody = Object.assign({}, payload, { model: 'gpt-4o-mini' });
+        console.warn('[requestAIReply] Falling back to model gpt-4o-mini due to error:', err?.message||err);
+        return sendOnce(fallbackBody);
+      }catch{}
+    }
+    throw err;
+  });
+  tryRequest(body).then(data=>{
       let reply = '';
       try{ reply = String(data?.reply || ''); }catch{ reply = ''; }
       if (!reply) reply = data?.error ? `Fel: ${data.error}` : 'Tomt svar från AI';
@@ -362,10 +389,9 @@
   try{ if (Array.isArray(requestAIReply._lastAttachments)) meta.attachments = requestAIReply._lastAttachments; }catch{}
       try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
       try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
-      // Route out via cables (if any) and include attachments so receivers can render footnotes
+      // Route out via cables (if any). Do not include attachments; citations are fine for footnotes
       try{
         const routedMeta = { author, who:'assistant', ts, citations };
-        try{ if (Array.isArray(requestAIReply._lastAttachments)) routedMeta.attachments = requestAIReply._lastAttachments; }catch{}
         if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, routedMeta);
       }catch{}
   }).catch(err=>{

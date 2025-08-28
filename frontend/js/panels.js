@@ -255,24 +255,16 @@
       const files = e.dataTransfer?.files; if (files && files.length){ uploadFiles(files); }
     }catch{} });
     const append=(text, who='user', ts=Date.now())=>{ const row=document.createElement('div'); row.className='message-row'+(who==='user'?' user':''); const group=document.createElement('div'); group.className='msg-group'; const author=document.createElement('div'); author.className='author-label'; if(panel.classList.contains('user-node-panel') && who==='user'){ const name=(panel._displayName||'').trim()||'User'; author.textContent=name; } else { const nameEl=panel.querySelector('.drawer-head .meta .name'); author.textContent=(nameEl?.textContent||(who==='user'?'User':'Assistant')).trim(); } if(panel._nameFont) author.style.fontFamily=panel._nameFont; group.appendChild(author); const b=document.createElement('div'); b.className='bubble '+(who==='user'?'user':''); const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent=text; if(panel._textFont) textEl.style.fontFamily=panel._textFont; b.appendChild(textEl); const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = (who==='user' ? 'right' : 'left'); meta.textContent = formatTime(ts); b.appendChild(meta); group.appendChild(b); row.appendChild(group); list.appendChild(row); if(panel.classList.contains('user-node-panel') && who==='user'){ const rgb=window.hexToRgb(panel._bubbleColorHex||'#7c5cff'); if(rgb){ const bg=`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${panel._bgOn ? (panel._bubbleAlpha ?? 0.1) : 0})`; const border=`rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Math.min(1, panel._bgOn ? (panel._bubbleAlpha ?? 0.1) + 0.12 : 0.08)})`; b.style.backgroundColor=bg; b.style.borderColor=border; } } list.scrollTop=list.scrollHeight; };
-    const buildMessageWithAttachments = (val)=>{
-      try{
-        const items = panel._attachments||[]; if (!items.length) return val;
-        const parts = [val];
-        for (const it of items){
-          const header = `\n\n---\nBilaga: ${it.name}${it.chars?` (${it.chars} tecken${it.truncated?', trunkerat':''})`:''}\n\n`;
-          parts.push(header + (it.text||''));
-        }
-        return parts.join('');
-      }catch{ return val; }
-    };
+    // Deprecated: attachments must never be sent out over connections.
+    // Kept for potential local-only preview use, but DO NOT call when routing or calling backends.
+    const buildMessageWithAttachments = (val)=>{ return val; };
   const clearAttachments = ()=>{ try{ panel._attachments = []; savePersistedAtt([]); renderAttachments(); }catch{} };
     const doSend=()=>{ const val=(ta.value||'').trim(); if(!val) return; const ownerId=panel.dataset.ownerId||null; const authorLabel = panel.querySelector('.drawer-head .meta .name'); const author = (authorLabel?.textContent||'User').trim(); let ts=Date.now(); try{ if(ownerId && window.graph){ const entry = window.graph.addMessage(ownerId, author, val, 'user'); ts = entry?.ts || ts; } }catch{} append(val,'user', ts);
       // Determine send mode
       let mode = 'current'; try{ mode = panel._sendMode || (readSaved().sendMode||'current'); }catch{}
       const entries = (window.graph && ownerId) ? (window.graph.getMessages(ownerId)||[]) : [];
       let lastSent = '';
-      const sendCurrent = ()=>{ const msg = buildMessageWithAttachments(val); lastSent = msg; if(ownerId && window.routeMessageFrom){ try{ window.routeMessageFrom(ownerId, msg, { author, who:'user', ts }); }catch{} } };
+      const sendCurrent = ()=>{ const msg = val; lastSent = msg; if(ownerId && window.routeMessageFrom){ try{ window.routeMessageFrom(ownerId, msg, { author, who:'user', ts }); }catch{} } };
       const sendHistoryOnce = ()=>{
         const parts = [];
         try{
@@ -280,22 +272,21 @@
         }catch{}
         // include current input at the end
         if (val) parts.push(`${author}: ${val}`);
-        let combined = parts.join('\n\n');
-        combined = buildMessageWithAttachments(combined);
+        const combined = parts.join('\n\n');
         lastSent = combined;
         if(ownerId && window.routeMessageFrom){ try{ window.routeMessageFrom(ownerId, combined, { author, who:'user', ts }); }catch{} }
       };
       const sendHistorySeq = ()=>{
         try{ for (const m of entries){ const t = String(m.text||''); if (t && ownerId && window.routeMessageFrom) window.routeMessageFrom(ownerId, t, { author, who:'user', ts }); } }catch{}
-        // send current last with attachments
+        // send current last (no attachments)
         sendCurrent();
       };
       if (mode === 'history-once') sendHistoryOnce();
       else if (mode === 'history-seq') sendHistorySeq();
       else sendCurrent();
   ta.value='';
-      // If Internet panel, kick off web-enabled reply via backend
-  try{ const host = document.querySelector(`.fab[data-id="${ownerId}"]`); if(host && host.dataset.type==='internet' && window.requestInternetReply){ const payload = lastSent || buildMessageWithAttachments(val); window.requestInternetReply(ownerId, { text: payload }); } }catch{}
+      // If Internet panel, kick off web-enabled reply via backend (no inline attachments)
+  try{ const host = document.querySelector(`.fab[data-id="${ownerId}"]`); if(host && host.dataset.type==='internet' && window.requestInternetReply){ const payload = lastSent || val; window.requestInternetReply(ownerId, { text: payload }); } }catch{}
       // If CoWorker panel, optionally kick off AI reply via backend (self chat) if enabled in settings
       try{
         const host = document.querySelector(`.fab[data-id="${ownerId}"]`);
@@ -307,7 +298,7 @@
             if (raw){ const s = JSON.parse(raw)||{}; if (typeof s.selfPanelReply === 'boolean') allow = !!s.selfPanelReply; }
           }catch{}
           if (allow){
-            const composed = (mode==='current' ? buildMessageWithAttachments(val) : val);
+            const composed = val; // attachments handled internally by node/backend
             window.requestAIReply(ownerId, { text: composed, sourceId: ownerId });
           }
         }

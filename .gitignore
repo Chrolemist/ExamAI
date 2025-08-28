@@ -225,3 +225,10 @@ frontend/package-lock.json
 # Stray SQLite URI file that can be created when using EXAMAI_DB_PATH as a URI
 # (Question mark must be escaped to match the literal filename)
 file:examai_test\?mode=memory&cache=shared
+
+# PDFs (repo-wide)
+# Prevent committing any PDF files anywhere in the tree
+*.[pP][dD][fF]
+
+# Uploaded files directory (if present)
+uploads/
