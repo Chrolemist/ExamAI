@@ -1376,6 +1376,7 @@
           const targetId = String(sel.value||''); if (!targetId) return;
           // Set mapping: destination section consumes theory from this (source) section
           localStorage.setItem(`sectionTheorySrc:${targetId}`, id);
+          try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
           // toast
           let cont = document.getElementById('toastContainer'); if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
           const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Export kopplad – öppna helskärm på målsektionen för att visa Teori.'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1500);
@@ -1824,6 +1825,7 @@
                 const targetId = String(sel.value||''); if (!targetId) return;
                 const srcId = id; // this section is the source of theory
                 localStorage.setItem(`sectionTheorySrc:${targetId}`, srcId);
+                try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
                 // feedback toast
                 let cont = document.getElementById('toastContainer'); if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
                 const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Export kopplad – öppna helskärm på målsektionen för att visa Teori.'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1500);

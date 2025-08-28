@@ -160,7 +160,8 @@
     <div class="messages" data-role="messages"></div>
     <div class="composer">
       <textarea class="userInput" rows="1" placeholder="Sök eller be om sammanfattning... "></textarea>
-      <button class="send-btn" type="button">Skicka</button>
+  <button class="send-btn" type="button">Skicka</button>
+  <button class="cancel-btn btn btn-ghost" type="button" style="display:none; margin-left:6px;">Avbryt</button>
     </div>`;
     addResizeHandles(panel); document.body.appendChild(panel);
     window.makePanelDraggable && window.makePanelDraggable(panel, panel.querySelector('.drawer-head'));
@@ -316,6 +317,16 @@
 
     // Composer (reuse global wireComposer if available)
     if (window.wireComposer) window.wireComposer(panel);
+    // Wire Cancel visibility to in-flight state
+    try{
+      const ownerId = panel.dataset.ownerId||'';
+      const cancelBtn = panel.querySelector('.cancel-btn');
+      const updateCancel = ()=>{ try{ let on = false; if (window.hasActiveAIRequest && ownerId) { on = !!window.hasActiveAIRequest(ownerId); } else if (window.__aiInflight && window.__aiInflight.has) { on = window.__aiInflight.has(ownerId); } if (cancelBtn) cancelBtn.style.display = on ? '' : 'none'; }catch{} };
+      updateCancel();
+      window.addEventListener('ai-request-started', (e)=>{ try{ if (String(e?.detail?.ownerId||'')===ownerId) updateCancel(); }catch{} });
+      window.addEventListener('ai-request-finished', (e)=>{ try{ if (String(e?.detail?.ownerId||'')===ownerId) setTimeout(updateCancel, 50); }catch{} });
+      cancelBtn?.addEventListener('click', ()=>{ try{ if (window.cancelAIRequest) { window.cancelAIRequest(ownerId); } else if (window.__aiInflight && window.__aiInflight.get) { const c = window.__aiInflight.get(ownerId); try{ c?.abort?.(); }catch{} try{ window.__aiInflight.delete(ownerId); }catch{} } window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, ok:false, canceled:true } })); updateCancel(); }catch{} });
+    }catch{}
     wirePanelResize(panel);
   }
 
@@ -380,78 +391,80 @@
     if (apiKey) body.apiKey = apiKey;
     const author = (()=>{ try{ const host=document.querySelector(`.fab[data-id="${ownerId}"]`); return (host?.dataset?.displayName)||'Internet'; }catch{ return 'Internet'; } })();
     setThinking(ownerId, true);
-    fetch(apiBase + '/chat', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) })
-      .then(async r=>{
-        const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
-        if (!r.ok) {
-          // try to log body for debugging
-          let text = '';
-          try{ text = await r.text(); }catch{};
-          console.error('[internet-node] /chat non-OK', r.status, text);
-          throw new Error('HTTP '+r.status+': '+String((text||'')).slice(0,200));
+    const controller = new AbortController(); const signal = controller.signal;
+    // Track in-flight for cancel and toggle
+    try{
+      window.__aiInflight = window.__aiInflight || new Map();
+      window.__aiInflight.set(ownerId, controller);
+    }catch{}
+    // Stream helper for Internet node
+    const sendStreamOnce = async (payload)=>{
+      const res = await fetch(apiBase + '/chat/stream', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload), signal });
+      const ct = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
+      if (!res.ok){ let txt=''; try{ txt = await res.text(); }catch{}; throw new Error('HTTP '+res.status+': '+String((txt||'')).slice(0,200)); }
+      if (!/x-ndjson/i.test(String(ct||''))) throw new Error('NO_STREAM');
+      const panel = document.querySelector(`.panel-flyout.internet-node-panel[data-owner-id="${ownerId}"]`) || document.querySelector(`.panel-flyout[data-owner-id="${ownerId}"]`);
+      const list = panel?.querySelector('.messages');
+      const ensureUI = ()=>{
+        if (!panel || !list) return null;
+        if (ensureUI._el && ensureUI._el.row && ensureUI._el.row.isConnected) return ensureUI._el;
+        const row=document.createElement('div'); row.className='message-row';
+        const group=document.createElement('div'); group.className='msg-group';
+        const authorEl=document.createElement('div'); authorEl.className='author-label'; authorEl.textContent = author || 'Internet';
+        const b=document.createElement('div'); b.className='bubble';
+        const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent='';
+        const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = 'left'; meta.textContent='';
+        b.appendChild(textEl); b.appendChild(meta); group.appendChild(authorEl); group.appendChild(b); row.appendChild(group); list.appendChild(row);
+        list.scrollTop = list.scrollHeight;
+        ensureUI._el = { row, bubble:b, textEl, metaEl:meta, panel, list };
+        return ensureUI._el;
+      };
+      const reader = res.body.getReader(); const decoder = new TextDecoder('utf-8');
+      let acc='';
+      while(true){
+        const { value, done } = await reader.read(); if (done) break;
+        const chunk = decoder.decode(value, { stream:true });
+        const lines = chunk.split(/\r?\n/);
+        for (const line of lines){ const t = String(line||'').trim(); if(!t) continue; let obj=null; try{ obj = JSON.parse(t); }catch{ continue; }
+          const type = String(obj?.type||'');
+          if (type === 'delta'){ const d = String(obj?.delta||''); if(d){ acc += d; const ui = ensureUI(); if(ui){ ui.textEl.textContent = acc; ui.list.scrollTop = ui.list.scrollHeight; } } }
         }
-        if (!/application\/json/i.test(String(ct||''))) { const _ = await r.text().catch(()=>null); throw new Error('Oväntat svar (ej JSON)'); }
-        return r.json();
-      }).then(data=>{
-        let reply=''; try{ reply=String(data?.reply||''); }catch{ reply=''; }
-        if(!reply) reply = data?.error ? ('Fel: ' + data.error) : 'Tomt svar från AI';
-        let ts = Date.now();
-        try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant'); ts = entry?.ts || ts; } }catch{}
-        // Render according to Internet node's render mode
-        try{
-          const panel = document.querySelector(`.panel-flyout.internet-node-panel[data-owner-id="${ownerId}"]`) || document.querySelector(`.panel-flyout[data-owner-id="${ownerId}"]`);
-          const list = panel?.querySelector('.messages');
-          if (panel && list){
-            let renderMode = 'md';
-            try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw){ const s=JSON.parse(raw)||{}; if(s.renderMode) renderMode=String(s.renderMode); } }catch{}
-            const row=document.createElement('div'); row.className='message-row';
-            const group=document.createElement('div'); group.className='msg-group';
-              const authorEl=document.createElement('div'); authorEl.className='author-label'; authorEl.textContent = author || 'Internet';
-            const b=document.createElement('div'); b.className='bubble';
-            const textEl=document.createElement('div'); textEl.className='msg-text';
-            if (renderMode === 'md' && window.mdToHtml){ textEl.innerHTML = sanitizeHtml(window.mdToHtml(String(reply||''))); }
-            else { textEl.textContent = String(reply||''); }
-            b.appendChild(textEl);
-            const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = 'left'; meta.textContent = formatTime(ts); b.appendChild(meta);
-            group.appendChild(authorEl); group.appendChild(b); row.appendChild(group); list.appendChild(row);
-            list.scrollTop = list.scrollHeight;
-          } else {
-            if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts });
-          }
-        }catch{ try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts }); }catch{} }
-        // Render citations beneath the last assistant bubble (clickable)
-        try{
-          const cites = Array.isArray(data?.citations) ? data.citations : [];
-          if (cites.length){
-            const panel = document.querySelector(`.panel-flyout.internet-node-panel[data-owner-id="${ownerId}"]`) || document.querySelector(`.panel-flyout[data-owner-id="${ownerId}"]`);
-            const list = panel?.querySelector('.messages');
-            const rows = list ? list.querySelectorAll('.message-row') : null;
-            const last = rows && rows.length ? rows[rows.length-1] : null;
-            const bubble = last ? last.querySelector('.bubble') : null;
-            if (bubble){
-              const box = document.createElement('div');
-              box.className = 'subtle';
-              box.style.marginTop = '6px';
-              box.style.fontSize = '12px';
-              const parts = cites.map((c, i)=>{
-                const title = (c.title||c.url||`Källa ${i+1}`);
-                const safeTitle = String(title).replace(/[\n\r]+/g,' ');
-                const url = String(c.url||'#');
-                return `<a href="${url}" target="_blank" rel="noopener noreferrer">[${i+1}] ${safeTitle}</a>`;
-              });
-              box.innerHTML = parts.join(' ');
-              bubble.appendChild(box);
-            }
-          }
-        }catch{}
-        try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts }); }catch{}
-  })
-  .catch(err=>{
-        const msg = 'Fel vid webbsökning: ' + (err?.message || String(err));
-        let ts = Date.now(); try{ if(window.graph){ const entry=window.graph.addMessage(ownerId, author, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}
-        try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{}
-      })
-  .finally(()=>{ setTimeout(()=>{ try{ setThinking(ownerId, false); }catch{} }, 700); });
+      }
+      // finalize
+      let finalText = String(acc||''); let ts = Date.now();
+      try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, finalText, 'assistant'); ts = entry?.ts || ts; } }catch{}
+      try{
+        const ui = ensureUI();
+        if (ui){
+          let renderMode = 'md'; try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw){ const s=JSON.parse(raw)||{}; if(s.renderMode) renderMode = String(s.renderMode); } }catch{}
+          if (renderMode === 'md' && window.mdToHtml){ try{ ui.textEl.innerHTML = sanitizeHtml(window.mdToHtml(finalText)); }catch{ ui.textEl.textContent = finalText; } } else { ui.textEl.textContent = finalText; }
+          if (ui.metaEl) ui.metaEl.textContent = formatTime(ts);
+          ui.list.scrollTop = ui.list.scrollHeight;
+        } else { if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', { ts }); }
+      }catch{ try{ if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', { ts }); }catch{} }
+      try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, finalText, { author, who:'assistant', ts }); }catch{}
+      return { reply: finalText };
+    };
+    const sendJSONOnce = async (payload)=>{
+      const r = await fetch(apiBase + '/chat', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload), signal });
+      const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
+      if (!r.ok){ let text=''; try{ text=await r.text(); }catch{}; throw new Error('HTTP '+r.status+': '+String((text||'')).slice(0,200)); }
+      if (!/application\/json/i.test(String(ct||''))){ const _ = await r.text().catch(()=>null); throw new Error('Oväntat svar (ej JSON)'); }
+      return r.json();
+    };
+    // Announce start for UI (to show cancel button)
+    try{ window.dispatchEvent(new CustomEvent('ai-request-started', { detail:{ ownerId, sourceId: ctx && ctx.sourceId ? String(ctx.sourceId) : null } })); }catch{}
+    let __ok = false;
+    (async ()=>{
+      try{
+        // Prefer streaming
+        try{ await sendStreamOnce(body); }
+        catch(e){ if (String(e?.message||'')==='NO_STREAM') { const data = await sendJSONOnce(body); const reply = String(data?.reply||'') || (data?.error? ('Fel: '+data.error) : 'Tomt svar från AI'); let ts=Date.now(); try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant'); ts = entry?.ts || ts; } }catch{}; if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts }); try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts }); }catch{} } else { throw e; } }
+  // success
+  __ok = true;
+      }catch(err){ const msg = 'Fel vid webbsökning: ' + (err?.message || String(err)); let ts = Date.now(); try{ if(window.graph){ const entry=window.graph.addMessage(ownerId, author, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}; try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{} }
+      finally{ setTimeout(()=>{ try{ setThinking(ownerId, false); }catch{} }, 700); try{ if (window.__aiInflight && window.__aiInflight.get && window.__aiInflight.get(ownerId) === controller) window.__aiInflight.delete(ownerId); }catch{} try{ window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, ok: __ok } })); }catch{} }
+    })();
   }
 
   // expose

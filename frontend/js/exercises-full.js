@@ -60,15 +60,13 @@
           // Show card and render source section's raw text in its chosen renderMode
           tCard.hidden = false;
           const raw = localStorage.getItem(`sectionRaw:${from}`)||'';
-          const s = localStorage.getItem(`sectionSettings:${from}`);
-          const mode = s ? (JSON.parse(s||'{}').renderMode || 'raw') : 'raw';
-      if (mode === 'md' && window.mdToHtml){ tEl.innerHTML = sanitizeHtmlLocal(window.mdToHtml(raw)); }
-          else if (mode === 'html'){
-            try{
-        tEl.innerHTML = sanitizeHtmlLocal(raw);
-            }catch{ tEl.textContent = raw; }
+          // Always render Theory as Markdown when possible, regardless of source mode
+          if (window.mdToHtml){
+            try{ tEl.innerHTML = sanitizeHtmlLocal(window.mdToHtml(raw)); }
+            catch{ tEl.textContent = raw; }
+          } else {
+            tEl.textContent = raw;
           }
-          else { tEl.textContent = raw; }
         } else {
           tCard.hidden = true; tEl.innerHTML = '';
         }

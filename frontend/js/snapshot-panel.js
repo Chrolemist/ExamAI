@@ -33,7 +33,7 @@
         <div style="flex:1"></div>
         <div style="position:relative">
           <button id="snapAddBtn" type="button" title="Lägg till nod" style="width:26px;height:22px;line-height:18px;text-align:center;border-radius:6px;border:1px solid rgba(255,255,255,0.25);background:linear-gradient(135deg,#7c5cff,#00d4ff);color:#111;font-weight:700;cursor:pointer;padding:0">+</button>
-          <div id="snapAddMenu" class="hidden" role="menu" aria-hidden="true" style="position:absolute;right:0;top:26px;background:rgba(24,24,32,0.95);border:1px solid rgba(255,255,255,0.2);border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,0.35);padding:6px;">
+          <div id="snapAddMenu" class="hidden" role="menu" aria-hidden="true" inert style="position:absolute;right:0;top:26px;background:rgba(24,24,32,0.95);border:1px solid rgba(255,255,255,0.2);border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,0.35);padding:6px;">
             <button type="button" data-kind="coworker" style="display:block;width:100%;text-align:left;color:#fff;background:none;border:none;padding:6px 8px;border-radius:6px;cursor:pointer">Ny CoWorker</button>
             <button type="button" data-kind="user" style="display:block;width:100%;text-align:left;color:#fff;background:none;border:none;padding:6px 8px;border-radius:6px;cursor:pointer">Ny User</button>
             <button type="button" data-kind="internet" style="display:block;width:100%;text-align:left;color:#fff;background:none;border:none;padding:6px 8px;border-radius:6px;cursor:pointer">Ny Internet</button>
@@ -110,8 +110,10 @@
     try{
       const addBtn = document.getElementById('snapAddBtn');
       const menu = document.getElementById('snapAddMenu');
-      const show = ()=>{ if(menu){ menu.classList.remove('hidden'); menu.setAttribute('aria-hidden','false'); } };
-      const hide = ()=>{ if(menu){ menu.classList.add('hidden'); menu.setAttribute('aria-hidden','true'); } };
+  const show = ()=>{ if(menu){ menu.classList.remove('hidden'); menu.setAttribute('aria-hidden','false'); menu.removeAttribute('inert'); (menu.querySelector('button')||addBtn).focus(); } };
+  const hide = ()=>{ if(menu){ try{ if (menu.contains(document.activeElement)) (addBtn||document.body).focus(); }catch{} menu.classList.add('hidden'); menu.setAttribute('aria-hidden','true'); menu.setAttribute('inert',''); } };
+  // Close on Escape when open
+  document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape' && menu && !menu.classList.contains('hidden')){ hide(); e.stopPropagation(); e.preventDefault(); } });
       addBtn?.addEventListener('click', (e)=>{ e.stopPropagation(); const vis = menu && !menu.classList.contains('hidden'); if(vis) hide(); else show(); });
       document.addEventListener('click', (e)=>{ if(!menu) return; if (menu.classList.contains('hidden')) return; if (!menu.contains(e.target) && e.target !== addBtn) hide(); });
       menu?.addEventListener('click', (e)=>{
