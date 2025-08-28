@@ -87,8 +87,8 @@
       window.updateConnectionsFor && window.updateConnectionsFor(el);
       el.querySelectorAll('.conn-point').forEach(cp => positionConnPoint(cp, el));
     };
-    const onDown = (e)=>{ const p=window.pointFromEvent(e); startX=p.x; startY=p.y; const rect=el.getBoundingClientRect(); sx=rect.left; sy=rect.top; el.classList.add('busy'); moved=false; window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp, { once:true }); };
-    const onUp = ()=>{ el.classList.remove('busy'); window.removeEventListener('pointermove', onMove); if (moved) el._lastDragTime = Date.now(); };
+  const onDown = (e)=>{ const p=window.pointFromEvent(e); startX=p.x; startY=p.y; const rect=el.getBoundingClientRect(); sx=rect.left; sy=rect.top; el.classList.add('dragging'); moved=false; window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp, { once:true }); };
+  const onUp = ()=>{ el.classList.remove('dragging'); window.removeEventListener('pointermove', onMove); if (moved) el._lastDragTime = Date.now(); };
     el.addEventListener('pointerdown', onDown);
   }
   /** Create a new node FAB of a given type at (x, y) and register in state/graph. */
@@ -157,6 +157,8 @@
       const last = el._lastDragTime || 0;
       if (Date.now() - last < 250) return;
       const ownerId = el.dataset.id || '';
+  // If this node has pending work, ensure the busy glow remains asserted
+  try{ const p = Number(el.dataset.pending||0)||0; if (p>0) el.classList.add('busy'); }catch{}
       const existing = ownerId ? document.querySelector(`.panel-flyout[data-owner-id="${ownerId}"]`) : null;
       if (existing) {
         // Toggle: hide by removing the panel (state is persisted in Graph/localStorage)

@@ -176,6 +176,8 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 
 /* Glow/busy */
 .fab.busy{box-shadow:0 0 0 2px rgba(124,92,255,0.75),0 0 22px rgba(124,92,255,0.35),0 0 44px rgba(0,212,255,0.25);border-color:rgba(124,92,255,0.6);animation:glowPulse 1.2s ease-in-out infinite}
+/* Dragging state uses a distinct outline so it won't interfere with busy glow */
+.fab.dragging{outline:2px dashed rgba(124,92,255,0.5); outline-offset:2px}
 @keyframes glowPulse{0%{box-shadow:0 0 0 2px rgba(124,92,255,0.65),0 0 18px rgba(124,92,255,0.28),0 0 36px rgba(0,212,255,0.2)}50%{box-shadow:0 0 0 2px rgba(124,92,255,0.9),0 0 30px rgba(124,92,255,0.45),0 0 60px rgba(0,212,255,0.35)}100%{box-shadow:0 0 0 2px rgba(124,92,255,0.65),0 0 18px rgba(124,92,255,0.28),0 0 36px rgba(0,212,255,0.2)}}
 
 /* Connection layer */
