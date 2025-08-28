@@ -64,9 +64,22 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
   /* Limit height so panel doesn’t keep growing; allow internal scroll */
   max-height:50vh; height:40vh; /* fixed viewport-based height to ensure scroll */
 }
-.panel.board-section .ex-fb .fb-head{display:flex; align-items:center; justify-content:space-between; gap:8px}
-.panel.board-section .ex-fb .fb-del{appearance:none; background:transparent; border:1px solid #2a2a35; color:#a6a6b3; border-radius:6px; padding:0 6px; height:20px; cursor:pointer; opacity:0.7}
-.panel.board-section .ex-fb .fb-del:hover{opacity:1; border-color:#3a3a45}
+/* Feedback round header + delete button (applies to panel and full-screen) */
+.panel.board-section .ex-fb .fb-head, .fx-fb .fb-head, .fb-head{display:flex; align-items:center; justify-content:space-between; gap:8px}
+/* Enhanced, modern icon button */
+.panel.board-section .ex-fb .fb-del, .fx-fb .fb-del, .fb-del{
+  appearance:none; background:rgba(255,255,255,0.03); border:1px solid #2a2a35; color:#cfd3e3;
+  width:22px; height:22px; border-radius:999px; display:inline-grid; place-items:center; line-height:1;
+  cursor:pointer; opacity:0.9; transition:background .15s ease, border-color .15s ease, transform .12s ease, box-shadow .15s ease, color .15s ease;
+}
+.panel.board-section .ex-fb .fb-del:hover, .fx-fb .fb-del:hover, .fb-del:hover{
+  background:rgba(255,80,80,0.12); border-color:#673232; color:#ffd3d3; transform:scale(1.06);
+  box-shadow:0 0 0 2px rgba(255,80,80,0.08), 0 6px 16px rgba(255,80,80,0.12);
+}
+.panel.board-section .ex-fb .fb-del:active, .fx-fb .fb-del:active, .fb-del:active{ transform:scale(0.96); }
+.panel.board-section .ex-fb .fb-del:focus-visible, .fx-fb .fb-del:focus-visible, .fb-del:focus-visible{
+  outline:none; box-shadow:0 0 0 2px rgba(124,92,255,0.35), 0 2px 10px rgba(124,92,255,0.2);
+}
  .fx-card#cardF{ display:flex; flex-direction:column }
  .fx-card#cardF .fx-fb{ flex:1 1 auto; min-height:0; overflow:auto; max-height:58vh; height:58vh; }
 
@@ -85,6 +98,15 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 .fx-q ul,
 .fx-q ol{ margin:0.4em 0 0.4em 1.2em }
 .fx-q li{ margin:0.25em 0 }
+
+/* Full-screen question mini-chat: dark theme input */
+.fx-qchat .input,
+.fx-qchat input[type="text"],
+.fx-qchat input{ background:#0f0f14; border:1px solid #24242c; color:var(--text); border-radius:10px; padding:8px 10px; }
+.fx-qchat .input::placeholder,
+.fx-qchat input::placeholder{ color:#8f93a3 }
+.fx-qchat .input:focus,
+.fx-qchat input:focus{ outline:2px solid rgba(124,92,255,0.35); outline-offset:0; border-color:#3a3a45 }
 
 /* Section IO points: position left for output, right for input */
 .panel .head .section-io{position:absolute;top:50%;transform:translateY(-50%);display:inline-block;width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 30% 30%, #fff, #cde, #79f);z-index:9050;cursor:crosshair}
