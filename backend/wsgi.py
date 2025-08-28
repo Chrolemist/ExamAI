@@ -1,7 +1,10 @@
 try:
-	from .app import create_app  # package import
+	from backend.app import create_app  # when installed as a package
 except Exception:
-	from app import create_app  # fallback when run directly
+	try:
+		from .app import create_app  # relative
+	except Exception:
+		from app import create_app  # local
 
 # Gunicorn entrypoint
 app = create_app()

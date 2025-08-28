@@ -42,3 +42,28 @@ Bygg och kör med Docker:
 docker build -t examai-backend .
 docker run -p 8000:8000 examai-backend
 ```
+
+# Backend API
+
+Refactored with SOLID-style modules and blueprints:
+
+- app.py: thin app factory (config, CORS, blueprint registration)
+- routes/
+	- chat.py: plain chat endpoint
+	- upload.py: file uploads and serving
+	- debug.py: debug utilities
+	- exam.py: demo exam builder
+	- rag.py: RAG ingest/query (chunk + embed + vector search)
+	- summarize.py: hierarchical summarization
+	- sliding.py: sliding window reading/QA
+- services/
+	- openai_service.py: OpenAI client factory
+	- tokenizer.py: token counting and chunking
+	- embeddings.py: embedding helper
+	- vector_store.py: in-memory vector DB (swap with Pinecone/Weaviate/Qdrant in prod)
+
+New endpoints:
+- POST /rag/ingest { text, chunkTokens?, overlapTokens?, embeddingModel? }
+- POST /rag/query { query, topK?, model?, embeddingModel?, max_tokens? }
+- POST /summarize/hierarchical { text, chunkTokens?, overlapTokens?, model?, layerPrompt?, max_tokens? }
+- POST /sliding/window { text, windowTokens?, overlapTokens?, ask?, model? }

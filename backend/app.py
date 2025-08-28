@@ -75,11 +75,26 @@ def create_app():
         from .routes.exam import exam_bp  # type: ignore
     except Exception:
         from routes.exam import exam_bp  # type: ignore
+    try:
+        from .routes.rag import rag_bp  # type: ignore
+    except Exception:
+        from routes.rag import rag_bp  # type: ignore
+    try:
+        from .routes.summarize import summarize_bp  # type: ignore
+    except Exception:
+        from routes.summarize import summarize_bp  # type: ignore
+    try:
+        from .routes.sliding import sliding_bp  # type: ignore
+    except Exception:
+        from routes.sliding import sliding_bp  # type: ignore
 
     app.register_blueprint(chat_bp)
     app.register_blueprint(upload_bp)
     app.register_blueprint(debug_bp)
     app.register_blueprint(exam_bp)
+    app.register_blueprint(rag_bp)
+    app.register_blueprint(summarize_bp)
+    app.register_blueprint(sliding_bp)
     return app
 
 

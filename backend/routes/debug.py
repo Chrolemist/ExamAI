@@ -2,7 +2,7 @@ import os
 from flask import Blueprint, jsonify, request
 
 try:
-    from .. import web_search as ws  # type: ignore
+    from backend import web_search as ws  # type: ignore
 except Exception:
     import web_search as ws  # type: ignore
 
