@@ -11,6 +11,7 @@
   const roundKey = (s)=> `sectionExercisesRound:${s}`;
 
   const els = {
+  t: document.getElementById('fxT'),
     q: document.getElementById('fxQ'),
     a: document.getElementById('fxA'),
     f: document.getElementById('fxF'),
@@ -22,7 +23,8 @@
     cards: {
       q: document.getElementById('cardQ'),
       a: document.getElementById('cardA'),
-      f: document.getElementById('cardF'),
+  f: document.getElementById('cardF'),
+  t: document.getElementById('cardT'),
     },
   };
 
@@ -33,6 +35,24 @@
   function dispatchChanged(){ try{ window.localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{} }
 
   function render(){
+    // Theory card: render if this section has an import marker
+    try{
+      const tCard = els.cards.t; const tEl = els.t; if (tCard && tEl){
+        const srcKey = `sectionTheorySrc:${id}`; const from = localStorage.getItem(srcKey)||'';
+        if (from){
+          // Show card and render source section's raw text in its chosen renderMode
+          tCard.hidden = false;
+          const raw = localStorage.getItem(`sectionRaw:${from}`)||'';
+          const s = localStorage.getItem(`sectionSettings:${from}`);
+          const mode = s ? (JSON.parse(s||'{}').renderMode || 'raw') : 'raw';
+          if (mode === 'md' && window.mdToHtml){ tEl.innerHTML = window.mdToHtml(raw); }
+          else if (mode === 'html'){ tEl.innerHTML = raw; }
+          else { tEl.textContent = raw; }
+        } else {
+          tCard.hidden = true; tEl.innerHTML = '';
+        }
+      }
+    }catch{}
     const arr = getList();
     const idx = Math.min(getCursor(), Math.max(0, arr.length-1));
   els.empty.hidden = !!arr.length;
@@ -126,7 +146,7 @@
   function toggleLayout(){ const l = loadLayout(); l.free = !l.free; saveLayout(l); applyLayout(); }
 
   function persistCard(card){
-    const name = card.id==='cardQ'?'q': card.id==='cardA'?'a':'f';
+  const name = card.id==='cardQ'?'q': card.id==='cardA'?'a': card.id==='cardF'?'f':'t';
     const r = card.getBoundingClientRect();
     const c = els.main.getBoundingClientRect();
     const l = loadLayout(); l[name] = { x: Math.round(r.left - c.left), y: Math.round(r.top - c.top), w: Math.round(r.width), h: Math.round(r.height) }; saveLayout(l);
@@ -271,7 +291,7 @@
   window.addEventListener('storage', (e)=>{
     try{
       if (!e) return;
-  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === '__exercises_changed__')){
+  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === '__exercises_changed__' || /^sectionRaw:/.test(e.key) || /^sectionSettings:/.test(e.key) || e.key === `sectionTheorySrc:${id}`)){
         render();
       }
     }catch{}

@@ -20,6 +20,8 @@
   .fx-wrap.free .fx-main { display:block; min-height: calc(100vh - 120px); }
       .fx-card { background:linear-gradient(180deg,#121219,#0e0e14); border:1px solid #23232b; border-radius:10px; padding:12px; color:var(--text); }
       .fx-card[data-free="1"]{ position:absolute; }
+  /* Theory card spans all columns in grid mode */
+  #cardT { grid-column: 1 / span 3; }
       .fx-resize{ position:absolute; right:6px; bottom:6px; width:14px; height:14px; cursor:nwse-resize;
         background:linear-gradient(135deg,transparent 50%, rgba(124,92,255,.4) 50%); clip-path:polygon(0 100%, 100% 0, 100% 100%); opacity:.7 }
       .fx-resize:hover{ opacity:1 }
@@ -39,6 +41,8 @@
   #cardA { display:flex; flex-direction:column; }
   #cardA .fx-a { flex: 1 1 auto; resize: none; }
   #cardA .fx-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; padding-right:18px; }
+  /* Theory content */
+  .fx-t { white-space: pre-wrap; }
     </style>
   </head>
   <body>
@@ -83,6 +87,11 @@
           <div class="fx-meta drag-handle" id="fxMetaF">Feedback</div>
           <div class="fx-fb" id="fxF" spellcheck="false"></div>
           <div class="loader-overlay" id="fxFLoad"><div class="spinner-rgb"></div></div>
+          <div class="fx-resize" title="Ändra storlek"></div>
+        </div>
+        <div class="fx-card" id="cardT" hidden>
+          <div class="fx-meta drag-handle" id="fxMetaT">Teori</div>
+          <div class="fx-t" id="fxT" spellcheck="false"></div>
           <div class="fx-resize" title="Ändra storlek"></div>
         </div>
       </section>

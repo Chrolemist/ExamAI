@@ -385,7 +385,15 @@
     makePanelDraggable(panel, panel.querySelector('.drawer-head'));
     try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
-    const clearBtn=panel.querySelector('[data-action="clear"]'); clearBtn?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
+    const clearBtn=panel.querySelector('[data-action="clear"]');
+    clearBtn?.addEventListener('click', ()=>{
+      try{
+        const m=panel.querySelector('.messages'); if(m) m.innerHTML='';
+        const ownerId = panel.dataset.ownerId||'';
+        if (ownerId && window.graph && typeof window.graph.clearMessages==='function') window.graph.clearMessages(ownerId);
+        panel._lastAssistantText = '';
+      }catch{}
+    });
     const delBtnU=panel.querySelector('[data-action="delete"]'); delBtnU?.addEventListener('click', ()=>{
       try{
         const ownerId = panel.dataset.ownerId||'';
@@ -528,7 +536,15 @@
   addResizeHandles(panel); document.body.appendChild(panel); makePanelDraggable(panel, panel.querySelector('.drawer-head'));
   try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
-    const clearBtn=panel.querySelector('[data-action="clear"]'); clearBtn?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
+    const clearBtn=panel.querySelector('[data-action="clear"]');
+    clearBtn?.addEventListener('click', ()=>{
+      try{
+        const m=panel.querySelector('.messages'); if(m) m.innerHTML='';
+        const ownerId = panel.dataset.ownerId||'';
+        if (ownerId && window.graph && typeof window.graph.clearMessages==='function') window.graph.clearMessages(ownerId);
+        panel._lastAssistantText = '';
+      }catch{}
+    });
     const delBtn=panel.querySelector('[data-action="delete"]'); delBtn?.addEventListener('click', ()=>{
       try{
         const ownerId = panel.dataset.ownerId||'';
@@ -1250,6 +1266,44 @@
   const selInput = mkSel('Inmatning:');
   parkWrap.appendChild(selGrader.wrap); parkWrap.appendChild(selImprover.wrap); parkWrap.appendChild(selInput.wrap);
     exBar.appendChild(parkWrap);
+    // Export dropdown: map this section's content as Theory into a chosen section's full-screen view
+    try{
+      const expWrap = document.createElement('label');
+      expWrap.className = 'subtle';
+      expWrap.style.display = 'flex'; expWrap.style.alignItems = 'center'; expWrap.style.gap = '6px'; expWrap.style.marginLeft = '12px';
+      const span = document.createElement('span'); span.textContent = 'Exportera till:';
+      const sel = document.createElement('select'); sel.className = 'btn';
+      expWrap.appendChild(span); expWrap.appendChild(sel);
+      exBar.appendChild(expWrap);
+      const fillSections = ()=>{
+        const opts = [{ value:'', label:'— Välj sektion —' }];
+        try{
+          document.querySelectorAll('.panel.board-section').forEach(el=>{
+            const sid = el.dataset.sectionId||''; if (!sid) return;
+            const h2 = el.querySelector('.head h2');
+            const title = (h2?.textContent||'').trim() || sid;
+            opts.push({ value: sid, label: title });
+          });
+        }catch{}
+        sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); });
+        sel.value='';
+      };
+      fillSections();
+      sel.addEventListener('change', ()=>{
+        try{
+          const targetId = String(sel.value||''); if (!targetId) return;
+          // Set mapping: destination section consumes theory from this (source) section
+          localStorage.setItem(`sectionTheorySrc:${targetId}`, id);
+          // toast
+          let cont = document.getElementById('toastContainer'); if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
+          const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Export kopplad – öppna helskärm på målsektionen för att visa Teori.'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1500);
+          // reset back to placeholder for repeated use
+          sel.value='';
+        }catch{}
+      });
+      // Refresh list when sections change (best-effort via storage keys)
+      window.addEventListener('storage', (e)=>{ try{ if (!e||!e.key) return; if (e.key==='boardSections:list:v1' || /^boardSection:title:/.test(e.key)) fillSections(); }catch{} });
+    }catch{}
           // Insert toolbar near title; inline IO is no longer present
           head.appendChild(exBar);
           // Wire actions
@@ -1656,6 +1710,42 @@
             fillFromCoworkers();
             window.addEventListener('coworkers-changed', fillFromCoworkers);
             sel.addEventListener('change', ()=>{ const p=getParking(); p.input = sel.value||null; setParking(p); });
+          }catch{}
+          // Export dropdown (non-exercises too)
+          try{
+            const expWrap = document.createElement('label');
+            expWrap.className = 'subtle';
+            expWrap.style.display = 'flex'; expWrap.style.alignItems = 'center'; expWrap.style.gap = '6px'; expWrap.style.marginLeft = '12px';
+            const span = document.createElement('span'); span.textContent = 'Exportera till:';
+            const sel = document.createElement('select'); sel.className = 'btn';
+            expWrap.appendChild(span); expWrap.appendChild(sel);
+            tBar.appendChild(expWrap);
+            const fillSections = ()=>{
+              const opts = [{ value:'', label:'— Välj sektion —' }];
+              try{
+                document.querySelectorAll('.panel.board-section').forEach(el=>{
+                  const sid = el.dataset.sectionId||''; if (!sid) return;
+                  const h2 = el.querySelector('.head h2');
+                  const title = (h2?.textContent||'').trim() || sid;
+                  opts.push({ value: sid, label: title });
+                });
+              }catch{}
+              sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); });
+              sel.value='';
+            };
+            fillSections();
+            sel.addEventListener('change', ()=>{
+              try{
+                const targetId = String(sel.value||''); if (!targetId) return;
+                const srcId = id; // this section is the source of theory
+                localStorage.setItem(`sectionTheorySrc:${targetId}`, srcId);
+                // feedback toast
+                let cont = document.getElementById('toastContainer'); if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
+                const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Export kopplad – öppna helskärm på målsektionen för att visa Teori.'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1500);
+                sel.value='';
+              }catch{}
+            });
+            window.addEventListener('storage', (e)=>{ try{ if (!e||!e.key) return; if (e.key==='boardSections:list:v1' || /^boardSection:title:/.test(e.key)) fillSections(); }catch{} });
           }catch{}
           head.appendChild(tBar);
           btnClear.addEventListener('click', ()=>{
