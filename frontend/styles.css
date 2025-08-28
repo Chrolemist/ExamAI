@@ -240,3 +240,20 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
   background:#0f0f14;
   color:#e6e6ec;
 }
+
+/* Loading overlay + RGB spinner (dark theme) */
+.loader-overlay{position:absolute;inset:0;display:none;place-items:center;/* removed blur to keep bubbles visible */background:rgba(7,7,11,0.28);border-radius:10px;z-index:20}
+.loader-overlay.show{display:grid}
+.spinner-rgb{width:64px;height:64px;border-radius:50%;
+  background:conic-gradient(from 0deg,#7c5cff, #00d4ff, #7c5cff);
+  -webkit-mask:radial-gradient(farthest-side, transparent 60%, #000 61%);
+          mask:radial-gradient(farthest-side, transparent 60%, #000 61%);
+  box-shadow:0 0 24px rgba(124,92,255,0.25), 0 0 36px rgba(0,212,255,0.18);
+  animation:spin 1.1s linear infinite, hue 4s linear infinite;
+}
+.spinner-rgb::before{content:"";position:absolute;inset:12px;border-radius:50%;
+  background:radial-gradient(circle at 30% 30%, rgba(124,92,255,.25), transparent 60%);
+  filter:blur(6px);
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes hue{0%{filter:hue-rotate(0deg)}100%{filter:hue-rotate(360deg)}}

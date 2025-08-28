@@ -1348,6 +1348,9 @@
               // Build right (answer + actions)
               const a = document.createElement('textarea'); a.className='ex-a-focus'; a.rows=14; a.placeholder='Skriv ditt svar...'; { const cur = getExercises(); a.value = cur[idx]?.a || ''; }
               const fb = document.createElement('div'); fb.className='ex-fb'; fb.setAttribute('aria-live','polite');
+              // Overlays for loading state
+              const leftOverlay = document.createElement('div'); leftOverlay.className='loader-overlay'; leftOverlay.innerHTML='<div class="spinner-rgb"></div>';
+              const rightOverlay = document.createElement('div'); rightOverlay.className='loader-overlay'; rightOverlay.innerHTML='<div class="spinner-rgb"></div>';
               const renderFb = ()=>{
                 try{
                   const cur = getExercises(); const it = cur[idx]||{}; const rounds = Array.isArray(it.fbRounds)? it.fbRounds : (it.fb? [String(it.fb)] : []);
@@ -1355,9 +1358,30 @@
                   const parts = rounds.map((txt, i)=>{
                     const head = `<div class=\"subtle\" style=\"margin:6px 0 4px; opacity:.85;\">Omgång ${i+1}</div>`;
                     const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
-                    return head + `<div class=\"fb-round\">${body}</div>`;
+                    return head + `<div class=\"fb-round\" data-ri=\"${i}\">${body}</div>`;
                   });
                   fb.innerHTML = parts.join('<hr style=\"border:none; border-top:1px solid #252532; margin:8px 0;\">');
+                  // Make each round editable and persist on change
+                  try{
+                    const blocks = fb.querySelectorAll('.fb-round');
+                    blocks.forEach(el=>{
+                      el.contentEditable = 'true';
+                      el.spellcheck = false;
+                      const saveNow = ()=>{
+                        try{
+                          const ri = Math.max(0, Number(el.getAttribute('data-ri')||'0')||0);
+                          const cur2 = getExercises(); const it2 = cur2[idx]||{};
+                          if (!Array.isArray(it2.fbRounds)) it2.fbRounds = (it2.fb? [String(it2.fb)] : []);
+                          while (it2.fbRounds.length <= ri) it2.fbRounds.push('');
+                          it2.fbRounds[ri] = String(el.innerText||'').trim();
+                          cur2[idx] = it2; setExercises(cur2);
+                        }catch{}
+                      };
+                      // Debounce input saves to avoid excessive writes
+                      let t=null; el.addEventListener('input', ()=>{ try{ if (t) clearTimeout(t); t=setTimeout(saveNow, 500); }catch{} });
+                      el.addEventListener('blur', saveNow);
+                    });
+                  }catch{}
                 }catch{ fb.textContent=''; }
               };
               renderFb();
@@ -1366,6 +1390,7 @@
               const del = document.createElement('button'); del.type='button'; del.className='btn btn-ghost'; del.textContent='Ta bort';
               actions.appendChild(gradeOne); actions.appendChild(del);
               right.appendChild(a); right.appendChild(actions); right.appendChild(fb);
+              left.appendChild(leftOverlay); right.appendChild(rightOverlay);
               // insert
               wrap.appendChild(left);
               wrap.appendChild(right);
@@ -1398,12 +1423,39 @@
                 // Prefer parked Grader (direct send), else fall back to cable routing
                 try{
                   const park = getParking(); const graderId = park && park.grader ? String(park.grader) : '';
+                  // If neither grader nor any outgoing connections from this section -> abort with hint
+                  const hasRoute = (function(){ try{ return (window.state?.connections||[]).some(c=> c.fromId===id); }catch{ return false; } })();
+                  if (!graderId && !hasRoute){ alert('Ingen "Rättare"-nod vald och inga kopplingar från denna sektion. Välj en Rättare i listan eller dra en kabel.'); return; }
+                  // show loading in feedback panel while model works
+                  rightOverlay.classList.add('show');
+                  const clearOverlay = ()=>{ setTimeout(()=>{ rightOverlay.classList.remove('show'); }, 200); };
+                  const doneHandler = (e)=>{ try{ if (!e || !e.detail || e.detail.id === id) clearOverlay(); }catch{ clearOverlay(); } };
+                  // on any exercises change (feedback arrival), hide overlay
+                  window.addEventListener('exercises-data-changed-global', doneHandler, { once:true });
+                  // also listen to local section event
+                  sec.addEventListener('exercises-data-changed', doneHandler, { once:true });
+                  // and global finish event in case of error
+                  const onFinish = (e)=>{ try{ const d=e?.detail; if (!d) return; if (d.sourceId && String(d.sourceId)===String(id)) clearOverlay(); }catch{} };
+                  window.addEventListener('ai-request-finished', onFinish, { once:true });
+                  // safety timeout to clear overlay if nothing comes back
+                  const safety = setTimeout(()=>{
+                    try{ rightOverlay.classList.remove('show'); }catch{}
+                    try{
+                      let cont = document.getElementById('toastContainer'); if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
+                      const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Inget svar mottogs. Kontrollera nod, nyckel eller nätverk.'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 2500);
+                    }catch{}
+                  }, 30000);
+                  const clearSafety = ()=>{ try{ clearTimeout(safety); }catch{} };
+                  window.addEventListener('exercises-data-changed-global', clearSafety, { once:true });
+                  sec.addEventListener('exercises-data-changed', clearSafety, { once:true });
+                  window.addEventListener('ai-request-finished', clearSafety, { once:true });
                   if (graderId && window.requestAIReply){ window.requestAIReply(graderId, { text: payload, sourceId: id }); }
                   else if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() });
                 }catch{}
                 // mark this index to receive incoming feedback
                 setPendingFeedback(idx);
               });
+              // When we send an improvement from full-screen, that page handles overlay. If we add an improve button here later, use leftOverlay similarly.
             }catch{}
           };
           sec.addEventListener('exercises-data-changed', ()=>renderExercisesFocus());

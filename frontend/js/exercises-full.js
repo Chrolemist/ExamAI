@@ -46,9 +46,30 @@
       const parts = rounds.map((txt, i)=>{
         const head = `<div class="subtle" style="margin:6px 0 4px; opacity:.85;">Omgång ${i+1}</div>`;
         const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
-        return head + `<div class="fb-round">${body}</div>`;
+        return head + `<div class="fb-round" data-ri="${i}">${body}</div>`;
       });
       els.f.innerHTML = parts.join('<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
+      // Make feedback rounds editable and persist to storage
+      try{
+        const blocks = els.f.querySelectorAll('.fb-round');
+        blocks.forEach(el=>{
+          el.contentEditable = 'true';
+          el.spellcheck = false;
+          const saveNow = ()=>{
+            try{
+              const ri = Math.max(0, Number(el.getAttribute('data-ri')||'0')||0);
+              const arr2 = getList(); const i2 = Math.min(getCursor(), Math.max(0, arr2.length-1));
+              const it2 = arr2[i2] || {};
+              if (!Array.isArray(it2.fbRounds)) it2.fbRounds = (it2.fb? [String(it2.fb)] : []);
+              while (it2.fbRounds.length <= ri) it2.fbRounds.push('');
+              it2.fbRounds[ri] = String(el.innerText||'').trim();
+              arr2[i2] = it2; setList(arr2);
+            }catch{}
+          };
+          let t=null; el.addEventListener('input', ()=>{ try{ if (t) clearTimeout(t); t=setTimeout(saveNow, 500); }catch{} });
+          el.addEventListener('blur', saveNow);
+        });
+      }catch{}
     }
   const counter = `${idx+1} / ${arr.length}`;
   if (els.infoTop) els.infoTop.textContent = counter;
@@ -128,6 +149,10 @@
   // Question improver mini-chat
   (function(){
     const inp = document.getElementById('fxQChat'); const send = document.getElementById('fxQSend'); if (!inp || !send) return;
+  const qLoad = document.getElementById('fxQLoad');
+  // Bubble effect instance attached to the question card
+  let bubbleFx = null; try{ const host = document.getElementById('cardQ'); if (host && window.BubbleEffect) bubbleFx = new window.BubbleEffect(host); }catch{}
+  let activeBubble = null; let bubbleTimer = null;
     const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
     const sendToImprover = (userText)=>{
       const v = String(userText||'').trim(); if (!v) return;
@@ -141,13 +166,24 @@
       // Mark pending improvement (cross-tab) so the reply replaces this question text
       try{ localStorage.setItem(`sectionPendingImprove:${id}`, String(i)); }catch{}
       const park = getParking(); const improverId = park && park.improver ? String(park.improver) : '';
-      if (!improverId){ alert('Ingen "Förbättra fråga"-nod vald i sektionen. Välj en CoWorker i listan.'); return; }
+  if (!improverId){ alert('Ingen "Förbättra fråga"-nod vald i sektionen. Välj en CoWorker i listan.'); return; }
+  // show loader on question card
+      try{ qLoad?.classList.add('show'); }catch{}
+      // Spawn a floating bubble from the chat input and schedule a timed pop
+      try{
+        if (bubbleFx){
+          if (activeBubble) { try{ activeBubble.dispose(); }catch{} activeBubble=null; }
+          activeBubble = bubbleFx.spawnAt(inp, v);
+          if (bubbleTimer) { try{ clearTimeout(bubbleTimer); }catch{} bubbleTimer=null; }
+          bubbleTimer = setTimeout(()=>{ try{ if (activeBubble){ activeBubble.fadeOut(10000); activeBubble=null; } }catch{} }, 10000);
+        }
+      }catch{}
       // Prefer direct coworker AI call if available, else route via connections
       let sent = false;
       if (improverId && window.requestAIReply){ try{ window.requestAIReply(improverId, { text: payload, sourceId: id }); sent = true; }catch{} }
       if (!sent && window.routeMessageFrom){ try{ window.routeMessageFrom(id, payload, { author: 'Fråga', who:'user', ts: Date.now() }); sent = true; }catch{} }
       // UX: brief indicator that message was sent
-      try{
+  try{
         let cont = document.getElementById('toastContainer');
         if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
         const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Skickat till förbättrare'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1100);
@@ -155,10 +191,12 @@
     };
     send.addEventListener('click', ()=>{ const v=String(inp.value||'').trim(); if(!v) return; sendToImprover(v); inp.value=''; });
     inp.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); const v=String(inp.value||'').trim(); if(!v) return; sendToImprover(v); inp.value=''; } });
+  // Bubble now pops on a hardcoded timer; keep loader cleanup via existing listeners above
   })();
   // Grade current question via backend /chat
   (function(){
     const btn = document.getElementById('fxGrade'); if (!btn) return;
+  const fLoad = document.getElementById('fxFLoad');
     btn.addEventListener('click', ()=>{
       try{
         const arr = getList(); const i = getCursor(); const it = arr[i]; if (!it){ alert('Ingen fråga vald.'); return; }
@@ -171,6 +209,8 @@
         const park = parkRaw ? (JSON.parse(parkRaw)||{}) : {};
         const graderId = park && park.grader ? String(park.grader) : '';
         if (!graderId){ alert('Ingen "Rättare"-nod vald i sektionen. Välj en CoWorker i listan.'); return; }
+    // show loader on feedback card
+    try{ fLoad?.classList.add('show'); }catch{}
         let sent = false;
         if (graderId && window.requestAIReply){ try{ window.requestAIReply(graderId, { text: payloadText, sourceId: id }); sent = true; }catch{} }
         if (!sent && window.routeMessageFrom){ try{ window.routeMessageFrom(id, payloadText, { author: 'Fråga', who:'user', ts: Date.now() }); sent = true; }catch{} }
@@ -186,6 +226,14 @@
 
   // Edits -> persist
   els.a.addEventListener('input', ()=>{ const arr=getList(); const i=getCursor(); if(arr[i]){ arr[i].a = els.a.value; setList(arr); }});
+  // Make question content editable and persist
+  try{
+    els.q.contentEditable = 'true';
+    els.q.spellcheck = false;
+    const saveQ = ()=>{ try{ const arr=getList(); const i=getCursor(); if(arr[i]){ arr[i].q = String(els.q.innerText||'').trim(); setList(arr); } }catch{} };
+    let tq=null; els.q.addEventListener('input', ()=>{ try{ if (tq) clearTimeout(tq); tq=setTimeout(saveQ, 500); }catch{} });
+    els.q.addEventListener('blur', saveQ);
+  }catch{}
 
   // Cross-tab sync via storage events
   window.addEventListener('storage', (e)=>{
@@ -198,7 +246,20 @@
   });
   // Same-tab global event (dispatched by connect.js when exercises change)
   window.addEventListener('exercises-data-changed-global', (ev)=>{
-    try{ render(); }catch{}
+  try{ render(); }catch{}
+  // hide loaders when data changed
+  try{ document.getElementById('fxFLoad')?.classList.remove('show'); }catch{}
+  try{ document.getElementById('fxQLoad')?.classList.remove('show'); }catch{}
+  });
+  // Also hide loaders when backend signals an AI request finished (success or error)
+  window.addEventListener('ai-request-finished', (ev)=>{
+    try{
+      const src = ev?.detail?.sourceId; if (!src) return;
+      // Only react if event is for this section id
+      if (String(src) !== String(id)) return;
+      document.getElementById('fxFLoad')?.classList.remove('show');
+      document.getElementById('fxQLoad')?.classList.remove('show');
+    }catch{}
   });
 
   initLayout();

@@ -226,7 +226,6 @@
   try{
       const panel = [...document.querySelectorAll('.panel-flyout')].find(p => p.dataset.ownerId === ownerId);
       if (panel){
-  const mEl = panel.querySelector('[data-role="model"]'); if (mEl && mEl.value) model = String(mEl.value);
         const useRole = panel.querySelector('[data-role="useRole"]');
         const roleEl = panel.querySelector('[data-role="role"]');
         const topicEl = panel.querySelector('[data-role="topic"]');
@@ -465,7 +464,7 @@
     const meta = { ts, citations };
     try{ if (Array.isArray(requestAIReply._lastAttachments)) meta.attachments = requestAIReply._lastAttachments; }catch{}
     try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
-    try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
+  try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
     try{ const routedMeta = { author, who:'assistant', ts, citations }; if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, routedMeta); }catch{}
   // New: append reply into any board section that has this coworker selected as its Input (Inmatning)
     try{
@@ -574,6 +573,38 @@
         }catch{}
       }
     }catch{}
+    // Cross-tab only: if no section DOM exists, still handle pending feedback markers across tabs
+    try{
+      const keys = Object.keys(localStorage || {}).filter(k => /^sectionPendingFeedback:/.test(k));
+      for (const k of keys){
+        try{
+          const sid = k.replace(/^sectionPendingFeedback:/, '');
+          const raw = localStorage.getItem(`sectionParking:${sid}`) || '{}';
+          const cfg = JSON.parse(raw||'{}')||{};
+          if (!cfg || String(cfg.grader||'') !== String(ownerId)) continue;
+          const v = localStorage.getItem(k);
+          if (v==null) continue;
+          const idx = Math.max(0, Number(v)||0);
+          const keyEx = `sectionExercises:${sid}`;
+          const arr = JSON.parse(localStorage.getItem(keyEx)||'[]')||[];
+          if (!arr[idx]) continue;
+          // round-aware append
+          let round = 1; try{ round = Math.max(1, Number(localStorage.getItem(`sectionExercisesRound:${sid}`)||'1')||1); }catch{}
+          try{ if (!Array.isArray(arr[idx].fbRounds)) arr[idx].fbRounds = []; if (arr[idx].fb && !arr[idx].fbRounds.length){ arr[idx].fbRounds = [ String(arr[idx].fb||'') ]; delete arr[idx].fb; } }catch{}
+          const rIndex = round - 1; while (arr[idx].fbRounds.length <= rIndex) arr[idx].fbRounds.push('');
+          const prev = String(arr[idx].fbRounds[rIndex]||'');
+          arr[idx].fbRounds[rIndex] = prev ? (prev + '\n\n' + String(reply||'')) : String(reply||'');
+          localStorage.setItem(keyEx, JSON.stringify(arr));
+          localStorage.removeItem(k);
+          try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+          try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
+          // If a section is also present in this tab, inform it too
+          try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`); if (sec) sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } })); }catch{}
+        }catch{}
+      }
+    }catch{}
+  // Announce completion to UI listeners (use body.sourceId if present)
+  try{ const src = (body && body.sourceId) ? String(body.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: true } })); }catch{}
   };
   const doStep = (pgStart, step)=>{
     const payload = Object.assign({}, body);
@@ -614,6 +645,8 @@
       let ts = Date.now();
       try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, msg.startsWith('Fel')?author:senderName, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}
       try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{}
+    // Also announce error completion for overlay cleanup
+    try{ const src = (body && body.sourceId) ? String(body.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: false, error: String(err?.message||err) } })); }catch{}
   }).finally(()=>{
     // Delay clearing busy a bit to avoid flicker when follow-up work kicks in
     setTimeout(()=>{ try{ setThinking(ownerId, false); }catch{} }, 700);

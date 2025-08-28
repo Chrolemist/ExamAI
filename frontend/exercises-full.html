@@ -64,6 +64,7 @@
             <input id="fxQChat" class="input" placeholder="Fråga förbättraren… t.ex. förtydliga eller skapa ny fråga" style="flex:1; min-width:0;">
             <button class="btn" id="fxQSend" title="Skicka till förbättrare">Skicka</button>
           </div>
+          <div class="loader-overlay" id="fxQLoad"><div class="spinner-rgb"></div></div>
           <div class="fx-resize" title="Ändra storlek"></div>
         </div>
         <div class="fx-card" id="cardA">
@@ -75,6 +76,7 @@
         <div class="fx-card" id="cardF">
           <div class="fx-meta drag-handle" id="fxMetaF">Feedback</div>
           <div class="fx-fb" id="fxF" spellcheck="false"></div>
+          <div class="loader-overlay" id="fxFLoad"><div class="spinner-rgb"></div></div>
           <div class="fx-resize" title="Ändra storlek"></div>
         </div>
       </section>
@@ -86,6 +88,7 @@
   <script src="js/markdown.js"></script>
   <!-- Provide requestAIReply/routeMessageFrom so full-screen can talk to coworkers -->
   <script src="js/connect.js"></script>
+  <script src="js/bubble-effect.js"></script>
     <script src="js/exercises-full.js"></script>
   </body>
   </html>
