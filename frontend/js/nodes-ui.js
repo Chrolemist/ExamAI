@@ -5,26 +5,60 @@
 // - D: Bero på små publika API: window.graph.addNode, window.updateConnectionsFor, window.makeConnPointInteractive.
 (function(){
   // Compute deterministic positions for newly created nodes.
-  // We place nodes along the bottom edge in a row and wrap to a new row when needed.
+  // New behavior: spawn inside Node Board – first at center, then around a clockwise circle, avoiding overlaps.
   function getNextNodePosition(){
     try{
+      const board = document.getElementById('nodeBoard');
+      const nodeW = 72, nodeH = 72; // approximate FAB size incl. spacing
+      const gap = 16; // radial spacing buffer
+      if (board){
+        const rect = board.getBoundingClientRect();
+        const scrollX = window.scrollX || window.pageXOffset || 0;
+        const scrollY = window.scrollY || window.pageYOffset || 0;
+        const cx = rect.left + rect.width/2 + scrollX;
+        const cy = rect.top + rect.height/2 + scrollY;
+        const margin = 8;
+        // spawn index (0 = center)
+        const idx = (window.__spawnIndex == null) ? 0 : window.__spawnIndex;
+        let x, y;
+        if (idx === 0){
+          x = Math.round(cx - nodeW/2);
+          y = Math.round(cy - nodeH/2);
+        } else {
+          // Excluding center, distribute on rings with 6*r slots per ring r
+          let i = idx - 1; // slot index among ring positions
+          let ring = 1;
+          while (i >= 6*ring){ i -= 6*ring; ring++; }
+          const slots = 6*ring;
+          const step = (Math.PI * 2) / slots;
+          const theta = i * step; // increasing theta is clockwise on screen coords
+          const R = ring * (Math.max(nodeW, nodeH) + gap);
+          x = Math.round(cx + R * Math.cos(theta) - nodeW/2);
+          y = Math.round(cy + R * Math.sin(theta) - nodeH/2);
+        }
+        // Clamp within board (to avoid half-outside)
+        const left = rect.left + scrollX + margin;
+        const top = rect.top + scrollY + margin;
+        const right = rect.right + scrollX - margin - nodeW;
+        const bottom = rect.bottom + scrollY - margin - nodeH;
+        x = Math.max(left, Math.min(x, right));
+        y = Math.max(top, Math.min(y, bottom));
+        window.__spawnIndex = idx + 1;
+        return { x, y };
+      }
+      // Fallback: previous bottom-row algorithm if board missing
       const margin = 16;
-      const nodeW = 72; // approximate FAB size incl. spacing
-      const nodeH = 72;
       const gapX = 16;
       const gapY = 12;
       const usableLeft = margin;
       const usableRight = window.innerWidth - margin - nodeW;
       const baseY = Math.max(80, window.innerHeight - (nodeH + margin));
-      // Gather existing FABs to find the bottom-most row placement that aligns left-to-right
       const fabs = [...document.querySelectorAll('.fab')];
       if (!fabs.length) return { x: usableLeft, y: baseY };
-      // Find last created logical position stored on window
       const last = window.__nextNodePos || { x: usableLeft - (gapX + nodeW), y: baseY };
       let nx = last.x + nodeW + gapX;
       let ny = last.y;
       if (nx > usableRight){ nx = usableLeft; ny = Math.min(baseY, last.y - (nodeH + gapY)); }
-      // Clamp inside viewport
       nx = Math.max(usableLeft, Math.min(nx, usableRight));
       ny = Math.max(margin, Math.min(ny, baseY));
       window.__nextNodePos = { x: nx, y: ny };

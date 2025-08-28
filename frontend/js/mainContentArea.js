@@ -1,15 +1,17 @@
-// Dynamic board sections: add/remove and minimal persistence of list & titles.
-// Responsibility: Manage board sections inside <main.content>.
-// SOLID hints:
-// - S: Only section CRUD + wiring here. Rendering of content and modes lives in panels.js.
-// - O: Expose small window API so other modules can add sections too.
-// - D: Depend on public window APIs (initBoardSectionSettings, makeConnPointInteractive).
+// Main Content Area orchestration: manages dynamic board sections and their wiring.
+// Responsibility: Everything inside <main class="content"> that is not node board.
+// Consolidates previous board-sections logic under a clearer name.
 (function(){
+  // Signal that Main Content Area is managed here
+  window.__mcaManaged = true;
+  // --- Internals & persistence helpers ---
   const LS_KEY_LIST = 'boardSections:list:v1';
   const LS_KEY_TITLE = (id)=>`boardSection:title:${id}`;
-
   function uid(){ return 's-' + Math.random().toString(36).slice(2, 9); }
+  function saveList(ids){ try{ localStorage.setItem(LS_KEY_LIST, JSON.stringify(ids||[])); }catch{} }
+  function loadList(){ try{ const raw = localStorage.getItem(LS_KEY_LIST); return raw? JSON.parse(raw)||[] : []; }catch{ return []; } }
 
+  // --- DOM builders ---
   function createSectionDom(id, title){
     const sec = document.createElement('section');
     sec.className = 'panel board-section';
@@ -28,48 +30,6 @@
     return sec;
   }
 
-  function saveList(ids){ try{ localStorage.setItem(LS_KEY_LIST, JSON.stringify(ids||[])); }catch{} }
-  function loadList(){ try{ const raw = localStorage.getItem(LS_KEY_LIST); return raw? JSON.parse(raw)||[] : []; }catch{ return []; } }
-
-  function wireSection(sec){
-    // Wire IO
-    try{ sec.querySelectorAll('.section-io').forEach(io=>{ if (!io._wired && window.makeConnPointInteractive){ window.makeConnPointInteractive(io, sec); io._wired = true; } }); }catch{}
-    // Persist and react to title edits
-    try{
-      const h2 = sec.querySelector('.head h2');
-      if (h2){
-        const id = sec.dataset.sectionId || '';
-        const onChange = ()=>{ try{ localStorage.setItem(LS_KEY_TITLE(id), (h2.textContent||'').trim()); }catch{} };
-        h2.addEventListener('input', onChange);
-        h2.addEventListener('blur', onChange);
-      }
-    }catch{}
-    // Inject a delete button if missing
-    try{
-      const head = sec.querySelector('.head');
-      if (head && !head.querySelector('[data-role="delSection"]')){
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn btn-ghost';
-        btn.setAttribute('data-role','delSection');
-        btn.title = 'Ta bort sektion';
-        btn.textContent = 'Ta bort';
-        btn.style.marginLeft = '8px';
-        // Insert before the IO point to keep layout consistent with other controls
-        const io = head.querySelector('.section-io');
-        if (io && io.parentElement === head){ head.insertBefore(btn, io); } else { head.appendChild(btn); }
-        btn.addEventListener('click', ()=>{
-          if (!confirm('Ta bort denna sektion?')) return;
-          removeSection(sec);
-        });
-      }
-    }catch{}
-    // Initialize panel settings/widgets
-    try{ window.initBoardSectionSettings && window.initBoardSectionSettings(); }catch{}
-    // Ensure connections layout refresh
-    try{ window.updateConnectionsFor && window.updateConnectionsFor(sec); }catch{}
-  }
-
   function refreshAllConnections(){
     try{
       document.querySelectorAll('.fab').forEach(f => window.updateConnectionsFor && window.updateConnectionsFor(f));
@@ -81,22 +41,48 @@
   function removeSection(sec){
     if (!sec) return;
     const id = sec.dataset.sectionId || '';
-    // Remove from DOM
     try{ sec.remove(); }catch{}
-    // Update persisted list
     try{
       const list = loadList();
       const next = list.filter(it => it && it.id !== id);
       saveList(next);
     }catch{}
-    // Clear section-specific storage
     try{ localStorage.removeItem(LS_KEY_TITLE(id)); }catch{}
     try{ localStorage.removeItem(`sectionSettings:${id}`); }catch{}
     try{ localStorage.removeItem(`sectionRaw:${id}`); }catch{}
     try{ localStorage.removeItem(`sectionExercises:${id}`); }catch{}
     try{ localStorage.removeItem(`sectionExercisesCursor:${id}`); }catch{}
-    // Refresh connections so any paths to this section are recalculated/removed
     refreshAllConnections();
+  }
+
+  function wireSection(sec){
+    try{ sec.querySelectorAll('.section-io').forEach(io=>{ if (!io._wired && window.makeConnPointInteractive){ window.makeConnPointInteractive(io, sec); io._wired = true; } }); }catch{}
+    try{
+      const h2 = sec.querySelector('.head h2');
+      if (h2){
+        const id = sec.dataset.sectionId || '';
+        const onChange = ()=>{ try{ localStorage.setItem(LS_KEY_TITLE(id), (h2.textContent||'').trim()); }catch{} };
+        h2.addEventListener('input', onChange);
+        h2.addEventListener('blur', onChange);
+      }
+    }catch{}
+    try{
+      const head = sec.querySelector('.head');
+      if (head && !head.querySelector('[data-role="delSection"]')){
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-ghost';
+        btn.setAttribute('data-role','delSection');
+        btn.title = 'Ta bort sektion';
+        btn.textContent = 'Ta bort';
+        btn.style.marginLeft = '8px';
+        const io = head.querySelector('.section-io');
+        if (io && io.parentElement === head){ head.insertBefore(btn, io); } else { head.appendChild(btn); }
+        btn.addEventListener('click', ()=>{ if (!confirm('Ta bort denna sektion?')) return; removeSection(sec); });
+      }
+    }catch{}
+    try{ window.initBoardSectionSettings && window.initBoardSectionSettings(); }catch{}
+    try{ window.updateConnectionsFor && window.updateConnectionsFor(sec); }catch{}
   }
 
   function addSection(title){
@@ -107,14 +93,12 @@
     const toolbar = main.querySelector('.board-sections-toolbar');
     if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
     wireSection(sec);
-    // Save
     const list = loadList(); list.push({ id, title: title||'' }); saveList(list);
     return sec;
   }
 
   function restoreExisting(){
     const main = document.querySelector('.layout .content'); if (!main) return;
-    // If there are already .board-section elements in markup, seed list and wire them
     const existing = Array.from(main.querySelectorAll('.board-section'));
     if (existing.length){
       const list = [];
@@ -132,25 +116,21 @@
       saveList(list);
       return;
     }
-    // Otherwise, restore from list if any
     const list = loadList();
     if (list.length){
       list.forEach(it=>{
         const title = localStorage.getItem(LS_KEY_TITLE(it.id)) || it.title || '';
         const sec = createSectionDom(it.id, title);
-        const main = document.querySelector('.layout .content');
         const toolbar = main?.querySelector('.board-sections-toolbar');
-        if (main){
-          if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
-          wireSection(sec);
-        }
+        if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
+        wireSection(sec);
       });
     } else {
-      // Seed with one empty section so users see the concept
       addSection('Teori');
     }
   }
 
+  // Public API
   window.addBoardSection = addSection;
   window.removeBoardSection = (id)=>{
     const sec = document.querySelector(`.board-section[data-section-id="${CSS.escape(id)}"]`);
@@ -163,5 +143,10 @@
       if (btn){ btn.addEventListener('click', ()=> addSection('Ny sektion')); }
       restoreExisting();
     }catch{}
+  });
+
+  // Ensure section settings initialized after all scripts (including panels.js) are ready
+  window.addEventListener('load', ()=>{
+    try{ window.initBoardSectionSettings && window.initBoardSectionSettings(); }catch{}
   });
 })();
