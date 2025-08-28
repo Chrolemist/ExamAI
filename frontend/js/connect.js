@@ -264,6 +264,25 @@
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
             // Stash for meta to allow footnotes rendering
             requestAIReply._lastAttachments = combined;
+            // Also include attachment contents as a dedicated user message marked with 'Bilaga:' so backend guidance is enabled
+            try{
+              const PER_ATT_CAP = 4000; // soft cap per attachment text
+              const joinSep = '\n\n---\n\n';
+              const blocks = combined.map((it, i)=>{
+                const head = `[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`;
+                const body = String(it.text||'').slice(0, PER_ATT_CAP);
+                return head + (body ? `\n${body}` : '');
+              }).filter(Boolean);
+              const materials = 'Bilaga:\n' + blocks.join(joinSep);
+              // Insert before the most recent user question if present, else append
+              if (Array.isArray(messages) && messages.length){
+                const lastIdx = messages.length - 1;
+                if (messages[lastIdx] && messages[lastIdx].role === 'user') messages.splice(lastIdx, 0, { role:'user', content: materials });
+                else messages.push({ role:'user', content: materials });
+              } else {
+                messages = [{ role:'user', content: materials }];
+              }
+            }catch{}
           } else {
             requestAIReply._lastAttachments = [];
           }
@@ -300,6 +319,24 @@
             const guide = 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
             requestAIReply._lastAttachments = combined;
+            // Include attachment contents as a 'Bilaga:' message so backend sees materials
+            try{
+              const PER_ATT_CAP = 4000;
+              const joinSep = '\n\n---\n\n';
+              const blocks = combined.map((it, i)=>{
+                const head = `[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`;
+                const body = String(it.text||'').slice(0, PER_ATT_CAP);
+                return head + (body ? `\n${body}` : '');
+              }).filter(Boolean);
+              const materials = 'Bilaga:\n' + blocks.join(joinSep);
+              if (Array.isArray(messages) && messages.length){
+                const lastIdx = messages.length - 1;
+                if (messages[lastIdx] && messages[lastIdx].role === 'user') messages.splice(lastIdx, 0, { role:'user', content: materials });
+                else messages.push({ role:'user', content: materials });
+              } else {
+                messages = [{ role:'user', content: materials }];
+              }
+            }catch{}
           } else {
             requestAIReply._lastAttachments = [];
           }
