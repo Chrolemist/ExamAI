@@ -211,7 +211,14 @@
       }catch{}
       return '';
     };
-    const apiBase = detectApiBase();
+  const apiBase = detectApiBase();
+  // Track in-flight requests per owner for cancel support
+  window.__aiInflight = window.__aiInflight || new Map();
+  const inflight = window.__aiInflight;
+  // If an older request is still running, optionally keep it or cancel it; we keep both with unique controllers
+  const controller = new AbortController();
+  const signal = controller.signal;
+  try{ inflight.set(ownerId, controller); }catch{}
     // Gather settings from coworker panel if present, else from Graph/localStorage
   let model = 'gpt-5-mini';
   let systemPrompt = '';
@@ -422,8 +429,9 @@
     if (redacted.apiKey) redacted.apiKey = '<REDACTED>';
     console.debug('[requestAIReply] apiBase=%s payload=%o', apiBase || '<auto>', redacted);
   }catch(e){}
-  const sendOnce = (payload)=> fetch(apiBase + '/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  // JSON (non-streaming) request helper
+  const sendJSONOnce = (payload)=> fetch(apiBase + '/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal
     }).then(async r=>{
       const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
       if (!r.ok) {
@@ -438,8 +446,134 @@
       if (!/application\/json/i.test(String(ct||''))) { const _ = await r.text().catch(()=>null); throw new Error('Oväntat svar (ej JSON)'); }
       return r.json();
   });
+  // NDJSON streaming helper (expects application/x-ndjson)
+  const sendStreamOnce = async (payload)=>{
+    const res = await fetch(apiBase + '/chat/stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal
+    });
+    const ct = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
+    if (!res.ok) {
+      // try to surface JSON error if present
+      if (/application\/json/i.test(String(ct||''))) {
+        let errData=null; try{ errData = await res.json(); }catch{}
+        const msg = (errData && (errData.error||errData.message||errData.hint)) || ('HTTP '+res.status);
+        throw new Error(String(msg));
+      } else {
+        let txt=''; try{ txt = await res.text(); }catch{}
+        throw new Error('HTTP '+res.status+': '+String((txt||'')).slice(0,200));
+      }
+    }
+    if (!/x-ndjson/i.test(String(ct||''))) {
+      // Not a stream; let caller fallback to JSON path
+      throw new Error('NO_STREAM');
+    }
+    // Live UI: set up a temporary streaming bubble if panel is open
+    const findPanelList = ()=>{
+      try{ const panel = [...document.querySelectorAll('.panel-flyout')].find(p => p.dataset.ownerId === ownerId); if(!panel) return null; const list = panel.querySelector('.messages'); if(!list) return null; return { panel, list }; }catch{ return null; }
+    };
+    const ensureStreamUI = ()=>{
+      const ctx = findPanelList(); if (!ctx) return null;
+      // Reuse existing streaming row if it's still attached
+      if (ensureStreamUI._el && ensureStreamUI._el.row && ensureStreamUI._el.row.isConnected) return ensureStreamUI._el;
+      const row=document.createElement('div'); row.className='message-row';
+      const group=document.createElement('div'); group.className='msg-group';
+      const authorEl=document.createElement('div'); authorEl.className='author-label'; authorEl.textContent = author || 'Assistant';
+      const b=document.createElement('div'); b.className='bubble';
+      const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent='';
+      b.appendChild(textEl);
+      const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign='left'; meta.textContent = '';
+      b.appendChild(meta);
+      group.appendChild(authorEl); group.appendChild(b); row.appendChild(group); ctx.list.appendChild(row);
+      ctx.list.scrollTop = ctx.list.scrollHeight;
+      ensureStreamUI._el = { row, bubble:b, textEl, metaEl:meta, panel:ctx.panel, list:ctx.list };
+      return ensureStreamUI._el;
+    };
+    let acc = '';
+    let finalCitations = [];
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let done=false, aborted=false;
+    try{
+      let leftover='';
+      while(true){
+        const { value, done:dr } = await reader.read();
+        if (dr) break;
+        const chunk = decoder.decode(value, { stream:true });
+        let data = leftover + chunk;
+        const lines = data.split(/\r?\n/);
+        leftover = lines.pop() || '';
+        for (const line of lines){
+          const t = String(line||'').trim(); if (!t) continue;
+          let obj=null; try{ obj = JSON.parse(t); }catch{ continue; }
+          const kind = String(obj?.type||'');
+          if (kind === 'meta'){
+            // could contain citations preview; ignore for now
+          } else if (kind === 'delta'){
+            const d = String(obj?.delta||'');
+            if (d){ acc += d; const ui = ensureStreamUI(); if (ui){ try{ ui.textEl.textContent = acc; ui.list.scrollTop = ui.list.scrollHeight; }catch{} } }
+          } else if (kind === 'error'){
+            throw new Error(String(obj?.error||'Strömfel'));
+          } else if (kind === 'done'){
+            try{ if (Array.isArray(obj?.citations)) finalCitations = obj.citations; }catch{}
+            done = true;
+          }
+        }
+      }
+    }catch(e){
+      if (e && (e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))){ aborted=true; const err=new Error('ABORTED'); err._aborted=true; throw err; }
+      throw e;
+    }
+    // Finalize UI render: convert to markdown if configured and append citations
+    const ui = ensureStreamUI();
+    let finalText = String(acc||'');
+    // Clean MER_SIDOR if present in non-pgwise flows (should not appear)
+    try{ finalText = finalText.replace(/\bMER_SIDOR\b/g,'').trim(); }catch{}
+    // Update graph and propagate
+    let ts = Date.now();
+    const meta = { ts, citations: Array.isArray(finalCitations)?finalCitations:[] };
+    try{ if (Array.isArray(requestAIReply._lastAttachments)) meta.attachments = requestAIReply._lastAttachments; }catch{}
+    try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, finalText, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
+  // Render or update the UI bubble
+    try{
+      if (ui){
+        // choose render mode
+        let renderMode = 'md';
+        try{
+          const sel = ui.panel.querySelector('[data-role="renderMode"]');
+          if (sel && sel.value) renderMode = String(sel.value);
+          else { const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if (raw){ const s=JSON.parse(raw)||{}; if (s.renderMode) renderMode = String(s.renderMode); } }
+        }catch{}
+        if (renderMode === 'md' && window.mdToHtml){
+          try{ ui.textEl.innerHTML = sanitizeHtml(window.mdToHtml(finalText)); }catch{ ui.textEl.textContent = finalText; }
+        } else { ui.textEl.textContent = finalText; }
+        // citations under bubble
+        try{
+          const cites = Array.isArray(finalCitations) ? finalCitations : [];
+          if (cites.length){
+            const box = document.createElement('div'); box.className='subtle'; box.style.marginTop='6px'; box.style.fontSize='12px';
+            const parts = cites.map((c,i)=>{ const title = (c?.title||c?.url||`Källa ${i+1}`); const safe = String(title).replace(/[\n\r]+/g,' '); const url = String(c?.url||'#'); return `<a href="${url}" target="_blank" rel="noopener noreferrer">[${i+1}] ${safe}<\/a>`; });
+            box.innerHTML = parts.join(' ');
+            // remove existing footers (if any) and append
+            const old = ui.bubble.querySelectorAll('.subtle'); old.forEach((el,idx)=>{ if(idx>0) el.remove(); });
+            ui.bubble.appendChild(box);
+          }
+        }catch{}
+        if (ui.metaEl) ui.metaEl.textContent = (window.formatTime? window.formatTime(ts) : '');
+        ui.list.scrollTop = ui.list.scrollHeight;
+      } else {
+        if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', meta);
+      }
+    }catch{ try{ if(!ensureStreamUI._el) if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', meta); }catch{} }
+    // Route onward
+    try{ const routedMeta = { author, who:'assistant', ts, citations: Array.isArray(finalCitations)?finalCitations:[] }; if(window.routeMessageFrom) window.routeMessageFrom(ownerId, finalText, routedMeta); }catch{}
+    // Completion event
+    try{ const src = (payload && payload.sourceId) ? String(payload.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: true } })); }catch{}
+    return { reply: finalText, citations: finalCitations };
+  };
   let triedFallback = false;
-  const tryRequest = (payload)=> sendOnce(payload).catch(err=>{
+  const tryRequest = (payload)=> sendJSONOnce(payload).catch(err=>{
+  // If aborted, propagate a special marker to stop the pipeline silently
+  if (err && (err.name === 'AbortError' || /aborted|abort/i.test(String(err.message||'')))){ const e = new Error('ABORTED'); e._aborted = true; throw e; }
     const em = String(err?.message||'').toLowerCase();
     // Heuristic: if the error seems model-related, try a safer fallback once
     if (!triedFallback && (em.includes('model') || em.includes('invalid') || em.includes('not found'))){
@@ -447,7 +581,7 @@
       try{
         const fallbackBody = Object.assign({}, payload, { model: 'gpt-4o-mini' });
         console.warn('[requestAIReply] Falling back to model gpt-4o-mini due to error:', err?.message||err);
-        return sendOnce(fallbackBody);
+        return sendJSONOnce(fallbackBody);
       }catch{}
     }
     throw err;
@@ -622,7 +756,33 @@
       return data;
     });
   };
-  doStep(_pgStart, 0).catch(err=>{
+  // Announce start for UI (e.g., show cancel button)
+  try{ window.dispatchEvent(new CustomEvent('ai-request-started', { detail:{ ownerId, sourceId: ctx && ctx.sourceId ? String(ctx.sourceId) : null } })); }catch{}
+  // Prefer streaming when no pagewise (materials) are involved; fallback to JSON path on error
+  const preferStream = !hasMaterials;
+  const startPromise = (preferStream ? (async ()=>{
+    const basePayload = Object.assign({}, body);
+    try{ return await sendStreamOnce(basePayload); }
+    catch(e){
+      // Allow fallback if server doesn't support stream or other non-abort error
+      if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) throw e;
+      // If NO_STREAM marker, just use JSON path
+      if (String(e?.message||'')==='NO_STREAM') return await doStep(_pgStart, 0);
+      // Try model fallback once for stream
+      if (!triedFallback){
+        triedFallback = true;
+        try{ const fb = Object.assign({}, basePayload, { model: 'gpt-4o-mini' }); return await sendStreamOnce(fb); }catch{}
+      }
+      // Fallback to JSON path finally
+      return await doStep(_pgStart, 0);
+    }
+  })() : doStep(_pgStart, 0));
+  startPromise.catch(err=>{
+      // If aborted, do nothing except emit finished with ok:false
+      if (err && (err._aborted || err.name === 'AbortError' || /aborted|abort/i.test(String(err.message||'')))){
+        try{ const src = (body && body.sourceId) ? String(body.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: false, error: 'aborted' } })); }catch{}
+        return;
+      }
       const msg = 'Fel vid AI-förfrågan: ' + (err?.message||String(err));
       // Show a toast with the error and a tip to increase tokens
       try{
@@ -650,8 +810,20 @@
   }).finally(()=>{
     // Delay clearing busy a bit to avoid flicker when follow-up work kicks in
     setTimeout(()=>{ try{ setThinking(ownerId, false); }catch{} }, 700);
+    // Clear inflight state
+    try{ if (inflight.get(ownerId) === controller) inflight.delete(ownerId); }catch{}
   });
   }
+
+  // Expose cancel helper
+  try{
+    if (!window.cancelAIRequest){
+      window.cancelAIRequest = function(id){ try{ const c = (window.__aiInflight && window.__aiInflight.get) ? window.__aiInflight.get(id) : null; if (c && c.abort) c.abort(); }catch{} };
+    }
+    if (!window.hasActiveAIRequest){
+      window.hasActiveAIRequest = function(id){ try{ return !!(window.__aiInflight && window.__aiInflight.has && window.__aiInflight.has(id)); }catch{ return false; } };
+    }
+  }catch{}
 
   // delete UI
   let _connDelBtn = null, _connDelHoveringBtn = false, _hoverConnCount = 0;

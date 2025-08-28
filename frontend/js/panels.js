@@ -583,10 +583,7 @@
         <input type="range" min="1000" max="30000" step="64" value="1000" data-role="maxTokens" />
         <div class="subtle"><span data-role="maxTokensValue">1000</span></div>
       </label>
-      <label>Skrivhastighet
-        <input type="range" min="0" max="100" step="1" value="10" data-role="typingSpeed" />
-        <div class="subtle">(<span data-role="typingSpeedValue">Snabb</span>)</div>
-      </label>
+      
       <label>Visningsläge
         <select data-role="renderMode">
           <option value="raw">Rå text</option>
@@ -602,9 +599,20 @@
     <div class="composer">
       <textarea class="userInput" rows="1" placeholder="Skriv ett meddelande..."></textarea>
       <button class="send-btn" type="button">Skicka</button>
+      <button class="cancel-btn btn btn-ghost" type="button" style="display:none; margin-left:6px;">Avbryt</button>
     </div>`;
   addResizeHandles(panel); document.body.appendChild(panel); makePanelDraggable(panel, panel.querySelector('.drawer-head'));
   try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
+  // Wire Cancel visibility to in-flight state
+  try{
+    const ownerId = panel.dataset.ownerId||'';
+    const cancelBtn = panel.querySelector('.cancel-btn');
+    const updateCancel = ()=>{ try{ const on = (window.hasActiveAIRequest && ownerId)? window.hasActiveAIRequest(ownerId) : false; if (cancelBtn) cancelBtn.style.display = on ? '' : 'none'; }catch{} };
+    updateCancel();
+    window.addEventListener('ai-request-started', (e)=>{ try{ if (String(e?.detail?.ownerId||'')===ownerId) updateCancel(); }catch{} });
+    window.addEventListener('ai-request-finished', (e)=>{ try{ if (String(e?.detail?.ownerId||'')===ownerId) setTimeout(updateCancel, 50); }catch{} });
+    cancelBtn?.addEventListener('click', ()=>{ try{ if (window.cancelAIRequest) window.cancelAIRequest(ownerId); updateCancel(); }catch{} });
+  }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
   const clearBtn=panel.querySelector('[data-action="clear"]');
   // Duplicate node: clone settings + name with increment
@@ -673,8 +681,7 @@
   const selfReplyEl = by('[data-role="selfReply"]');
       const maxTokEl = by('[data-role="maxTokens"]');
       const maxTokVal = by('[data-role="maxTokensValue"]');
-      const typeSpdEl = by('[data-role="typingSpeed"]');
-      const typeSpdVal = by('[data-role="typingSpeedValue"]');
+      
       const renderEl = by('[data-role="renderMode"]');
   // Web search settings removed from CoWorker; handled by Internet node
       const apiKeyEl = by('[data-role="apiKey"]');
@@ -733,7 +740,7 @@
       if (typeof saved.useRole === 'boolean' && useRoleEl) useRoleEl.checked = !!saved.useRole;
   if (typeof saved.selfPanelReply === 'boolean' && selfReplyEl) selfReplyEl.checked = !!saved.selfPanelReply; else if (selfReplyEl && saved.selfPanelReply === undefined) selfReplyEl.checked = true;
       if (saved.maxTokens && maxTokEl) { maxTokEl.value = String(saved.maxTokens); if(maxTokVal) maxTokVal.textContent = String(saved.maxTokens); }
-      if (typeof saved.typingSpeed === 'number' && typeSpdEl) { typeSpdEl.value = String(saved.typingSpeed); if(typeSpdVal) typeSpdVal.textContent = (saved.typingSpeed>=66?'Snabb':saved.typingSpeed<=33?'Långsam':'Medel'); }
+      
       if (saved.renderMode && renderEl) renderEl.value = saved.renderMode;
   // no web settings for coworker anymore
       if (saved.apiKey && apiKeyEl) { apiKeyEl.value = saved.apiKey; }
@@ -747,7 +754,7 @@
       useRoleEl?.addEventListener('change', ()=>{ persist({ useRole: !!useRoleEl.checked }); updateRoleBadge(); });
   selfReplyEl?.addEventListener('change', ()=>{ persist({ selfPanelReply: !!selfReplyEl.checked }); });
       maxTokEl?.addEventListener('input', ()=>{ const v=Math.max(256, Math.min(30000, Number(maxTokEl.value)||1000)); if(maxTokVal) maxTokVal.textContent=String(v); persist({ maxTokens: v }); });
-      typeSpdEl?.addEventListener('input', ()=>{ const v = Math.max(0, Math.min(100, Number(typeSpdEl.value)||10)); if(typeSpdVal) typeSpdVal.textContent = (v>=66?'Snabb':v<=33?'Långsam':'Medel'); persist({ typingSpeed: v }); });
+      
       renderEl?.addEventListener('change', ()=>persist({ renderMode: renderEl.value }));
   // removed web listeners
       apiKeyEl?.addEventListener('input', ()=>{ persist({ apiKey: apiKeyEl.value||'' }); updateKeyBadge(); });

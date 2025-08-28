@@ -30,4 +30,4 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Use 2 workers by default; adjust for Cloud Run memory/CPU
-CMD ["gunicorn", "-w", "2", "-b", ":8000", "wsgi:app"]
+CMD ["gunicorn", "-w", "2", "-b", ":8000", "--timeout", "120", "--graceful-timeout", "20", "--keep-alive", "75", "wsgi:app"]

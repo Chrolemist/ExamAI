@@ -58,6 +58,19 @@ def create_app():
             pass
         return resp
 
+    # Ensure JSON errors so after_request can attach CORS headers
+    @app.errorhandler(Exception)
+    def handle_any_error(e):
+        try:
+            from werkzeug.exceptions import HTTPException  # type: ignore
+        except Exception:
+            HTTPException = None  # type: ignore
+        if HTTPException and isinstance(e, HTTPException):
+            code = int(getattr(e, 'code', 500) or 500)
+            desc = str(getattr(e, 'description', '')) or str(e)
+            return {"error": desc}, code
+        return {"error": str(e)}, 500
+
     # Registrera routes via blueprints
     try:
         from .routes.chat import chat_bp  # type: ignore
