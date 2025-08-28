@@ -18,6 +18,9 @@ services:
 
     ports:
       - "8000:8000"
+    volumes:
+      # Persist uploaded files so /files/* links survive restarts
+      - ./uploads:/app/uploads
 
     # Healthcheck without curl (use Python available in the image)
     healthcheck:

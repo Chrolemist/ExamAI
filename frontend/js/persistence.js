@@ -207,6 +207,8 @@
         <select id="snapList" style="padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;"></select>
         <button id="btnLoadSnap" type="button" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.15);color:#fff;">Load</button>
         <button id="btnDeleteSnap" type="button" title="Ta bort vald sparning" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,80,80,0.5);background:rgba(120,20,20,0.35);color:#fff;">Delete</button>
+        <div style="flex:1"></div>
+        <button id="btnClearLocal" type="button" title="Rensa all lokal data (noder, inställningar, bilagor)" style="padding:5px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.25);background:rgba(255,80,80,0.15);color:#ffdede;">Rensa lokal data</button>
       </div>
     `;
     document.body.appendChild(bar);
@@ -236,6 +238,16 @@
       if (!res.ok) { alert('Kunde inte ta bort: '+res.error); return; }
       refreshList();
     });
+    // Clear local storage from snapshot bar
+    document.getElementById('btnClearLocal')?.addEventListener('click', ()=>{
+      try{
+        if (!confirm('Rensa all lokal data (noder, inställningar, bilagor)?')) return;
+        localStorage.clear();
+        try{ if (window.graph && typeof window.graph.reset === 'function') window.graph.reset(); }catch{}
+        try{ if (window.resetConnections) window.resetConnections(); }catch{}
+      }catch{}
+      location.reload();
+    });
     // Toggle behavior inside bar
     const body = document.getElementById('snapBody');
     const toggle = document.getElementById('snapToggle');
@@ -264,12 +276,12 @@
       menu?.addEventListener('click', (e)=>{
         const t = e.target.closest('button[data-kind]'); if (!t) return; hide();
         const kind = t.getAttribute('data-kind');
-        const x = 40 + Math.random() * (window.innerWidth - 120);
-        const y = 80 + Math.random() * (window.innerHeight - 160);
-        if (window.createIcon) window.createIcon(kind === 'user' ? 'user' : kind === 'internet' ? 'internet' : 'coworker', x, y);
+        let pos = { x: 60, y: Math.max(80, window.innerHeight - 140) };
+        try{ if (window.getNextNodePosition) pos = window.getNextNodePosition(); }catch{}
+        if (window.createIcon) window.createIcon(kind === 'user' ? 'user' : kind === 'internet' ? 'internet' : 'coworker', pos.x, pos.y);
       });
-      // Hide original global plus for a cleaner UI
-      try{ const old = document.querySelector('.copilot-plus-wrap'); if (old) old.style.display='none'; }catch{}
+  // Hide the legacy topbar controls for a cleaner UI
+  try{ const old = document.querySelector('.copilot-plus-wrap'); if (old) old.style.display='none'; }catch{}
     }catch{}
   }
 

@@ -112,7 +112,7 @@
   const label = document.createElement('div');
   label.className='fab-label';
   el.appendChild(label);
-    document.body.appendChild(el);
+  document.body.appendChild(el);
   ;['t','r','b','l'].forEach(side => { const cp = document.createElement('div'); cp.dataset.side=side; let role='io-out'; if (side==='l'||side==='t') role='io-in'; else role='io-out'; cp.className='conn-point '+role; el.appendChild(cp); positionConnPoint(cp, el); window.makeConnPointInteractive && window.makeConnPointInteractive(cp, el); });
     makeDraggable(el);
     el.addEventListener('click', (e)=>{

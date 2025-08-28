@@ -18,16 +18,20 @@
   });
 
   // Clear local storage and reset app
-  const clearBtn = document.getElementById('clearStorageBtn');
-  if (clearBtn){
-    clearBtn.addEventListener('click', ()=>{
-      try{
-        if (!confirm('Rensa all lokal data (noder, inställningar, bilagor)?')) return;
-        localStorage.clear();
-        try{ if (window.graph && typeof window.graph.reset === 'function') window.graph.reset(); }catch{}
-        try{ if (window.resetConnections) window.resetConnections(); }catch{}
-      }catch{}
-      location.reload();
-    });
-  }
+  const clearBtns = [
+    document.getElementById('clearStorageBtn'),
+    document.getElementById('clearLocalTopBtn')
+  ].filter(Boolean);
+  const onClearLocal = ()=>{
+    try{
+      if (!confirm('Rensa all lokal data (noder, inställningar, bilagor)?')) return;
+      localStorage.clear();
+      try{ if (window.graph && typeof window.graph.reset === 'function') window.graph.reset(); }catch{}
+      try{ if (window.resetConnections) window.resetConnections(); }catch{}
+    }catch{}
+    location.reload();
+  };
+  clearBtns.forEach(btn=>{
+    try{ btn.addEventListener('click', onClearLocal); }catch{}
+  });
 })();

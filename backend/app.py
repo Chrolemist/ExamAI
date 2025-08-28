@@ -36,7 +36,55 @@ except Exception:
 
 def create_app():
     app = Flask(__name__)
-    CORS(app)
+    # Explicit CORS to allow local frontends (5500 = nginx, 127.0.0.1 variants, common dev ports)
+    try:
+        CORS(
+            app,
+            resources={
+                r"/*": {
+                    "origins": [
+                        "http://localhost:5500",
+                        "http://127.0.0.1:5500",
+                        "http://localhost:3000",
+                        "http://127.0.0.1:3000",
+                        "http://localhost:5173",
+                        "http://127.0.0.1:5173",
+                    ],
+                    "methods": ["GET", "POST", "OPTIONS"],
+                    "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+                }
+            },
+            supports_credentials=False,
+        )
+    except Exception:
+        # Fallback
+        try:
+            CORS(app)
+        except Exception:
+            pass
+
+    # Ensure CORS headers are present on all responses, including errors
+    _ALLOWED_ORIGINS = {
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    }
+
+    @app.after_request
+    def add_cors_headers(resp):
+        try:
+            origin = request.headers.get("Origin", "")
+            if origin in _ALLOWED_ORIGINS:
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Vary"] = ", ".join(filter(None, [resp.headers.get("Vary"), "Origin"]))
+                resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+                resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        except Exception:
+            pass
+        return resp
 
     # Directory to persist uploaded files for stable URLs
     UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
@@ -45,8 +93,12 @@ def create_app():
     except Exception:
         pass
 
-    @app.post("/chat")
+    # Handle CORS preflight explicitly for robustness
+    @app.route("/chat", methods=["POST", "OPTIONS"])
     def chat():
+        # Short-circuit preflight
+        if request.method == "OPTIONS":
+            return ("", 204)
         data = request.get_json(force=True, silent=True) or {}
         # Accept both OPENAI_MODEL and legacy OPENAI_MODEL_NAME
         model = (data.get("model") or os.getenv("OPENAI_MODEL") or os.getenv("OPENAI_MODEL_NAME") or "gpt-5-mini").strip()
@@ -58,7 +110,14 @@ def create_app():
 
         if OpenAI is None:
             return jsonify({"error": "OpenAI SDK not installed"}), 500
-        client = OpenAI()
+        # Support per-request API key (panel-specific) or use global from env
+        api_key = (data.get("apiKey") or os.getenv("OPENAI_API_KEY") or "").strip()
+        if not api_key:
+            return jsonify({"error": "Saknar API-nyckel. Ange en i panelen eller sätt OPENAI_API_KEY i serverns .env."}), 401
+        try:
+            client = OpenAI(api_key=api_key)
+        except Exception as e:
+            return jsonify({"error": f"Kunde inte initiera OpenAI-klienten: {e}"}), 500
 
         # System prompt
         system_prompt = (data.get("system") or "Du är en hjälpsam AI‑assistent.").strip()
@@ -284,7 +343,7 @@ def create_app():
         # Call chat.completions with the assembled messages
         try:
             max_user = data.get("max_tokens") or data.get("max_completion_tokens") or 1000
-            resp = client.chat.completions.create(model=model, messages=messages, max_tokens=max_user)
+            resp = client.chat.completions.create(model=model, messages=messages, max_tokens=max_user, timeout=30)
             reply = resp.choices[0].message.content if resp.choices else ""
             try:
                 finish_reason = resp.choices[0].finish_reason  # type: ignore[attr-defined]
@@ -388,8 +447,11 @@ def create_app():
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
-    @app.post("/upload")
+    @app.route("/upload", methods=["POST", "OPTIONS"])
     def upload_files():
+        # Preflight
+        if request.method == "OPTIONS":
+            return ("", 204)
         try:
             files = request.files.getlist("files") or []
             if not files:

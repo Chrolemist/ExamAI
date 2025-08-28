@@ -55,8 +55,9 @@
       <span class="badge" data-role="roleBadge" title="Roll">Roll</span>
       <span class="badge badge-error" data-role="keyStatus">Ingen nyckel</span>
       <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
-      <button class="icon-btn" data-action="clear" title="Rensa chatt">🧹</button>
-      <button class="icon-btn" data-close>✕</button>
+  <button class="icon-btn" data-action="clear" title="Rensa chatt">🧹</button>
+  <button class="icon-btn" data-action="delete" title="Radera">🗑</button>
+  <button class="icon-btn" data-close>✕</button>
     </header>
   <div class="settings collapsed" data-role="settings">
       <label>Modell
@@ -84,7 +85,7 @@
       <label>Visningsläge
         <select data-role="renderMode">
           <option value="raw">Rå text</option>
-          <option value="md">Snyggt (Markdown)</option>
+          <option value="md" selected>Snyggt (Markdown)</option>
         </select>
       </label>
     <label>Sökmotor/metod
@@ -159,6 +160,23 @@
     window.makePanelDraggable && window.makePanelDraggable(panel, panel.querySelector('.drawer-head'));
     // Close/clear
     panel.querySelector('[data-close]')?.addEventListener('click', ()=>panel.remove());
+    // delete removes the underlying node and connections
+    try{
+      const delBtn = panel.querySelector('[data-action="delete"]');
+      delBtn && delBtn.addEventListener('click', ()=>{
+        try{
+          const ownerId = panel.dataset.ownerId||'';
+          const host = ownerId ? document.querySelector(`.fab[data-id="${ownerId}"]`) : null;
+          if (host) host.remove();
+          (window.state?.connections||[]).slice().forEach(c=>{
+            if (c.fromId===ownerId || c.toId===ownerId){ try{ c.pathEl?.remove(); }catch{} try{ c.hitEl?.remove(); }catch{} }
+          });
+          if (window.state && Array.isArray(window.state.connections)) window.state.connections = window.state.connections.filter(c=> c.fromId!==ownerId && c.toId!==ownerId);
+          if (window.graph && window.graph.nodes) window.graph.nodes.delete(ownerId);
+        }catch{}
+        panel.remove();
+      });
+    }catch{}
     panel.querySelector('[data-action="clear"]')?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
     // Settings toggle
     try{
@@ -269,8 +287,8 @@
     try{
       const ownerId=panel.dataset.ownerId||''; const list=panel.querySelector('.messages');
       const entries=(window.graph&&ownerId)?(window.graph.getMessages(ownerId)||[]):[];
-      // read current render mode (default raw)
-      let renderMode = 'raw';
+    // read current render mode (default md)
+    let renderMode = 'md';
       try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw){ const s=JSON.parse(raw)||{}; if(s.renderMode) renderMode = String(s.renderMode); } }catch{}
       for(const m of entries){
         const row=document.createElement('div'); row.className='message-row'+(m.who==='user'?' user':'');
@@ -367,7 +385,7 @@
           const panel = document.querySelector(`.panel-flyout.internet-node-panel[data-owner-id="${ownerId}"]`) || document.querySelector(`.panel-flyout[data-owner-id="${ownerId}"]`);
           const list = panel?.querySelector('.messages');
           if (panel && list){
-            let renderMode = 'raw';
+            let renderMode = 'md';
             try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw){ const s=JSON.parse(raw)||{}; if(s.renderMode) renderMode=String(s.renderMode); } }catch{}
             const row=document.createElement('div'); row.className='message-row';
             const group=document.createElement('div'); group.className='msg-group';

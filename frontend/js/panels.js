@@ -2,6 +2,33 @@
 // Purpose: Owns the flyout panel UIs for User/CoWorker/Internet and the chat composer.
 // Panels are draggable/resizable and connectable via header IO points.
 (function(){
+  // Open URLs safely: HEAD-check http(s) targets to avoid blank tabs if the file is missing (404)
+  function openIfExists(url){
+    try{
+      if (!url) return;
+      const u = String(url);
+      // Skip network preflight for non-http(s) links
+      if (!/^https?:/i.test(u)){
+        try{ window.open(u, '_blank', 'noopener'); }catch{}
+        return;
+      }
+      const base = u.split('#')[0];
+      fetch(base, { method:'HEAD', cache:'no-store' })
+        .then(r => {
+          if (r && r.ok){
+            try{ window.open(u, '_blank', 'noopener'); }
+            catch{
+              const a=document.createElement('a'); a.href=u; a.target='_blank'; a.rel='noopener'; document.body.appendChild(a); a.click(); a.remove();
+            }
+          } else {
+            alert('Denna bilaga saknas – ladda upp igen.');
+          }
+        })
+        .catch(()=>{ alert('Denna bilaga saknas – ladda upp igen.'); });
+    }catch{
+      try{ window.open(url, '_blank', 'noopener'); }catch{}
+    }
+  }
   function formatTime(ts){ try{ return new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); }catch{ return ''; } }
   // Persist panel geometry (position + size) per ownerId
   const geomKey = (ownerId)=> `panelGeom:${ownerId}`;
@@ -178,8 +205,8 @@
               if (pick && pick.page) finalHref = href + `#page=${encodeURIComponent(pick.page)}`;
             }catch{}
           }
-      try{ window.open(finalHref, '_blank', 'noopener'); }
-      catch{ const a = document.createElement('a'); a.href = finalHref; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
+  try{ openIfExists(finalHref); }
+  catch{ const a = document.createElement('a'); a.href = finalHref; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
         }catch{}
       };
   items.forEach((it, idx)=>{ const chip = document.createElement('span'); chip.className = 'attachment-chip'; const name = document.createElement('span'); name.className='name'; const fullName = `${it.name||'fil'}${it.chars?` (${it.chars} tecken${it.truncated?', trunkerat':''})`:''}`; name.textContent = fullName; name.title = it.name || 'fil';
@@ -191,7 +218,11 @@
   const uploadFiles = async (files)=>{
       try{
         const arr = Array.from(files||[]).filter(f=>{
-          const n = (f.name||'').toLowerCase(); const t = (f.type||'').toLowerCase();
+          const n = (f.name||'').toLowerCase();
+          const t = (f.type||'').toLowerCase();
+          // Exclude HTML explicitly to avoid confusing page handling and XSS risk
+          if (n.endsWith('.html') || n.endsWith('.htm') || t.includes('html')) return false;
+          // Allow PDFs and common text/markdown docs
           return n.endsWith('.pdf') || n.endsWith('.txt') || n.endsWith('.md') || n.endsWith('.markdown') || t.includes('pdf') || t.includes('text') || t.includes('markdown');
         });
         if (!arr.length) return;
@@ -298,6 +329,7 @@
       <div class="meta"><div class="name">User</div></div>
       <button class="btn btn-ghost" data-action="settings">Inställningar ▾</button>
       <button class="icon-btn" data-action="clear" title="Rensa chatt">🧹</button>
+  <button class="icon-btn" data-action="delete" title="Radera">🗑</button>
       <button class="icon-btn" data-close>✕</button>
     </header>
     <div class="settings collapsed" data-role="settings">
@@ -339,7 +371,7 @@
       <label>Visningsläge
         <select data-role="renderMode">
           <option value="raw">Rå text</option>
-          <option value="md">Snyggt (Markdown)</option>
+          <option value="md" selected>Snyggt (Markdown)</option>
         </select>
       </label>
       <div style="margin-top:10px;display:flex;justify-content:flex-end">
@@ -358,6 +390,24 @@
     try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
     const clearBtn=panel.querySelector('[data-action="clear"]'); clearBtn?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
+    const delBtnU=panel.querySelector('[data-action="delete"]'); delBtnU?.addEventListener('click', ()=>{
+      try{
+        const ownerId = panel.dataset.ownerId||'';
+        // Remove UI node
+        const host = ownerId ? document.querySelector(`.fab[data-id="${ownerId}"]`) : null;
+        if (host) host.remove();
+        // Remove connections touching this node
+        try{
+          (window.state?.connections||[]).slice().forEach(c=>{
+            if (c.fromId===ownerId || c.toId===ownerId){ try{ c.pathEl?.remove(); }catch{} try{ c.hitEl?.remove(); }catch{} }
+          });
+          if (window.state && Array.isArray(window.state.connections)) window.state.connections = window.state.connections.filter(c=> c.fromId!==ownerId && c.toId!==ownerId);
+        }catch{}
+        // Remove from Graph
+        try{ if (window.graph && window.graph.nodes) window.graph.nodes.delete(ownerId); }catch{}
+      }catch{}
+      panel.remove();
+    });
     panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true;
   const colorToggle=panel.querySelector('[data-role="colorToggle"]'); const colorPanel=panel.querySelector('[data-role="colorPanel"]'); const colorPicker=panel.querySelector('[data-role="colorPicker"]'); const alphaEl=panel.querySelector('[data-role="alpha"]'); const alphaVal=panel.querySelector('[data-role="alphaVal"]'); const fontTextSel=panel.querySelector('[data-role="fontText"]'); const fontNameSel=panel.querySelector('[data-role="fontName"]'); const messagesEl=panel.querySelector('.messages'); const inputEl=panel.querySelector('.userInput'); const renderSel=panel.querySelector('[data-role="renderMode"]');
     if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value=String(Math.round(panel._bubbleAlpha*100)); if(alphaVal) alphaVal.textContent=`${Math.round(panel._bubbleAlpha*100)}%`;
@@ -372,14 +422,14 @@
     fontNameSel?.addEventListener('change', ()=>{ panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); });
     const headerNameEl=panel.querySelector('.drawer-head .meta .name'); const nameInput=panel.querySelector('[data-role="name"]'); panel._displayName=''; const updateFabLabel=(text)=>{ const lab=hostEl.querySelector('.fab-label'); if(lab) lab.textContent=text; };
     nameInput?.addEventListener('input', ()=>{ panel._displayName=nameInput.value||''; const nameText=panel._displayName.trim()||'User'; if(headerNameEl) headerNameEl.textContent=nameText; updateFabLabel(nameText); }); if(headerNameEl) headerNameEl.textContent='User'; updateFabLabel('User');
-  panel.querySelector('[data-action="resetAll"]')?.addEventListener('click', ()=>{ panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true; const m=messagesEl; if(m) m.innerHTML=''; if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value='10'; if(alphaVal) alphaVal.textContent='10%'; if(fontTextSel){ fontTextSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; } if(fontNameSel){ fontNameSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); } if(renderSel){ renderSel.value='raw'; } applyBubbleStyles(); });
+  panel.querySelector('[data-action="resetAll"]')?.addEventListener('click', ()=>{ panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true; const m=messagesEl; if(m) m.innerHTML=''; if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value='10'; if(alphaVal) alphaVal.textContent='10%'; if(fontTextSel){ fontTextSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; } if(fontNameSel){ fontNameSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); } if(renderSel){ renderSel.value='md'; } applyBubbleStyles(); });
   panel.querySelector('[data-close]')?.addEventListener('click', ()=>{ document.removeEventListener('click', onDocClick); panel.remove(); });
     // Render historical messages if any
   try{
       const ownerId = panel.dataset.ownerId||''; const list = panel.querySelector('.messages');
       const entries = (window.graph && ownerId) ? window.graph.getMessages(ownerId) : [];
       // Determine render mode for user panel
-      let renderMode = 'raw';
+  let renderMode = 'md';
       try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw){ const s=JSON.parse(raw)||{}; if (s.userRenderMode) renderMode = String(s.userRenderMode); } }catch{}
       if (renderSel){ try{ renderSel.value = renderMode; }catch{} renderSel.addEventListener('change', ()=>{ try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); const cur = raw? JSON.parse(raw):{}; const next = Object.assign({}, cur, { userRenderMode: renderSel.value }); localStorage.setItem(`nodeSettings:${ownerId}`, JSON.stringify(next)); }catch{} }); }
       for(const m of entries){
@@ -422,9 +472,9 @@
     <div class="settings collapsed" data-role="settings">
       <label>Modell
         <select data-role="model">
-          <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+          <option value="gpt-4o-mini">gpt-4o-mini</option>
           <option value="gpt-5">gpt-5</option>
-          <option value="gpt-5-mini">gpt-5-mini</option>
+          <option value="gpt-5-mini" selected>gpt-5-mini</option>
           <option value="gpt-5-nano">gpt-5-nano</option>
           <option value="3o">3o</option>
         </select>
@@ -455,7 +505,7 @@
       <label>Visningsläge
         <select data-role="renderMode">
           <option value="raw">Rå text</option>
-          <option value="md">Snyggt (Markdown)</option>
+          <option value="md" selected>Snyggt (Markdown)</option>
         </select>
       </label>
       <label>API-nyckel (denna copilot)
@@ -472,7 +522,24 @@
   try{ const g = loadPanelGeom(panel.dataset.ownerId||''); if (g) applyPanelGeom(panel, g); }catch{}
     const settingsBtn=panel.querySelector('[data-action="settings"]'); const settings=panel.querySelector('[data-role="settings"]'); settingsBtn?.addEventListener('click', ()=>settings.classList.toggle('collapsed'));
     const clearBtn=panel.querySelector('[data-action="clear"]'); clearBtn?.addEventListener('click', ()=>{ const m=panel.querySelector('.messages'); if(m) m.innerHTML=''; });
-    const delBtn=panel.querySelector('[data-action="delete"]'); delBtn?.addEventListener('click', ()=>panel.remove());
+    const delBtn=panel.querySelector('[data-action="delete"]'); delBtn?.addEventListener('click', ()=>{
+      try{
+        const ownerId = panel.dataset.ownerId||'';
+        // Remove UI node
+        const host = ownerId ? document.querySelector(`.fab[data-id="${ownerId}"]`) : null;
+        if (host) host.remove();
+        // Remove connections touching this node
+        try{
+          (window.state?.connections||[]).slice().forEach(c=>{
+            if (c.fromId===ownerId || c.toId===ownerId){ try{ c.pathEl?.remove(); }catch{} try{ c.hitEl?.remove(); }catch{} }
+          });
+          if (window.state && Array.isArray(window.state.connections)) window.state.connections = window.state.connections.filter(c=> c.fromId!==ownerId && c.toId!==ownerId);
+        }catch{}
+        // Remove from Graph
+        try{ if (window.graph && window.graph.nodes) window.graph.nodes.delete(ownerId); }catch{}
+      }catch{}
+      panel.remove();
+    });
     panel.querySelector('[data-close]')?.addEventListener('click', ()=>panel.remove());
     // Settings persistence wiring (Graph + localStorage)
     try{
@@ -593,7 +660,7 @@
       const ownerId = panel.dataset.ownerId||''; const list = panel.querySelector('.messages');
       const entries = (window.graph && ownerId) ? window.graph.getMessages(ownerId) : [];
       // Determine render mode (saved or current control)
-      let renderMode = 'raw';
+  let renderMode = 'md';
       try{
         const sel = panel.querySelector('[data-role="renderMode"]');
         if (sel && sel.value) renderMode = String(sel.value);
@@ -673,6 +740,7 @@
                       }catch{}
                     }
                     a.href = finalHref; a.target='_blank'; a.rel='noopener';
+                    try{ a.addEventListener('click', (e)=>{ e.preventDefault(); openIfExists(finalHref); }); }catch{}
                   }catch{ a.href='#'; }
                   a.textContent = (it.name||`Bilaga ${i+1}`); li.appendChild(a);
       // Calibrate control for PDFs
@@ -721,7 +789,7 @@
                     const baseBlob = it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
                     let finalHref = baseHttp || baseBlob;
                     if (isPdf(it) && baseHttp){ const off = (function(){ try{ const v=localStorage.getItem('pdfPageOffset:'+baseHttp); const n=Number(v); return Number.isFinite(n)? Math.trunc(n) : 0; }catch{ return 0; } })(); const eff = Math.max(1, page + off); finalHref = baseHttp + `#page=${encodeURIComponent(eff)}`; }
-                      try{ window.open(finalHref, '_blank', 'noopener'); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                      try{ openIfExists(finalHref); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
                   } else if (bil <= total){
                     // Fallback: open citation n (ignore page)
                     const c = citItems[bil - attLen - 1]; const href = String(c?.url||'#'); if(href && href !== '#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
@@ -740,7 +808,7 @@
                   const baseHttp = it.url || '';
                   const baseBlob = it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
                   const finalHref = baseHttp || baseBlob;
-                  try{ window.open(finalHref, '_blank', 'noopener'); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  try{ openIfExists(finalHref); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
                 } else {
                   const c = citItems[idx - (attItems?.length||0) - 1]; const href=String(c?.url||'#'); if(href && href!=='#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
                 }
@@ -777,7 +845,7 @@
     const b=document.createElement('div'); b.className='bubble '+(who==='user'?'user':'');
     const textEl=document.createElement('div'); textEl.className='msg-text';
     // Determine if this panel should render markdown for assistant messages (coworker) or for user panel mode
-    let renderMode = 'raw';
+  let renderMode = 'md';
     try{
       const sel = panel.querySelector('[data-role="renderMode"]');
       if (sel && sel.value) renderMode = String(sel.value);
@@ -873,7 +941,7 @@
                 const baseHttp = it.url || '';
                 const baseBlob = it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
                 const final = (isPdf(it) && baseHttp) ? (function(){ const off=(function(){ try{ const v=localStorage.getItem('pdfPageOffset:'+baseHttp); const n=Number(v); return Number.isFinite(n)? Math.trunc(n) : 0; }catch{ return 0; } })(); const eff=Math.max(1, page+off); return baseHttp + `#page=${encodeURIComponent(eff)}`; })() : (baseHttp || baseBlob);
-                try{ window.open(final, '_blank', 'noopener'); }catch{ const tmp = document.createElement('a'); tmp.href = final; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  try{ openIfExists(final); }catch{ const tmp = document.createElement('a'); tmp.href = final; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
               } else if (bil <= total){
                 const c = citItems[bil - attLen - 1]; const href = String(c?.url||'#'); if(href && href !== '#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
               }
@@ -904,7 +972,7 @@
                 if (pick && pick.page && baseHttp) finalHref = baseHttp + `#page=${encodeURIComponent(pick.page)}`;
               }catch{}
               const final = isPdf(it) ? finalHref : (baseHttp || baseBlob);
-              try{ window.open(final, '_blank', 'noopener'); }catch{ const tmp = document.createElement('a'); tmp.href = final; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+              try{ openIfExists(final); }catch{ const tmp = document.createElement('a'); tmp.href = final; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
             } else {
               const c = citItems[idx - (attItems?.length||0) - 1];
               const href = String(c?.url||'#'); if (href && href !== '#'){ const tmp = document.createElement('a'); tmp.href = href; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
@@ -970,6 +1038,8 @@
               }catch{}
             }
             a.href = finalHref; a.target = '_blank'; a.rel = 'noopener';
+            // Intercept to 404-check before opening
+            try{ a.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); openIfExists(finalHref); }); }catch{}
           }catch{ a.href = '#'; }
           a.textContent = (it.name||`Bilaga ${idx}`);
           li.appendChild(a);
@@ -1028,8 +1098,8 @@
         }catch{ return {}; }
       };
       const settings = getSecSettings();
-      const modeNow = (sec?.dataset.mode) || settings.mode || settings.renderMode || 'raw';
-  const readSecMode = ()=> ((sec?.dataset.mode) || settings.mode || settings.renderMode || 'raw');
+    const modeNow = (sec?.dataset.mode) || settings.mode || settings.renderMode || 'md';
+  const readSecMode = ()=> ((sec?.dataset.mode) || settings.mode || settings.renderMode || 'md');
       // If in exercises mode and a pending feedback index exists, store incoming text as feedback
       if (modeNow === 'exercises'){
         try{
@@ -1460,7 +1530,7 @@
           editBtn.onclick = ()=>{ if (!editing) startEdit(); };
           // Only show edit button in Markdown mode
           const s = localStorage.getItem(`sectionSettings:${id}`);
-          const mode = s ? (JSON.parse(s).renderMode || 'raw') : 'raw';
+          const mode = s ? (JSON.parse(s).renderMode || 'md') : 'md';
           editBtn.style.display = (mode === 'md') ? '' : 'none';
           // Initial render
           if (mode === 'exercises'){

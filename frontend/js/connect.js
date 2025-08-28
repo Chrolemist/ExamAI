@@ -62,13 +62,24 @@
     svg()?.appendChild(p);
     return p;
   }
-  /** Draw mirrored cubic Bezier path between two points. */
+  /** Draw a cubic Bezier path that flips bend direction depending on geometry. */
   function drawPath(path, x1, y1, x2, y2){
-    const dx = Math.abs(x2 - x1);
-    const sign = (x2 >= x1) ? 1 : -1;
-    const cx = Math.max(40, dx * 0.4);
-    const c1x = x1 + sign * cx, c1y = y1;
-    const c2x = x2 - sign * cx, c2y = y2;
+    const dx = x2 - x1, dy = y2 - y1;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    let c1x, c1y, c2x, c2y;
+    if (adx >= ady) {
+      // Predominantly horizontal: bend left/right; flip when x crosses
+      const sign = dx >= 0 ? 1 : -1;
+      const cx = Math.max(40, adx * 0.4);
+      c1x = x1 + sign * cx; c1y = y1 + ( (y1 + y2)/2 - y1 ) * 0.2; // slight pull toward mid-y
+      c2x = x2 - sign * cx; c2y = y2 + ( (y1 + y2)/2 - y2 ) * 0.2;
+    } else {
+      // Predominantly vertical: bend up/down; flip when y crosses
+      const signY = dy >= 0 ? 1 : -1;
+      const cy = Math.max(40, ady * 0.4);
+      c1x = x1 + dx * 0.2; c1y = y1 + signY * cy;
+      c2x = x2 - dx * 0.2; c2y = y2 - signY * cy;
+    }
     path.setAttribute('d', `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`);
   }
 
@@ -153,6 +164,7 @@
       if (host && host.dataset.type === 'coworker') whoForTarget = 'user';
     }catch{}
   const baseMeta = (payload && payload.meta) ? Object.assign({}, payload.meta) : {};
+  // Ensure attachments/citations are preserved in routed meta
   const routedMeta = Object.assign(baseMeta, { ts, via: `${conn.fromId}->${conn.toId}`, from: sourceId, author: (author||'Incoming') });
   try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, whoForTarget, routedMeta); }catch{}
   try{ if(window.receiveMessage) window.receiveMessage(targetId, text, whoForTarget, routedMeta); }catch{}
@@ -305,10 +317,14 @@
       // Ensure last turn includes the just received user/assistant? The incoming to coworker was an assistant or user? In our model, payload.who was 'assistant' for received.
       // No extra append needed because transmitOnConnection already added it to Graph before this call.
     }catch{}
-    // Coerce unsupported/legacy model aliases to a safe default
+    // Coerce unsupported/legacy model aliases to a safe default, but preserve gpt-5* defaults
     try{
       const ml = (model||'').toLowerCase();
-      if (!ml || ml.startsWith('gpt-5') || ml === '3o' || ml === 'o3' || ml === 'mini') model = 'gpt-4o-mini';
+      // If empty or clearly invalid, fall back to gpt-5-mini as default
+      if (!ml || ml === 'mini') model = 'gpt-5-mini';
+      // Keep gpt-5 family as-is; map old experimental aliases to gpt-5-mini
+      else if (ml === '3o' || ml === 'o3') model = 'gpt-5-mini';
+      // Otherwise, leave user-selected models untouched
     }catch{}
     const body = { model, max_tokens: maxTokens };
     if (systemPrompt) body.system = systemPrompt;
@@ -346,8 +362,12 @@
   try{ if (Array.isArray(requestAIReply._lastAttachments)) meta.attachments = requestAIReply._lastAttachments; }catch{}
       try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
       try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
-      // Route out via cables (if any)
-      try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts, citations }); }catch{}
+      // Route out via cables (if any) and include attachments so receivers can render footnotes
+      try{
+        const routedMeta = { author, who:'assistant', ts, citations };
+        try{ if (Array.isArray(requestAIReply._lastAttachments)) routedMeta.attachments = requestAIReply._lastAttachments; }catch{}
+        if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, routedMeta);
+      }catch{}
   }).catch(err=>{
       const msg = 'Fel vid AI-förfrågan: ' + (err?.message||String(err));
       let ts = Date.now();
