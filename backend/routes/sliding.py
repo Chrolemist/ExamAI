@@ -29,14 +29,14 @@ def sliding_window():
             {"role": "system", "content": "Besvara frågan endast utifrån detta fönster av texten."},
             {"role": "user", "content": f"TEXT:\n{w}\n\nFRÅGA:\n{ask}"},
         ]
-        r = client.chat.completions.create(model=model, messages=msgs, max_tokens=400)
-        a = r.choices[0].message.content if r.choices else ""
-        answers.append(a or "")
+    r = client.chat.completions.create(model=model, messages=msgs, max_completion_tokens=400)
+    a = r.choices[0].message.content if r.choices else ""
+    answers.append(a or "")
     # Optional: final merge
     msgs2 = [
         {"role": "system", "content": "Sammanfatta konsistent vad som framgår av del-svaren utan motsägelser."},
         {"role": "user", "content": "\n\n---\n\n".join(answers)},
     ]
-    r2 = client.chat.completions.create(model=model, messages=msgs2, max_tokens=600)
+    r2 = client.chat.completions.create(model=model, messages=msgs2, max_completion_tokens=600)
     final = r2.choices[0].message.content if r2.choices else ""
     return jsonify({"answer": final, "steps": len(windows)})

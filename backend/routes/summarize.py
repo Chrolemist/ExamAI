@@ -27,9 +27,9 @@ def hierarchical():
             {"role": "system", "content": layer_prompt},
             {"role": "user", "content": ch},
         ]
-        r = client.chat.completions.create(model=model, messages=msgs, max_tokens=300)
-        s = r.choices[0].message.content if r.choices else ""
-        first_summaries.append(s or "")
+    r = client.chat.completions.create(model=model, messages=msgs, max_completion_tokens=300)
+    s = r.choices[0].message.content if r.choices else ""
+    first_summaries.append(s or "")
 
     # Second-level summary
     joined = "\n\n---\n\n".join(first_summaries)
@@ -37,6 +37,6 @@ def hierarchical():
         {"role": "system", "content": "Kondensera följande delsummeringar till en executive summary."},
         {"role": "user", "content": joined},
     ]
-    r2 = client.chat.completions.create(model=model, messages=msgs2, max_tokens=int(data.get("max_tokens", 800)))
+    r2 = client.chat.completions.create(model=model, messages=msgs2, max_completion_tokens=int(data.get("max_tokens", data.get("max_completion_tokens", 800))))
     final = r2.choices[0].message.content if r2.choices else ""
     return jsonify({"summary": final, "parts": len(chunks)})

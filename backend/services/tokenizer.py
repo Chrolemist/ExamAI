@@ -6,7 +6,7 @@ except Exception:
     tiktoken = None  # type: ignore
 
 
-def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
+def count_tokens(text: str, model: str = "cl100k_base") -> int:
     if not text:
         return 0
     if tiktoken is not None:
@@ -19,7 +19,7 @@ def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
     return max(1, len(text.split()))
 
 
-def chunk_text(text: str, max_tokens: int = 800, overlap: int = 100, model: str = "gpt-4o-mini") -> List[str]:
+def chunk_text(text: str, max_tokens: int = 800, overlap: int = 100, model: str = "cl100k_base") -> List[str]:
     if not text:
         return []
     if max_tokens <= 0:

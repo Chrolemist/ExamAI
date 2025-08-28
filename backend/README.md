@@ -53,7 +53,7 @@ Refactored with SOLID-style modules and blueprints:
 	- upload.py: file uploads and serving
 	- debug.py: debug utilities
 	- exam.py: demo exam builder
-	- rag.py: RAG ingest/query (chunk + embed + vector search)
+	- rag.py: RAG ingest/query (per-collection store, metadata for citations)
 	- summarize.py: hierarchical summarization
 	- sliding.py: sliding window reading/QA
 - services/
@@ -61,9 +61,12 @@ Refactored with SOLID-style modules and blueprints:
 	- tokenizer.py: token counting and chunking
 	- embeddings.py: embedding helper
 	- vector_store.py: in-memory vector DB (swap with Pinecone/Weaviate/Qdrant in prod)
+	- vector_registry.py: per-collection registry for isolated vector stores
 
-New endpoints:
-- POST /rag/ingest { text, chunkTokens?, overlapTokens?, embeddingModel? }
-- POST /rag/query { query, topK?, model?, embeddingModel?, max_tokens? }
+RAG endpoints:
+- POST /rag/ingest { collection, bilaga?, text, chunkTokens?, overlapTokens?, embeddingModel? }
+	- Splits by [Sida N] markers, chunks per page, stores metadata {bilaga, sida}
+- POST /rag/query { collection, query, topK?, model?, embeddingModel?, max_tokens?, returnJSON? }
+	- Retrieves top chunks and instructs the model to cite [Bilaga, Sida] in the answer; returns sources list
 - POST /summarize/hierarchical { text, chunkTokens?, overlapTokens?, model?, layerPrompt?, max_tokens? }
 - POST /sliding/window { text, windowTokens?, overlapTokens?, ask?, model? }
