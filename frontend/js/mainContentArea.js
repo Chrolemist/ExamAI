@@ -44,6 +44,7 @@
       const list = loadList();
       const next = list.filter(it => it && it.id !== id);
       saveList(next);
+  try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'remove', id } })); }catch{}
     }catch{}
     try{ localStorage.removeItem(LS_KEY_TITLE(id)); }catch{}
     try{ localStorage.removeItem(`sectionSettings:${id}`); }catch{}
@@ -61,7 +62,7 @@
       const h2 = sec.querySelector('.head h2');
       if (h2){
         const id = sec.dataset.sectionId || '';
-  const onChange = ()=>{ try{ const name=(h2.textContent||'').trim(); localStorage.setItem(LS_KEY_TITLE(id), name); if (window.sectionIOBoard) window.sectionIOBoard.rename(id, name); }catch{} };
+  const onChange = ()=>{ try{ const name=(h2.textContent||'').trim(); localStorage.setItem(LS_KEY_TITLE(id), name); if (window.sectionIOBoard) window.sectionIOBoard.rename(id, name); try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'rename', id, title: name } })); }catch{} }catch{} };
         h2.addEventListener('input', onChange);
         h2.addEventListener('blur', onChange);
       }
@@ -102,6 +103,7 @@
     wireSection(sec);
     const list = loadList(); list.push({ id, title: name }); saveList(list);
     try{ window.sectionIOBoard && window.sectionIOBoard.add(id, name); }catch{}
+  try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'add', id, title: name } })); }catch{}
     return sec;
   }
 
@@ -166,6 +168,7 @@
             try{ localStorage.removeItem(`sectionExercisesCursor:${it.id}`); }catch{}
           }); }catch{}
           try{ saveList([]); }catch{}
+          try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'clear' } })); }catch{}
           // Clear IO board
           try{ if (window.sectionIOBoard) window.sectionIOBoard.syncAll(); }catch{}
           // Refresh cables

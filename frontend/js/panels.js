@@ -1343,9 +1343,10 @@
       const expWrap = document.createElement('label');
       expWrap.className = 'subtle';
       expWrap.style.display = 'flex'; expWrap.style.alignItems = 'center'; expWrap.style.gap = '6px'; expWrap.style.marginLeft = '12px';
-      const span = document.createElement('span'); span.textContent = 'Exportera till:';
-      const sel = document.createElement('select'); sel.className = 'btn';
-      expWrap.appendChild(span); expWrap.appendChild(sel);
+  const span = document.createElement('span'); span.textContent = 'Exportera till:';
+  const sel = document.createElement('select'); sel.className = 'btn';
+  const refreshBtn = document.createElement('button'); refreshBtn.type='button'; refreshBtn.className='btn btn-ghost'; refreshBtn.textContent='↻'; refreshBtn.title='Uppdatera lista'; refreshBtn.style.padding='2px 6px';
+  expWrap.appendChild(span); expWrap.appendChild(sel); expWrap.appendChild(refreshBtn);
       exBar.appendChild(expWrap);
       const fillSections = ()=>{
         const opts = [{ value:'', label:'— Välj sektion —' }];
@@ -1360,7 +1361,9 @@
         sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); });
         sel.value='';
       };
-      fillSections();
+  fillSections();
+  // Manual refresh
+  refreshBtn.addEventListener('click', ()=> fillSections());
       sel.addEventListener('change', ()=>{
         try{
           const targetId = String(sel.value||''); if (!targetId) return;
@@ -1373,8 +1376,9 @@
           sel.value='';
         }catch{}
       });
-      // Refresh list when sections change (best-effort via storage keys)
-      window.addEventListener('storage', (e)=>{ try{ if (!e||!e.key) return; if (e.key==='boardSections:list:v1' || /^boardSection:title:/.test(e.key)) fillSections(); }catch{} });
+  // Auto-refresh when sections change (same-tab event + cross-tab storage keys)
+  window.addEventListener('board-sections-changed', fillSections);
+  window.addEventListener('storage', (e)=>{ try{ if (!e||!e.key) return; if (e.key==='boardSections:list:v1' || /^boardSection:title:/.test(e.key)) fillSections(); }catch{} });
     }catch{}
           // Insert toolbar near title; inline IO is no longer present
           head.appendChild(exBar);
@@ -1790,7 +1794,8 @@
             expWrap.style.display = 'flex'; expWrap.style.alignItems = 'center'; expWrap.style.gap = '6px'; expWrap.style.marginLeft = '12px';
             const span = document.createElement('span'); span.textContent = 'Exportera till:';
             const sel = document.createElement('select'); sel.className = 'btn';
-            expWrap.appendChild(span); expWrap.appendChild(sel);
+            const refreshBtn = document.createElement('button'); refreshBtn.type='button'; refreshBtn.className='btn btn-ghost'; refreshBtn.textContent='↻'; refreshBtn.title='Uppdatera lista'; refreshBtn.style.padding='2px 6px';
+            expWrap.appendChild(span); expWrap.appendChild(sel); expWrap.appendChild(refreshBtn);
             tBar.appendChild(expWrap);
             const fillSections = ()=>{
               const opts = [{ value:'', label:'— Välj sektion —' }];
@@ -1806,6 +1811,7 @@
               sel.value='';
             };
             fillSections();
+            refreshBtn.addEventListener('click', ()=> fillSections());
             sel.addEventListener('change', ()=>{
               try{
                 const targetId = String(sel.value||''); if (!targetId) return;
@@ -1817,6 +1823,7 @@
                 sel.value='';
               }catch{}
             });
+            window.addEventListener('board-sections-changed', fillSections);
             window.addEventListener('storage', (e)=>{ try{ if (!e||!e.key) return; if (e.key==='boardSections:list:v1' || /^boardSection:title:/.test(e.key)) fillSections(); }catch{} });
           }catch{}
           head.appendChild(tBar);
