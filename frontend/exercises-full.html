@@ -90,7 +90,12 @@
           <div class="fx-resize" title="Ändra storlek"></div>
         </div>
         <div class="fx-card" id="cardT" hidden>
-          <div class="fx-meta drag-handle" id="fxMetaT">Teori</div>
+          <div class="fx-meta drag-handle" id="fxMetaT">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span>Teori</span>
+              <button type="button" class="btn btn-ghost" id="fxTRemove" title="Ta bort koppling">Ta bort</button>
+            </div>
+          </div>
           <div class="fx-t" id="fxT" spellcheck="false"></div>
           <div class="fx-resize" title="Ändra storlek"></div>
         </div>
