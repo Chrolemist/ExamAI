@@ -9,6 +9,13 @@
 html,body,#app{height:100%}
 body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,255,.15),transparent),linear-gradient(180deg,#0b0b0d 0%, #0b0b0d 100%);color:var(--text);font:14px/1.5 Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
 
+/* Dark scrollbars (Firefox + WebKit) */
+*{ scrollbar-width: thin; scrollbar-color: #3a3a45 #0f0f14 }
+*::-webkit-scrollbar{ width:10px; height:10px }
+*::-webkit-scrollbar-track{ background:#0f0f14; border-radius:8px }
+*::-webkit-scrollbar-thumb{ background:linear-gradient(180deg,#23232b,#2a2a35); border-radius:8px; border:1px solid #2f2f3a }
+*::-webkit-scrollbar-thumb:hover{ background:linear-gradient(180deg,#2a2a35,#353544) }
+
 /* Node Board */
 #nodeBoard{position:relative;width:100%;z-index:1500;padding:14px 16px 6px 16px;backdrop-filter:blur(2px);height:auto;overflow:visible}
 #nodeBoard .nb-sections{display:grid;grid-template-columns:repeat(3,minmax(240px,1fr));gap:12px;padding-right:6px}
