@@ -23,7 +23,10 @@
       .fx-resize{ position:absolute; right:6px; bottom:6px; width:14px; height:14px; cursor:nwse-resize;
         background:linear-gradient(135deg,transparent 50%, rgba(124,92,255,.4) 50%); clip-path:polygon(0 100%, 100% 0, 100% 100%); opacity:.7 }
       .fx-resize:hover{ opacity:1 }
-      .fx-q { min-height: 200px; white-space:pre-wrap; }
+  /* Make question card a column so chat stays pinned at bottom */
+  #cardQ { display:flex; flex-direction:column; min-height: 200px; }
+  .fx-q { flex: 1 1 auto; min-height: 160px; white-space:pre-wrap; overflow:auto; }
+  .fx-qchat { margin-top: 8px; display:flex; gap:6px; }
   .fx-a { width:100%; height:58vh; resize:vertical; color:var(--text); background:#0f0f14; border:1px solid #24242c; border-radius:10px; padding:10px; }
       .fx-a::placeholder{ color:#8f93a3 }
       .fx-fb { min-height: 120px; white-space:pre-wrap; }
@@ -56,6 +59,10 @@
         <div class="fx-card" id="cardQ">
           <div class="fx-meta drag-handle" id="fxMetaQ">Fråga</div>
           <div class="fx-q" id="fxQ" spellcheck="false"></div>
+          <div class="fx-qchat" style="display:flex; gap:6px; margin-top:8px;">
+            <input id="fxQChat" class="input" placeholder="Fråga förbättraren… t.ex. förtydliga eller skapa ny fråga" style="flex:1; min-width:0;">
+            <button class="btn" id="fxQSend" title="Skicka till förbättrare">Skicka</button>
+          </div>
           <div class="fx-resize" title="Ändra storlek"></div>
         </div>
         <div class="fx-card" id="cardA">
@@ -76,6 +83,8 @@
   <script src="js/utils.js"></script>
   <script src="js/drag-within.js"></script>
   <script src="js/markdown.js"></script>
+  <!-- Provide requestAIReply/routeMessageFrom so full-screen can talk to coworkers -->
+  <script src="js/connect.js"></script>
     <script src="js/exercises-full.js"></script>
   </body>
   </html>

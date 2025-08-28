@@ -2,24 +2,8 @@
 // Responsibility: Maintain a compact list of Section-IO items, one per board-section, to keep cables tidy.
 // Public API: window.sectionIOBoard.syncAll(), add(id,name), remove(id), rename(id,name)
 (function(){
-  function ensureBoard(){
-    let board = document.getElementById('sectionIoBoard');
-    if (board) return board;
-    // Insert after Node Board
-    const nb = document.getElementById('nodeBoard');
-    const wrap = document.createElement('section');
-    wrap.id = 'sectionIoBoard';
-    wrap.setAttribute('aria-label','Section IO');
-    wrap.className = 'section-io-board';
-    wrap.innerHTML = `
-      <div class="sib-head">
-        <h2>Section IO</h2>
-      </div>
-      <div class="sib-list"></div>`;
-    if (nb && nb.parentElement){ nb.parentElement.insertBefore(wrap, nb.nextSibling); }
-    else { document.querySelector('#app')?.appendChild(wrap); }
-    return wrap;
-  }
+  // Section IO Board deprecated: keep no-op API for compatibility
+  function ensureBoard(){ return null; }
 
   function makeItem(id, name){
     const item = document.createElement('div');
@@ -39,54 +23,15 @@
     try{ window.updateConnectionsFor && window.updateConnectionsFor(item); }catch{}
   }
 
-  function add(id, name){
-    const board = ensureBoard();
-    const list = board.querySelector('.sib-list');
-    if (!list) return;
-    // Avoid duplicates
-    if (list.querySelector(`.sib-item[data-section-id="${CSS.escape(id)}"]`)) return;
-    const item = makeItem(id, name);
-    list.appendChild(item);
-    wireItem(item);
-  }
+  function add(id, name){ /* no-op */ }
 
-  function remove(id){
-    const board = ensureBoard();
-    const item = board.querySelector(`.sib-item[data-section-id="${CSS.escape(id)}"]`);
-    if (item) item.remove();
-  }
+  function remove(id){ /* no-op */ }
 
-  function rename(id, name){
-    const board = ensureBoard();
-    const item = board.querySelector(`.sib-item[data-section-id="${CSS.escape(id)}"]`);
-    if (!item) return;
-    const t = item.querySelector('.sib-title'); if (t) t.textContent = name || id;
-    // Update titles on IO for accessibility
-    try{
-      item.querySelectorAll('.conn-point').forEach(cp=>{ cp.title = (cp.classList.contains('io-in')?'Till ':'Från ') + (name||id); });
-    }catch{}
-  }
+  function rename(id, name){ /* no-op */ }
 
-  function syncAll(){
-    const board = ensureBoard();
-    const list = board.querySelector('.sib-list');
-    if (!list) return;
-    // Reset current
-    list.innerHTML = '';
-    // Build from existing sections
-    document.querySelectorAll('.panel.board-section').forEach(sec=>{
-      const id = sec.dataset.sectionId || '';
-      const name = sec.querySelector('.head h2')?.textContent?.trim() || id || 'Sektion';
-      if (!id) return;
-      const item = makeItem(id, name);
-      list.appendChild(item);
-      wireItem(item);
-    });
-  }
+  function syncAll(){ /* no-op */ }
 
   window.sectionIOBoard = { ensureBoard, add, remove, rename, syncAll };
 
-  window.addEventListener('DOMContentLoaded', ()=>{
-    try{ ensureBoard(); syncAll(); }catch{}
-  });
+  window.addEventListener('DOMContentLoaded', ()=>{ /* no UI */ });
 })();

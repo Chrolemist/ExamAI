@@ -22,6 +22,8 @@
 				window.createIcon('user', midX - 200, 160);
 				window.createIcon('coworker', midX - 20, 240);
 				window.createIcon('internet', midX + 200, 160);
+	// Ensure section toolbars refresh coworker lists on fresh loads
+	try{ window.dispatchEvent(new CustomEvent('coworkers-changed')); }catch{}
 			}
 
 			// Persist Node Board headings (Analys/Idéer/Produktion) across reloads

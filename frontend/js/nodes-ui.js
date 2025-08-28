@@ -180,6 +180,8 @@
     label.textContent = displayName;
     el.dataset.displayName = displayName;
     if (window.graph && el._model == null) { el._model = window.graph.nodes.get(id); }
+  // Notify listeners (e.g., section toolbars) that coworker list may have changed
+  try{ if (type === 'coworker') window.dispatchEvent(new CustomEvent('coworkers-changed')); }catch{}
     return el;
   }
   // expose

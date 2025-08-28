@@ -104,26 +104,62 @@
   document.getElementById('fxNext').addEventListener('click', ()=>{ const arr=getList(); const n=Math.min(Math.max(0, arr.length-1), getCursor()+1); setCursor(n); render(); });
   document.getElementById('fxClose').addEventListener('click', ()=>{ window.close(); });
   if (els.btnLayout){ els.btnLayout.addEventListener('click', toggleLayout); }
+  // Question improver mini-chat
+  (function(){
+    const inp = document.getElementById('fxQChat'); const send = document.getElementById('fxQSend'); if (!inp || !send) return;
+    const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
+    const sendToImprover = (userText)=>{
+      const v = String(userText||'').trim(); if (!v) return;
+      const arr = getList(); const i = getCursor(); const it = arr[i]; if (!it) return;
+      const n = i+1;
+      // Include current question + user's prompt so the coworker has full context
+      const payload = [
+        `Fråga ${n}: ${it.q||''}`,
+        `Instruktion: ${v}`
+      ].join('\n');
+      // Mark pending improvement (cross-tab) so the reply replaces this question text
+      try{ localStorage.setItem(`sectionPendingImprove:${id}`, String(i)); }catch{}
+      const park = getParking(); const improverId = park && park.improver ? String(park.improver) : '';
+      if (!improverId){ alert('Ingen "Förbättra fråga"-nod vald i sektionen. Välj en CoWorker i listan.'); return; }
+      // Prefer direct coworker AI call if available, else route via connections
+      let sent = false;
+      if (improverId && window.requestAIReply){ try{ window.requestAIReply(improverId, { text: payload, sourceId: id }); sent = true; }catch{} }
+      if (!sent && window.routeMessageFrom){ try{ window.routeMessageFrom(id, payload, { author: 'Fråga', who:'user', ts: Date.now() }); sent = true; }catch{} }
+      // UX: brief indicator that message was sent
+      try{
+        let cont = document.getElementById('toastContainer');
+        if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
+        const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Skickat till förbättrare'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1100);
+      }catch{}
+    };
+    send.addEventListener('click', ()=>{ const v=String(inp.value||'').trim(); if(!v) return; sendToImprover(v); inp.value=''; });
+    inp.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); const v=String(inp.value||'').trim(); if(!v) return; sendToImprover(v); inp.value=''; } });
+  })();
   // Grade current question via backend /chat
   (function(){
     const btn = document.getElementById('fxGrade'); if (!btn) return;
-    const detectApiBase = ()=>{ try{ if (window.API_BASE && typeof window.API_BASE === 'string') return window.API_BASE; }catch{} try{ if (location.protocol==='file:') return 'http://localhost:8000'; if (location.port && location.port !== '8000') return 'http://localhost:8000'; }catch{} return ''; };
-    const renderFb = (s)=>{ try{ els.f.innerHTML = (window.mdToHtml? window.mdToHtml(s||'') : String(s||'')); }catch{ els.f.textContent = String(s||''); } };
-    btn.addEventListener('click', async ()=>{
+    btn.addEventListener('click', ()=>{
       try{
         const arr = getList(); const i = getCursor(); const it = arr[i]; if (!it){ alert('Ingen fråga vald.'); return; }
         const n = i+1;
         const payloadText = `Fråga ${n}: ${it.q||''}\nSvar ${n}: ${it.a||''}`;
-        const apiBase = detectApiBase();
-        const body = { model: 'gpt-5-mini', messages: [ { role:'system', content:'Du är en lärare. Ge kort, konstruktiv feedback på svaret. Om relevant, föreslå förbättringar. Svara på svenska. Använd Markdown.' }, { role:'user', content: payloadText } ], max_completion_tokens: 600 };
-        btn.disabled = true; const prevTxt = btn.textContent; btn.textContent = 'Rättar…';
-        const r = await fetch(apiBase + '/chat', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
-        if (!r.ok){ const t = await r.text().catch(()=>'' ); throw new Error(`Rätta misslyckades (${r.status}): ${t.slice(0,200)}`); }
-        const data = await r.json(); const reply = String(data?.reply||'');
-        it.fb = reply; setList(arr);
-        renderFb(reply);
+        // Mark pending feedback so the coworker reply is stored here (cross-tab)
+        try{ localStorage.setItem(`sectionPendingFeedback:${id}`, String(i)); }catch{}
+        // Prefer parked Grader
+        const parkRaw = localStorage.getItem(`sectionParking:${id}`);
+        const park = parkRaw ? (JSON.parse(parkRaw)||{}) : {};
+        const graderId = park && park.grader ? String(park.grader) : '';
+        if (!graderId){ alert('Ingen "Rättare"-nod vald i sektionen. Välj en CoWorker i listan.'); return; }
+        let sent = false;
+        if (graderId && window.requestAIReply){ try{ window.requestAIReply(graderId, { text: payloadText, sourceId: id }); sent = true; }catch{} }
+        if (!sent && window.routeMessageFrom){ try{ window.routeMessageFrom(id, payloadText, { author: 'Fråga', who:'user', ts: Date.now() }); sent = true; }catch{} }
+        // tiny sent toast
+        try{
+          let cont = document.getElementById('toastContainer');
+          if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
+          const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Skickat till rättare'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1100);
+        }catch{}
       }catch(e){ alert(String(e?.message||e)); }
-      finally{ btn.disabled=false; btn.textContent='Rätta'; }
     });
   })();
 
@@ -138,6 +174,10 @@
         render();
       }
     }catch{}
+  });
+  // Same-tab global event (dispatched by connect.js when exercises change)
+  window.addEventListener('exercises-data-changed-global', (ev)=>{
+    try{ render(); }catch{}
   });
 
   initLayout();

@@ -204,3 +204,39 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .panel.board-section .ex-q-focus{font-size:15px}
 .panel.board-section .ex-a-focus{min-height:260px}
 .panel.board-section .ex-fb{min-height:140px}
+
+/* Section toolbar selects (dark theme for Välj nod etc.) */
+.panel.board-section .head select.btn{
+  background:#0f0f14;
+  border:1px solid #24242c;
+  color:#e6e6ec;
+  border-radius:10px;
+  padding:6px 10px;
+  min-height:30px;
+}
+.panel.board-section .head select.btn:focus{
+  outline:2px solid rgba(124,92,255,0.35);
+  outline-offset:0;
+  border-color:#3a3a45;
+}
+.panel.board-section .head select.btn option{
+  background:#0f0f14;
+  color:#e6e6ec;
+}
+/* Ensure render-mode select in head is also dark if present */
+.panel.board-section .head select[data-role="secRenderMode"]{
+  background:#0f0f14;
+  border:1px solid #24242c;
+  color:#e6e6ec;
+  border-radius:10px;
+  padding:6px 10px;
+  min-height:30px;
+}
+.panel.board-section .head select[data-role="secRenderMode"]:focus{
+  outline:2px solid rgba(124,92,255,0.35);
+  border-color:#3a3a45;
+}
+.panel.board-section .head select[data-role="secRenderMode"] option{
+  background:#0f0f14;
+  color:#e6e6ec;
+}

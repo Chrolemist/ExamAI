@@ -30,10 +30,9 @@
   function makeHitPath(){
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     p.setAttribute('fill', 'none');
-  p.setAttribute('stroke', 'rgba(0,0,0,0)');
+    p.setAttribute('stroke', 'rgba(0,0,0,0)');
     p.setAttribute('stroke-width', '12');
     p.setAttribute('stroke-linecap', 'round');
-  p.style.pointerEvents = 'stroke';
     p.style.cursor = 'pointer';
     svg()?.appendChild(p);
     return p;
@@ -408,14 +407,8 @@
   let hasMaterials = false;
   try { hasMaterials = Array.isArray(requestAIReply._lastAttachments) && requestAIReply._lastAttachments.length > 0; } catch {}
   let _pgStart = 1;
-  // Read saved pagesPerStep from settings; default 1, bump to >=2 in quote mode
-  let pagesPerStep = 1;
-  try{
-    const raw = localStorage.getItem(`nodeSettings:${ownerId}`);
-    if (raw){ const s = JSON.parse(raw)||{}; if (typeof s.pagesPerStep === 'number') pagesPerStep = Math.max(1, Math.min(5, Number(s.pagesPerStep)||1)); }
-  }catch{}
-  if (typeof quoteMode === 'boolean' && quoteMode) pagesPerStep = Math.max(pagesPerStep, 2);
-  if (hasMaterials) body.pgwise = { enable: true, startPage: _pgStart, pagesPerStep };
+  // Simplified: no UI or stored setting; enable pgwise with default window size (backend default)
+  if (hasMaterials) body.pgwise = { enable: true, startPage: _pgStart };
   if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
     if (apiKey) body.apiKey = apiKey;
@@ -474,6 +467,105 @@
     try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
     try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
     try{ const routedMeta = { author, who:'assistant', ts, citations }; if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, routedMeta); }catch{}
+  // New: append reply into any board section that has this coworker selected as its Input (Inmatning)
+    try{
+      const secs = document.querySelectorAll('.panel.board-section');
+      secs.forEach(sec=>{
+        try{
+          const sid = sec?.dataset?.sectionId || '';
+          if (!sid) return;
+          const raw = localStorage.getItem(`sectionParking:${sid}`);
+          const cfg = raw ? (JSON.parse(raw)||{}) : {};
+          // 1) Input append
+          if (cfg && String(cfg.input||'') === String(ownerId)){
+            // Avoid duplicate if this coworker is already cabled directly to this section (routeMessageFrom already appended)
+            let connected = false;
+            try{ connected = (window.state?.connections||[]).some(c => ( (c.fromId===ownerId && c.toId===sid) || (c.toId===ownerId && c.fromId===sid) )); }catch{}
+            if (!connected && window.appendToSection) window.appendToSection(sid, reply);
+          }
+          // 2) Improver update: if section awaits improvement from this coworker, update that specific question text
+          let pendingImproveIdx = null;
+          if (cfg && String(cfg.improver||'') === String(ownerId)){
+            if (sec?.dataset?.pendingImprove !== undefined){ pendingImproveIdx = Math.max(0, Number(sec.dataset.pendingImprove)||0); try{ delete sec.dataset.pendingImprove; }catch{} }
+            // Cross-tab marker from full-screen view
+            if (pendingImproveIdx==null){ try{ const v = localStorage.getItem(`sectionPendingImprove:${sid}`); if (v!=null){ pendingImproveIdx = Math.max(0, Number(v)||0); localStorage.removeItem(`sectionPendingImprove:${sid}`); } }catch{} }
+          }
+          if (pendingImproveIdx!=null){
+            try{
+              const key = `sectionExercises:${sid}`;
+              const arr = JSON.parse(localStorage.getItem(key)||'[]')||[];
+              if (arr[pendingImproveIdx]){
+                arr[pendingImproveIdx].q = String(reply||'').trim() || arr[pendingImproveIdx].q;
+                localStorage.setItem(key, JSON.stringify(arr));
+                // cross-tab notify and same-tab global event
+                try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+                try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
+                // trigger re-render of focus UI if visible
+                sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } }));
+              }
+            }catch{}
+          }
+        }catch{}
+      });
+    }catch{}
+  // Also handle feedback updates when full-screen flagged an index but section isn’t mounted
+    try{
+      const all = document.querySelectorAll('.panel.board-section');
+      all.forEach(sec=>{
+        try{
+          const sid = sec?.dataset?.sectionId || '';
+          if (!sid) return;
+          const raw = localStorage.getItem(`sectionParking:${sid}`) || '{}';
+          const cfg = JSON.parse(raw||'{}')||{};
+          if (!cfg || String(cfg.grader||'') !== String(ownerId)) return;
+          // collect pending feedback idx: dataset flag or cross-tab key
+          let idx = null;
+          if (sec?.dataset?.pendingFeedback !== undefined){ idx = Math.max(0, Number(sec.dataset.pendingFeedback)||0); try{ delete sec.dataset.pendingFeedback; }catch{} }
+          if (idx==null){ try{ const v = localStorage.getItem(`sectionPendingFeedback:${sid}`); if (v!=null){ idx = Math.max(0, Number(v)||0); localStorage.removeItem(`sectionPendingFeedback:${sid}`); } }catch{} }
+          if (idx==null) return;
+          const key = `sectionExercises:${sid}`;
+          const arr = JSON.parse(localStorage.getItem(key)||'[]')||[];
+          if (arr[idx]){
+            arr[idx].fb = (arr[idx].fb ? (arr[idx].fb + '\n\n') : '') + String(reply||'');
+            localStorage.setItem(key, JSON.stringify(arr));
+            try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+            try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
+            sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } }));
+          }
+        }catch{}
+      });
+    }catch{}
+    // Also handle improvement updates cross-tab when no section element is needed
+    try{
+      // Iterate localStorage for pending improve markers
+      const keys = Object.keys(localStorage || {}).filter(k => /^sectionPendingImprove:/.test(k));
+      for (const k of keys){
+        try{
+          const sid = k.replace(/^sectionPendingImprove:/, '');
+          const raw = localStorage.getItem(`sectionParking:${sid}`) || '{}';
+          const cfg = JSON.parse(raw||'{}')||{};
+          if (!cfg || String(cfg.improver||'') !== String(ownerId)) continue;
+          const v = localStorage.getItem(k);
+          if (v==null) continue;
+          const idx = Math.max(0, Number(v)||0);
+          // apply update
+          const keyEx = `sectionExercises:${sid}`;
+          const arr = JSON.parse(localStorage.getItem(keyEx)||'[]')||[];
+          if (arr[idx]){
+            arr[idx].q = String(reply||'').trim() || arr[idx].q;
+            localStorage.setItem(keyEx, JSON.stringify(arr));
+            // remove marker
+            localStorage.removeItem(k);
+            // cross-tab notify and same-tab event
+            try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+            try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
+            // if section is present, inform UI
+            const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`);
+            if (sec) sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } }));
+          }
+        }catch{}
+      }
+    }catch{}
   };
   const doStep = (pgStart, step)=>{
     const payload = Object.assign({}, body);
@@ -514,7 +606,10 @@
       let ts = Date.now();
       try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, msg.startsWith('Fel')?author:senderName, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}
       try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{}
-  }).finally(()=>{ setThinking(ownerId, false); });
+  }).finally(()=>{
+    // Delay clearing busy a bit to avoid flicker when follow-up work kicks in
+    setTimeout(()=>{ try{ setThinking(ownerId, false); }catch{} }, 700);
+  });
   }
 
   // delete UI

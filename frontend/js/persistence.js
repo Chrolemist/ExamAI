@@ -78,11 +78,12 @@
         const readJSON = (k, def)=>{ try{ const raw = localStorage.getItem(k); return raw ? JSON.parse(raw) : def; }catch{ return def; } };
         const readStr  = (k, def)=>{ try{ const v = localStorage.getItem(k); return (v==null? def: v); }catch{ return def; } };
         const readNum  = (k, def)=>{ try{ const v = Number(localStorage.getItem(k)); return Number.isFinite(v)? v : def; }catch{ return def; } };
-        const settings = readJSON(`sectionSettings:${id}`, null);
+  const settings = readJSON(`sectionSettings:${id}`, null);
         const exercises = readJSON(`sectionExercises:${id}`, null);
         const cursor = readNum(`sectionExercisesCursor:${id}`, null);
         const layout = readJSON(`sectionExercisesLayout:${id}`, null);
-        sectionState[id] = { settings, exercises, cursor, layout };
+  const parking = readJSON(`sectionParking:${id}`, null);
+  sectionState[id] = { settings, exercises, cursor, layout, parking };
       });
     }catch{}
     // Per-node attachments and flyout panel geometry
@@ -198,7 +199,8 @@
         if ('settings' in st) write(`sectionSettings:${id}`, st.settings);
         if ('exercises' in st) write(`sectionExercises:${id}`, st.exercises);
         if ('cursor' in st){ try{ if (st.cursor==null) localStorage.removeItem(`sectionExercisesCursor:${id}`); else localStorage.setItem(`sectionExercisesCursor:${id}`, String(st.cursor)); }catch{} }
-        if ('layout' in st) write(`sectionExercisesLayout:${id}`, st.layout);
+  if ('layout' in st) write(`sectionExercisesLayout:${id}`, st.layout);
+  if ('parking' in st) write(`sectionParking:${id}`, st.parking);
       });
     }catch{}
     // Restore per-node attachments and flyout panel geometry to localStorage
@@ -208,8 +210,10 @@
       const pg = data.panelGeom || {};
       Object.keys(pg||{}).forEach(id=>{ try{ if (pg[id]) localStorage.setItem(`panelGeom:${id}`, JSON.stringify(pg[id])); }catch{} });
     }catch{}
-    // Restore sections (DOM content)
-    restoreSections(data.sections||[]);
+  // Restore sections (DOM content)
+  restoreSections(data.sections||[]);
+  // Notify UI that coworker list and labels may have changed (after nodes + parking restored)
+  try{ window.dispatchEvent(new CustomEvent('coworkers-changed')); }catch{}
   // Refresh connection geometry once after a tick
   setTimeout(()=>{ try{ window.updateConnectionsFor && document.querySelectorAll('.fab,.panel').forEach(el=> window.updateConnectionsFor(el)); }catch{} }, 0);
   }

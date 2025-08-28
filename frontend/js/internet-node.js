@@ -442,13 +442,13 @@
           }
         }catch{}
         try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts }); }catch{}
-      })
-      .catch(err=>{
+  })
+  .catch(err=>{
         const msg = 'Fel vid webbsökning: ' + (err?.message || String(err));
         let ts = Date.now(); try{ if(window.graph){ const entry=window.graph.addMessage(ownerId, author, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}
         try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{}
       })
-      .finally(()=> setThinking(ownerId, false));
+  .finally(()=>{ setTimeout(()=>{ try{ setThinking(ownerId, false); }catch{} }, 700); });
   }
 
   // expose

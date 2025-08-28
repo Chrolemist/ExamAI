@@ -505,10 +505,6 @@
         <input type="range" min="1000" max="30000" step="64" value="1000" data-role="maxTokens" />
         <div class="subtle"><span data-role="maxTokensValue">1000</span></div>
       </label>
-      <label>Sidor per steg (bilageläsning)
-        <input type="range" min="1" max="5" step="1" value="1" data-role="pagesPerStep" />
-        <div class="subtle"><span data-role="pagesPerStepValue">1</span></div>
-      </label>
       <label>Skrivhastighet
         <input type="range" min="0" max="100" step="1" value="10" data-role="typingSpeed" />
         <div class="subtle">(<span data-role="typingSpeedValue">Snabb</span>)</div>
@@ -589,8 +585,6 @@
   const selfReplyEl = by('[data-role="selfReply"]');
       const maxTokEl = by('[data-role="maxTokens"]');
       const maxTokVal = by('[data-role="maxTokensValue"]');
-  const ppsEl = by('[data-role="pagesPerStep"]');
-  const ppsVal = by('[data-role="pagesPerStepValue"]');
       const typeSpdEl = by('[data-role="typingSpeed"]');
       const typeSpdVal = by('[data-role="typingSpeedValue"]');
       const renderEl = by('[data-role="renderMode"]');
@@ -639,6 +633,8 @@
         if(headerNameEl) headerNameEl.textContent = nm;
         try{ const fabLab = hostEl.querySelector('.fab-label'); if(fabLab) fabLab.textContent = nm; }catch{}
         try{ hostEl.dataset.displayName = nm; }catch{}
+        // Announce coworker list change so parking selectors can refresh labels
+        try{ if ((hostEl.dataset.type||'') === 'coworker') window.dispatchEvent(new CustomEvent('coworkers-changed')); }catch{}
       };
       const saved = readSaved();
       // Initialize controls from saved settings
@@ -649,7 +645,6 @@
       if (typeof saved.useRole === 'boolean' && useRoleEl) useRoleEl.checked = !!saved.useRole;
   if (typeof saved.selfPanelReply === 'boolean' && selfReplyEl) selfReplyEl.checked = !!saved.selfPanelReply; else if (selfReplyEl && saved.selfPanelReply === undefined) selfReplyEl.checked = true;
       if (saved.maxTokens && maxTokEl) { maxTokEl.value = String(saved.maxTokens); if(maxTokVal) maxTokVal.textContent = String(saved.maxTokens); }
-  if (saved.pagesPerStep && ppsEl) { const v = Math.max(1, Math.min(5, Number(saved.pagesPerStep)||1)); ppsEl.value = String(v); if (ppsVal) ppsVal.textContent = String(v); }
       if (typeof saved.typingSpeed === 'number' && typeSpdEl) { typeSpdEl.value = String(saved.typingSpeed); if(typeSpdVal) typeSpdVal.textContent = (saved.typingSpeed>=66?'Snabb':saved.typingSpeed<=33?'Långsam':'Medel'); }
       if (saved.renderMode && renderEl) renderEl.value = saved.renderMode;
   // no web settings for coworker anymore
@@ -664,7 +659,6 @@
       useRoleEl?.addEventListener('change', ()=>{ persist({ useRole: !!useRoleEl.checked }); updateRoleBadge(); });
   selfReplyEl?.addEventListener('change', ()=>{ persist({ selfPanelReply: !!selfReplyEl.checked }); });
       maxTokEl?.addEventListener('input', ()=>{ const v=Math.max(256, Math.min(30000, Number(maxTokEl.value)||1000)); if(maxTokVal) maxTokVal.textContent=String(v); persist({ maxTokens: v }); });
-  ppsEl?.addEventListener('input', ()=>{ const v=Math.max(1, Math.min(5, Number(ppsEl.value)||1)); if(ppsVal) ppsVal.textContent=String(v); persist({ pagesPerStep: v }); });
       typeSpdEl?.addEventListener('input', ()=>{ const v = Math.max(0, Math.min(100, Number(typeSpdEl.value)||10)); if(typeSpdVal) typeSpdVal.textContent = (v>=66?'Snabb':v<=33?'Långsam':'Medel'); persist({ typingSpeed: v }); });
       renderEl?.addEventListener('change', ()=>persist({ renderMode: renderEl.value }));
   // removed web listeners
@@ -1148,8 +1142,12 @@
           ensureExercisesLayout();
           const id = sec.dataset.sectionId || '';
           const parse = (txt)=>{ try{ return (window.__parseQuestions? window.__parseQuestions(String(txt||'')) : []); }catch{ return []; } };
-          const items = parse(String(plain||''));
-          if (!items.length) return;
+          let items = parse(String(plain||''));
+          // Fallback: if nothing parsed, make a single question from the whole text
+          if (!items.length){
+            const q = String(plain||'').trim();
+            if (q) items = [{ q }]; else return;
+          }
           // merge with existing
           let cur = [];
           try{ const raw = localStorage.getItem(`sectionExercises:${id}`); if(raw){ cur = JSON.parse(raw)||[]; } }catch{}
@@ -1233,7 +1231,16 @@
           btnDeleteAll.type = 'button'; btnDeleteAll.textContent = 'Ta bort alla'; btnDeleteAll.className='btn btn-ghost';
           const btnFullscreen = document.createElement('button');
           btnFullscreen.type = 'button'; btnFullscreen.textContent = 'Öppna helskärm'; btnFullscreen.className='btn';
-          exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnDeleteAll); exBar.appendChild(btnFullscreen);
+    exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnDeleteAll); exBar.appendChild(btnFullscreen);
+    // Parking slots for exercises: choose coworker nodes to act as Grader and Improver
+    const parkWrap = document.createElement('div');
+    parkWrap.style.display='flex'; parkWrap.style.gap='8px'; parkWrap.style.alignItems='center'; parkWrap.style.marginLeft='12px';
+    const mkSel = (labelText)=>{ const wrap=document.createElement('label'); wrap.className='subtle'; wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='6px'; const span=document.createElement('span'); span.textContent=labelText; const sel=document.createElement('select'); sel.className='btn'; wrap.appendChild(span); wrap.appendChild(sel); return { wrap, sel, span }; };
+  const selGrader = mkSel('Rättare:');
+  const selImprover = mkSel('Förbättra fråga:');
+  const selInput = mkSel('Inmatning:');
+  parkWrap.appendChild(selGrader.wrap); parkWrap.appendChild(selImprover.wrap); parkWrap.appendChild(selInput.wrap);
+    exBar.appendChild(parkWrap);
           // Insert toolbar near title; inline IO is no longer present
           head.appendChild(exBar);
           // Wire actions
@@ -1249,6 +1256,34 @@
           });
           // Storage helpers for focus UI
           const getExercises = ()=>{ try{ const raw = localStorage.getItem(`sectionExercises:${id}`); return raw? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
+  const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
+  const setParking = (obj)=>{ try{ localStorage.setItem(`sectionParking:${id}`, JSON.stringify(obj||{})); }catch{} };
+        // Populate parking selectors with coworker nodes and persist selection
+        try{
+            const fillFromCoworkers = ()=>{
+              const opts = [{ value:'', label:'— Välj nod —' }];
+              document.querySelectorAll('.fab[data-type="coworker"]').forEach(el=>{
+                const value = el.dataset.id||''; const label = el.dataset.displayName || ('CoWorker '+value);
+                if (value) opts.push({ value, label });
+              });
+              const fill = (sel)=>{ sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); }); };
+                const cur = getParking();
+                const prevGrader = cur && cur.grader ? String(cur.grader) : '';
+                const prevImprover = cur && cur.improver ? String(cur.improver) : '';
+                const prevInput = cur && cur.input ? String(cur.input) : '';
+                fill(selGrader.sel); fill(selImprover.sel); fill(selInput.sel);
+                if (prevGrader) selGrader.sel.value = prevGrader;
+                if (prevImprover) selImprover.sel.value = prevImprover;
+                if (prevInput) selInput.sel.value = prevInput;
+            };
+            // Initial fill
+            fillFromCoworkers();
+            // Keep up to date when coworkers are added or renamed
+            window.addEventListener('coworkers-changed', fillFromCoworkers);
+            selGrader.sel.addEventListener('change', ()=>{ const p=getParking(); p.grader = selGrader.sel.value||null; setParking(p); });
+            selImprover.sel.addEventListener('change', ()=>{ const p=getParking(); p.improver = selImprover.sel.value||null; setParking(p); });
+              selInput.sel.addEventListener('change', ()=>{ const p=getParking(); p.input = selInput.sel.value||null; setParking(p); });
+        }catch{}
           const setExercises = (arr)=>{ try{ localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(arr||[])); }catch{} };
           // pending feedback target index (store transiently on section)
           const setPendingFeedback = (idx)=>{ try{ sec.dataset.pendingFeedback = String(idx); }catch{} };
@@ -1337,7 +1372,13 @@
                 const btn = ev.currentTarget; const now = Date.now(); if (btn && btn._lastClick && (now - btn._lastClick) < 400) return; if (btn) btn._lastClick = now;
                 const it = getExercises()[idx]; if (!it) return;
                 const n = idx+1; const payload = `Fråga ${n}: ${it.q||''}\nSvar ${n}: ${it.a||''}`;
-                try{ const title = sec.querySelector('.head h2')?.textContent?.trim() || 'Sektion'; if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() }); }catch{}
+                const title = sec.querySelector('.head h2')?.textContent?.trim() || 'Sektion';
+                // Prefer parked Grader (direct send), else fall back to cable routing
+                try{
+                  const park = getParking(); const graderId = park && park.grader ? String(park.grader) : '';
+                  if (graderId && window.requestAIReply){ window.requestAIReply(graderId, { text: payload, sourceId: id }); }
+                  else if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() });
+                }catch{}
                 // mark this index to receive incoming feedback
                 setPendingFeedback(idx);
               });
@@ -1397,9 +1438,13 @@
               const payload = `Fråga ${n}: ${q}\nSvar ${n}: ${ans}`;
               try{
                 const title = sec.querySelector('.head h2')?.textContent?.trim() || 'Sektion';
-                // Use the section's id to route out via cables
-                if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() });
+                // Prefer parked Grader (direct), else fall back to cable routing
+                const park = getParking(); const graderId = park && park.grader ? String(park.grader) : '';
+                if (graderId && window.requestAIReply){ window.requestAIReply(graderId, { text: payload, sourceId: id }); }
+                else if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() });
               }catch{}
+              // mark pending feedback to current displayed number (1-based -> store index)
+              try{ const idx = Math.max(0, (Number(n)||1) - 1); sec.dataset.pendingFeedback = String(idx); }catch{}
             });
             grid?.appendChild(box);
             saveExercises();
@@ -1703,8 +1748,11 @@
     }
     function importExercisesIntoSection(sec, text, opts){
       try{
-        const items = parseQuestions(text);
-        if (!items.length) return;
+        let items = parseQuestions(text);
+        if (!items.length){
+          const q = String(text||'').trim();
+          if (q) items = [{ q }]; else return;
+        }
         if (!opts || !opts.append) clearBlocks(sec);
         items.forEach(it=>createBlock(sec, it));
         saveExercises(sec);
