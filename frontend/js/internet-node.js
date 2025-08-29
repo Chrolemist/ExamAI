@@ -153,6 +153,33 @@
           <div class="subtle"><span data-role="webTotalCharsValue">9000</span> tecken</div>
         </label>
       </fieldset>
+      <fieldset class="subsec">
+        <legend>Chunkning</legend>
+        <label class="inline">
+          <input type="checkbox" data-role="chunkEnable" /> Aktivera chunkning
+        </label>
+        <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label class="inline"><input type="checkbox" data-role="chunkNodeToNode" checked /> Mellan noder</label>
+          <label class="inline"><input type="checkbox" data-role="chunkToSection" checked /> Till sektioner</label>
+        </div>
+        <label class="inline" style="margin-top:6px">
+          <input type="checkbox" data-role="chunkNumbered" /> Numrerad chunkning (1., 2), 3: …)
+        </label>
+        <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px; margin-top:6px">
+          <label class="inline"><input type="checkbox" data-role="chunkLines" checked /> Radchunkning</label>
+          <label>rader/batch
+            <input type="range" min="1" max="50" step="1" value="3" data-role="chunkBatchSize" />
+            <span class="subtle" data-role="chunkBatchSizeVal">3</span>
+          </label>
+        </div>
+        <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px; margin-top:6px">
+          <label class="inline"><input type="checkbox" data-role="chunkTokens" /> Tokenchunkning</label>
+          <label>tokens/batch
+            <input type="range" min="200" max="2000" step="50" value="800" data-role="chunkTokenSize" />
+            <span class="subtle" data-role="chunkTokenSizeVal">800</span>
+          </label>
+        </div>
+      </fieldset>
       <label>API-nyckel (denna nod)
         <input type="password" placeholder="Valfri – annars används global" data-role="apiKey" />
       </label>
@@ -222,6 +249,17 @@
   const webUseToolEl = by('[data-role="webUseOpenAITool"]'); const webForceEl = by('[data-role="webForceTool"]'); const webCtxSizeEl = by('[data-role="webSearchContextSize"]');
   const webLocCountryEl = by('[data-role="webLocCountry"]'); const webLocRegionEl = by('[data-role="webLocRegion"]'); const webLocCityEl = by('[data-role="webLocCity"]'); const webLocTzEl = by('[data-role="webLocTimezone"]');
   const webMaxEl = by('[data-role="webMaxResults"]'); const webPerEl = by('[data-role="webPerPageChars"]'); const webPerVal = by('[data-role="webPerPageCharsValue"]'); const webTotEl = by('[data-role="webTotalChars"]'); const webTotVal = by('[data-role="webTotalCharsValue"]');
+  // Chunking controls (Internet node supports tokens, lines, numbering)
+  const chEnableEl = by('[data-role="chunkEnable"]');
+  const chNodeToNodeEl = by('[data-role="chunkNodeToNode"]');
+  const chToSectionEl = by('[data-role="chunkToSection"]');
+  const chNumberedEl = by('[data-role="chunkNumbered"]');
+  const chLinesEl = by('[data-role="chunkLines"]');
+  const chBatchEl = by('[data-role="chunkBatchSize"]');
+  const chBatchValEl = by('[data-role="chunkBatchSizeVal"]');
+  const chTokensEl = by('[data-role="chunkTokens"]');
+  const chTokSizeEl = by('[data-role="chunkTokenSize"]');
+  const chTokSizeValEl = by('[data-role="chunkTokenSizeVal"]');
   const webLinkDepthEl = by('[data-role="webLinkDepth"]'); const webMaxPagesEl = by('[data-role="webMaxPages"]');
       const apiKeyEl = by('[data-role="apiKey"]'); const keyBadge = by('[data-role="keyStatus"]'); const roleBadge = by('[data-role="roleBadge"]');
       const headerNameEl = panel.querySelector('.drawer-head .meta .name');
@@ -249,6 +287,20 @@
   if (typeof saved.webMaxPages === 'number' && webMaxPagesEl) webMaxPagesEl.value = String(saved.webMaxPages);
       if (saved.apiKey && apiKeyEl) apiKeyEl.value = saved.apiKey;
       updateKeyBadge(); updateRoleBadge();
+      // Initialize chunking UI
+      if (typeof saved.chunkingEnabled==='boolean' && chEnableEl) chEnableEl.checked = !!saved.chunkingEnabled;
+      if (typeof saved.chunkNodeToNode==='boolean' && chNodeToNodeEl) chNodeToNodeEl.checked = !!saved.chunkNodeToNode; else if (chNodeToNodeEl) chNodeToNodeEl.checked = true;
+      if (typeof saved.chunkToSection==='boolean' && chToSectionEl) chToSectionEl.checked = !!saved.chunkToSection; else if (chToSectionEl) chToSectionEl.checked = true;
+      if (typeof saved.chunkUseNumbering==='boolean' && chNumberedEl) chNumberedEl.checked = !!saved.chunkUseNumbering;
+      if (typeof saved.chunkUseLines==='boolean' && chLinesEl) chLinesEl.checked = !!saved.chunkUseLines; else if (chLinesEl) chLinesEl.checked = true;
+      if (saved.chunkBatchSize && chBatchEl){ chBatchEl.value = String(Math.max(1, Math.min(50, Number(saved.chunkBatchSize)||3))); if(chBatchValEl) chBatchValEl.textContent = chBatchEl.value; }
+      if (typeof saved.chunkUseTokens==='boolean' && chTokensEl) chTokensEl.checked = !!saved.chunkUseTokens;
+      if (saved.chunkTokenSize && chTokSizeEl){ chTokSizeEl.value = String(Math.max(200, Math.min(2000, Number(saved.chunkTokenSize)||800))); if(chTokSizeValEl) chTokSizeValEl.textContent = chTokSizeEl.value; }
+      const updChunkDisabled = ()=>{
+        const on = !!(chEnableEl && chEnableEl.checked);
+        [chNodeToNodeEl, chToSectionEl, chNumberedEl, chLinesEl, chBatchEl, chTokensEl, chTokSizeEl].forEach(el=>{ if (el) el.disabled = !on; });
+      };
+      updChunkDisabled();
       modelEl?.addEventListener('change', ()=>persist({ model: modelEl.value }));
       topicEl?.addEventListener('input', ()=>{ persist({ topic: topicEl.value||'' }); updateRoleBadge(); });
       roleEl?.addEventListener('input', ()=>{ persist({ role: roleEl.value||'' }); updateRoleBadge(); });
@@ -288,6 +340,15 @@
   webLinkDepthEl?.addEventListener('change', ()=>persist({ webLinkDepth: Math.max(0, Math.min(10, Number(webLinkDepthEl.value)||0)) }));
   webMaxPagesEl?.addEventListener('change', ()=>persist({ webMaxPages: Math.max(1, Math.min(20, Number(webMaxPagesEl.value)||6)) }));
       apiKeyEl?.addEventListener('input', ()=>{ persist({ apiKey: apiKeyEl.value||'' }); updateKeyBadge(); });
+  // Chunking persistence
+  chEnableEl?.addEventListener('change', ()=>{ persist({ chunkingEnabled: !!chEnableEl.checked }); updChunkDisabled(); });
+  chNodeToNodeEl?.addEventListener('change', ()=>persist({ chunkNodeToNode: !!chNodeToNodeEl.checked }));
+  chToSectionEl?.addEventListener('change', ()=>persist({ chunkToSection: !!chToSectionEl.checked }));
+  chNumberedEl?.addEventListener('change', ()=>persist({ chunkUseNumbering: !!chNumberedEl.checked }));
+  chLinesEl?.addEventListener('change', ()=>persist({ chunkUseLines: !!chLinesEl.checked }));
+  chBatchEl?.addEventListener('input', ()=>{ const v=Math.max(1, Math.min(50, Number(chBatchEl.value)||3)); if (chBatchValEl) chBatchValEl.textContent=String(v); persist({ chunkBatchSize: v }); });
+  chTokensEl?.addEventListener('change', ()=>persist({ chunkUseTokens: !!chTokensEl.checked }));
+  chTokSizeEl?.addEventListener('input', ()=>{ const v=Math.max(200, Math.min(2000, Number(chTokSizeEl.value)||800)); if (chTokSizeValEl) chTokSizeValEl.textContent=String(v); persist({ chunkTokenSize: v }); });
       // Keep header/fab name in sync (read-only label here)
       try{ const nm = headerName; const fabLab = hostEl.querySelector('.fab-label'); if(fabLab) fabLab.textContent = nm; hostEl.dataset.displayName = nm; }catch{}
     }catch{}
@@ -332,7 +393,7 @@
 
   // Backend call: request a web-enabled reply for Internet node and route outputs
   function requestInternetReply(ownerId, ctx){
-    if(!ownerId || !ctx || !ctx.text) return;
+    if(!ownerId || !ctx || !ctx.text) return Promise.resolve();
     function setThinking(id, on){ try{ const host=document.querySelector(`.fab[data-id="${id}"]`); if(!host) return; const cur=Number(host.dataset.pending||0)||0; const next=on?(cur+1):Math.max(0,cur-1); host.dataset.pending=String(next); host.classList.toggle('busy', next>0); }catch{} }
     const detectApiBase = ()=>{
       try{ if (window.API_BASE && typeof window.API_BASE === 'string') return window.API_BASE; }catch{}
@@ -455,16 +516,38 @@
     // Announce start for UI (to show cancel button)
     try{ window.dispatchEvent(new CustomEvent('ai-request-started', { detail:{ ownerId, sourceId: ctx && ctx.sourceId ? String(ctx.sourceId) : null } })); }catch{}
     let __ok = false;
-    (async ()=>{
+    const run = async ()=>{
       try{
         // Prefer streaming
-        try{ await sendStreamOnce(body); }
-        catch(e){ if (String(e?.message||'')==='NO_STREAM') { const data = await sendJSONOnce(body); const reply = String(data?.reply||'') || (data?.error? ('Fel: '+data.error) : 'Tomt svar från AI'); let ts=Date.now(); try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant'); ts = entry?.ts || ts; } }catch{}; if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts }); try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts }); }catch{} } else { throw e; } }
-  // success
-  __ok = true;
-      }catch(err){ const msg = 'Fel vid webbsökning: ' + (err?.message || String(err)); let ts = Date.now(); try{ if(window.graph){ const entry=window.graph.addMessage(ownerId, author, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}; try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{} }
-      finally{ setTimeout(()=>{ try{ setThinking(ownerId, false); }catch{} }, 700); try{ if (window.__aiInflight && window.__aiInflight.get && window.__aiInflight.get(ownerId) === controller) window.__aiInflight.delete(ownerId); }catch{} try{ window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, ok: __ok } })); }catch{} }
-    })();
+        try{ return await sendStreamOnce(body); }
+        catch(e){
+          if (String(e?.message||'')==='NO_STREAM') {
+            const data = await sendJSONOnce(body);
+            const reply = String(data?.reply||'') || (data?.error? ('Fel: '+data.error) : 'Tomt svar från AI');
+            let ts=Date.now();
+            try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant'); ts = entry?.ts || ts; } }catch{}
+            try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', { ts }); }catch{}
+            try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, { author, who:'assistant', ts }); }catch{}
+            return { reply };
+          } else { throw e; }
+        }
+      } finally {
+        __ok = true;
+      }
+    };
+    // Ensure cleanup and events even when awaited by callers
+    const p = run().catch(err=>{
+      const msg = 'Fel vid webbsökning: ' + (err?.message || String(err));
+      let ts = Date.now();
+      try{ if(window.graph){ const entry=window.graph.addMessage(ownerId, author, msg, 'assistant'); ts = entry?.ts || ts; } }catch{}
+      try{ if(window.receiveMessage) window.receiveMessage(ownerId, msg, 'assistant', { ts }); }catch{}
+      return { error: msg };
+    }).finally(()=>{
+      setTimeout(()=>{ try{ setThinking(ownerId, false); }catch{} }, 700);
+      try{ if (window.__aiInflight && window.__aiInflight.get && window.__aiInflight.get(ownerId) === controller) window.__aiInflight.delete(ownerId); }catch{}
+      try{ window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, ok: __ok } })); }catch{}
+    });
+    return p;
   }
 
   // expose

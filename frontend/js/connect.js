@@ -87,9 +87,12 @@
   // Smart chunking for large payloads going into coworker nodes to avoid 400s
   try{
     const host = document.querySelector(`.fab[data-id="${targetId}"]`);
-    const isCoworkerTarget = !!(host && host.dataset.type === 'coworker');
-    const srcHost = document.querySelector(`.fab[data-id="${sourceId}"]`);
-    const isCoworkerSource = !!(srcHost && srcHost.dataset.type === 'coworker');
+  const isCoworkerTarget = !!(host && host.dataset.type === 'coworker');
+  const isInternetTarget = !!(host && host.dataset.type === 'internet');
+  const srcHost = document.querySelector(`.fab[data-id="${sourceId}"]`);
+  const isCoworkerSource = !!(srcHost && srcHost.dataset.type === 'coworker');
+  const isInternetSource = !!(srcHost && srcHost.dataset.type === 'internet');
+  const isUserSource = !!(srcHost && srcHost.dataset.type === 'user');
     // Settings-driven backpressure & chunkning (remove controller):
     // Read coworker settings of source node (controls) and apply when sending to another coworker
     const readNodeSettings = (id)=>{ try{ const raw = localStorage.getItem(`nodeSettings:${id}`); return raw ? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
@@ -107,7 +110,7 @@
       const batchSize = Math.max(1, Math.min(50, Number(srcSettings.chunkBatchSize||3)));
       const tokenSize = Math.max(200, Math.min(2000, Number(srcSettings.chunkTokenSize||800)));
       // 1) Numbered chunking (strongest) → strict backpressure per numbered block
-      if (isCoworkerSource && chunkEnabled && allowNodeToNode && useNumbering && window.chunking && typeof window.chunking.splitByNumbering==='function'){
+      if ((isCoworkerSource || isInternetSource || isUserSource) && chunkEnabled && allowNodeToNode && useNumbering && window.chunking && typeof window.chunking.splitByNumbering==='function'){
         const parts = window.chunking.splitByNumbering(text);
         if (Array.isArray(parts) && parts.length>1){
           (async ()=>{
@@ -119,14 +122,18 @@
               try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
               try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
               try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
-              try{ if (window.requestAIReply) await window.requestAIReply(targetId, { text: payload, sourceId }); }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
+              try{
+                const tType = host?.dataset?.type;
+                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payload, sourceId }); }
+                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payload, sourceId }); }
+              }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
             }
           })();
           return true;
         }
       }
       // 2) Line chunking
-      if (isCoworkerSource && chunkEnabled && allowNodeToNode && useLines){
+      if ((isCoworkerSource || isInternetSource || isUserSource) && chunkEnabled && allowNodeToNode && useLines){
         const parts = makeLineBatches(text, batchSize);
         if (Array.isArray(parts) && parts.length>1){
           (async ()=>{
@@ -138,14 +145,18 @@
               try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
               try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
               try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
-              try{ if (window.requestAIReply) await window.requestAIReply(targetId, { text: payload, sourceId }); }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
+              try{
+                const tType = host?.dataset?.type;
+                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payload, sourceId }); }
+                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payload, sourceId }); }
+              }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
             }
           })();
           return true;
         }
       }
       // Token-based chunking (optional): when enabled and oversized for configured tokenSize
-      if (isCoworkerTarget && chunkEnabled && allowNodeToNode && useTokens){
+      if ((isCoworkerTarget || isInternetTarget) && chunkEnabled && allowNodeToNode && useTokens && !isUserSource){
         const totalT = approxTokens(text);
         const maxT = tokenSize || estimateChunkBudget();
         if (totalT > maxT){
@@ -160,7 +171,11 @@
               try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
               try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
               try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
-              try{ if (window.requestAIReply) await window.requestAIReply(targetId, { text: payload, sourceId }); }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
+              try{
+                const tType = host?.dataset?.type;
+                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payload, sourceId }); }
+                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payload, sourceId }); }
+              }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
             }
           })();
           return true;
@@ -181,7 +196,11 @@
           try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
           try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
           try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
-          try{ if (window.requestAIReply) await window.requestAIReply(targetId, { text: payload, sourceId }); }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
+          try{
+            const tType = host?.dataset?.type;
+            if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payload, sourceId }); }
+            else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payload, sourceId }); }
+          }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
         }
       })();
       return true;
@@ -631,7 +650,11 @@
           else { const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if (raw){ const s=JSON.parse(raw)||{}; if (s.renderMode) renderMode = String(s.renderMode); } }
         }catch{}
         if (renderMode === 'md' && window.mdToHtml){
-          try{ ui.textEl.innerHTML = sanitizeHtml(window.mdToHtml(finalText)); }catch{ ui.textEl.textContent = finalText; }
+          try{
+            const html = window.mdToHtml(finalText);
+            if (typeof window.sanitizeHtml === 'function') ui.textEl.innerHTML = window.sanitizeHtml(html);
+            else ui.textEl.innerHTML = html;
+          }catch{ ui.textEl.textContent = finalText; }
         } else { ui.textEl.textContent = finalText; }
         // citations under bubble
         try{

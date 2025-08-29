@@ -192,8 +192,32 @@
     const composerEl = panel.querySelector('.composer');
     const ownerId = panel.dataset.ownerId||'';
     const lsKey = (id)=>`nodeSettings:${id}`;
+    // Persist unsent draft text per node so it survives panel close/reopen
+    const draftKey = ownerId ? `nodeDraft:${ownerId}` : '';
     const readSaved = ()=>{ let s={}; try{ if(window.graph && ownerId) s = Object.assign({}, window.graph.getNodeSettings(ownerId)||{}); }catch{} try{ const raw = localStorage.getItem(lsKey(ownerId)); if(raw){ s = Object.assign({}, s, JSON.parse(raw)||{}); } }catch{} return s; };
     const persist = (partial)=>{ try{ if(window.graph && ownerId) window.graph.setNodeSettings(ownerId, partial||{}); }catch{} try{ const cur = readSaved(); const next = Object.assign({}, cur, partial||{}); localStorage.setItem(lsKey(ownerId), JSON.stringify(next)); }catch{} };
+    // Load persisted draft into textarea on open
+    try{ if (ta && draftKey){ const d = localStorage.getItem(draftKey); if (typeof d === 'string'){ ta.value = d; } } }catch{}
+    // Auto-grow textarea up to max-height; then allow inner scroll
+    const autosize = ()=>{
+      try{
+        if (!ta) return;
+        const s = getComputedStyle(ta);
+        const maxH = Math.max(80, parseInt(s.maxHeight||'300', 10)||300);
+        ta.style.height = 'auto';
+        const h = Math.min(ta.scrollHeight, maxH);
+        ta.style.height = h + 'px';
+        ta.style.overflowY = (ta.scrollHeight > maxH) ? 'auto' : 'hidden';
+      }catch{}
+    };
+    // Save draft on input and resize
+    try{
+      if (ta){
+        ta.addEventListener('input', ()=>{ try{ if (draftKey) localStorage.setItem(draftKey, ta.value||''); }catch{} autosize(); });
+        // Initial autosize
+        setTimeout(autosize, 0);
+      }
+    }catch{}
     const ensureSendModeUI = ()=>{
       if (!composerEl || !send) return;
       // Create a small toggle button and menu
@@ -330,7 +354,7 @@
     // Kept for potential local-only preview use, but DO NOT call when routing or calling backends.
     const buildMessageWithAttachments = (val)=>{ return val; };
   const clearAttachments = ()=>{ try{ panel._attachments = []; savePersistedAtt([]); renderAttachments(); }catch{} };
-    const doSend=()=>{ const val=(ta.value||'').trim(); if(!val) return; const ownerId=panel.dataset.ownerId||null; const authorLabel = panel.querySelector('.drawer-head .meta .name'); const author = (authorLabel?.textContent||'User').trim(); let ts=Date.now(); try{ if(ownerId && window.graph){ const entry = window.graph.addMessage(ownerId, author, val, 'user'); ts = entry?.ts || ts; } }catch{} append(val,'user', ts);
+  const doSend=()=>{ const val=(ta.value||'').trim(); if(!val) return; const ownerId=panel.dataset.ownerId||null; const authorLabel = panel.querySelector('.drawer-head .meta .name'); const author = (authorLabel?.textContent||'User').trim(); let ts=Date.now(); try{ if(ownerId && window.graph){ const entry = window.graph.addMessage(ownerId, author, val, 'user'); ts = entry?.ts || ts; } }catch{} append(val,'user', ts);
       // Determine send mode
       let mode = 'current'; try{ mode = panel._sendMode || (readSaved().sendMode||'current'); }catch{}
       const entries = (window.graph && ownerId) ? (window.graph.getMessages(ownerId)||[]) : [];
@@ -356,6 +380,8 @@
       else if (mode === 'history-seq') sendHistorySeq();
       else sendCurrent();
   ta.value='';
+  try{ if (draftKey) localStorage.removeItem(draftKey); }catch{}
+  try{ autosize(); }catch{}
       // If Internet panel, kick off web-enabled reply via backend (no inline attachments)
   try{ const host = document.querySelector(`.fab[data-id="${ownerId}"]`); if(host && host.dataset.type==='internet' && window.requestInternetReply){ const payload = lastSent || val; window.requestInternetReply(ownerId, { text: payload }); } }catch{}
       // If CoWorker panel, optionally kick off AI reply via backend (self chat) if enabled in settings
@@ -437,6 +463,25 @@
           <option value="md" selected>Snyggt (Markdown)</option>
         </select>
       </label>
+      <fieldset style="margin:8px 0; padding:8px; border:1px solid #28283a; border-radius:8px;">
+        <legend class="subtle" style="padding:0 6px;">Chunkning</legend>
+        <label class="inline">
+          <input type="checkbox" data-role="chunkEnable" /> Aktivera chunkning
+        </label>
+        <div data-role="chunkScope" style="margin-left:20px; display:grid; gap:6px; margin-top:6px;">
+          <label class="inline"><input type="checkbox" data-role="chunkNodeToNode" checked /> Mellan noder</label>
+          <label class="inline"><input type="checkbox" data-role="chunkToSection" checked /> Till sektioner</label>
+          <div style="display:grid; gap:6px;">
+            <label class="inline"><input type="checkbox" data-role="chunkUseLines" checked /> Radchunkning (rader/batch)</label>
+            <label style="margin-left:22px;">
+              <input type="range" min="1" max="50" step="1" value="3" data-role="chunkAgg" />
+              <div class="subtle"><span data-role="chunkAggValue">3</span> rader/batch</div>
+            </label>
+            <label class="inline"><input type="checkbox" data-role="chunkUseNumbering" /> Numrerad chunkning (1., 2), 3: ...)</label>
+            <div class="subtle" style="margin-left:22px;">Splitta per numrerad rubrik så att varje del (t.ex. 1–10) blir en egen prompt.</div>
+          </div>
+        </div>
+      </fieldset>
       <div style="margin-top:10px;display:flex;justify-content:flex-end">
         <button type="button" class="btn danger" data-action="resetAll" title="Nollställ">Nollställ</button>
       </div>
@@ -506,6 +551,32 @@
   // Initialize from saved userDisplayName if present
   try{ const saved = readSavedU(); const initName = (typeof saved.userDisplayName==='string' && saved.userDisplayName.trim()) ? saved.userDisplayName : (hostEl.dataset.displayName||'User'); if(nameInput) nameInput.value = initName; applyUserName(initName); }catch{ applyUserName(hostEl.dataset.displayName||'User'); }
   nameInput?.addEventListener('input', ()=>{ panel._displayName=(nameInput.value||''); const nameText=panel._displayName.trim()||'User'; applyUserName(nameText); persistU({ userDisplayName: nameText }); });
+  // Initialize chunking controls (User: no token chunking)
+  try{
+    const chunkEnableEl = panel.querySelector('[data-role="chunkEnable"]');
+    const chunkScopeWrap = panel.querySelector('[data-role="chunkScope"]');
+    const chunkNodeToNodeEl = panel.querySelector('[data-role="chunkNodeToNode"]');
+    const chunkToSectionEl = panel.querySelector('[data-role="chunkToSection"]');
+    const chunkUseLinesEl = panel.querySelector('[data-role="chunkUseLines"]');
+    const chunkUseNumberingEl = panel.querySelector('[data-role="chunkUseNumbering"]');
+    const chunkAggEl = panel.querySelector('[data-role="chunkAgg"]');
+    const chunkAggVal = panel.querySelector('[data-role="chunkAggValue"]');
+    const savedU = readSavedU();
+    if (chunkEnableEl) chunkEnableEl.checked = !!savedU.chunkingEnabled;
+    if (chunkScopeWrap){ const en = !!chunkEnableEl?.checked; chunkScopeWrap.style.opacity = en ? '1' : '0.6'; chunkScopeWrap.style.pointerEvents = en ? '' : 'none'; }
+    if (chunkNodeToNodeEl) chunkNodeToNodeEl.checked = (savedU.chunkNodeToNode!==undefined) ? !!savedU.chunkNodeToNode : true;
+    if (chunkToSectionEl) chunkToSectionEl.checked = (savedU.chunkToSection!==undefined) ? !!savedU.chunkToSection : true;
+    if (chunkUseLinesEl) chunkUseLinesEl.checked = (savedU.chunkUseLines!==undefined) ? !!savedU.chunkUseLines : true;
+    if (chunkUseNumberingEl) chunkUseNumberingEl.checked = (savedU.chunkUseNumbering!==undefined) ? !!savedU.chunkUseNumbering : false;
+    if (chunkAggEl){ const n=Math.max(1, Math.min(50, Number(savedU.chunkBatchSize||3))); chunkAggEl.value=String(n); if (chunkAggVal) chunkAggVal.textContent=String(n); }
+    const updateChunkUIU = ()=>{ try{ const en = !!chunkEnableEl?.checked; if (chunkScopeWrap){ chunkScopeWrap.style.opacity = en ? '1' : '0.6'; chunkScopeWrap.style.pointerEvents = en ? '' : 'none'; } }catch{} };
+    chunkEnableEl?.addEventListener('change', ()=>{ persistU({ chunkingEnabled: !!chunkEnableEl.checked }); updateChunkUIU(); });
+    chunkNodeToNodeEl?.addEventListener('change', ()=>persistU({ chunkNodeToNode: !!chunkNodeToNodeEl.checked }));
+    chunkToSectionEl?.addEventListener('change', ()=>persistU({ chunkToSection: !!chunkToSectionEl.checked }));
+    chunkUseLinesEl?.addEventListener('change', ()=>persistU({ chunkUseLines: !!chunkUseLinesEl.checked }));
+    chunkUseNumberingEl?.addEventListener('change', ()=>persistU({ chunkUseNumbering: !!chunkUseNumberingEl.checked }));
+    chunkAggEl?.addEventListener('input', ()=>{ const n=Math.max(1, Math.min(50, Number(chunkAggEl.value)||3)); if (chunkAggVal) chunkAggVal.textContent=String(n); persistU({ chunkBatchSize: n }); });
+  }catch{}
   panel.querySelector('[data-action="resetAll"]')?.addEventListener('click', ()=>{ panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true; const m=messagesEl; if(m) m.innerHTML=''; if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value='10'; if(alphaVal) alphaVal.textContent='10%'; if(fontTextSel){ fontTextSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; } if(fontNameSel){ fontNameSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); } if(renderSel){ renderSel.value='md'; } applyBubbleStyles(); });
   panel.querySelector('[data-close]')?.addEventListener('click', ()=>{ document.removeEventListener('click', onDocClick); panel.remove(); });
     // Render historical messages if any
