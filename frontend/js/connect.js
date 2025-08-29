@@ -597,6 +597,83 @@
         }catch{}
       });
     };
+  // Stream feedback deltas into fullscreen/regular section when grading
+    const feedbackCtx = (function(){
+      try{
+        const sid = String((ctx && ctx.sourceId) || '') || '';
+        if (!sid) return null;
+        // Only stream if this coworker is the selected grader for the section
+        const rawP = localStorage.getItem(`sectionParking:${sid}`);
+        const park = rawP ? (JSON.parse(rawP)||{}) : {};
+        if (!park || String(park.grader||'') !== String(ownerId)) return null;
+        // Prefer explicit fullscreen marker; else fall back to DOM dataset for the live section panel
+        let markerType = 'ls';
+        let v = localStorage.getItem(`sectionPendingFeedback:${sid}`);
+        if (v==null){
+          const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`);
+          const ds = sec && sec.dataset ? sec.dataset.pendingFeedback : undefined;
+          if (ds !== undefined) { v = ds; markerType = 'dom'; }
+        }
+        if (v==null) return null;
+        const idx = Math.max(0, Number(v)||0);
+        return { sid, idx, markerType };
+      }catch{ return null; }
+    })();
+    const appendDeltaToFeedback = (delta)=>{
+      try{
+        if (!feedbackCtx) return;
+        const { sid, idx } = feedbackCtx;
+        const key = `sectionExercises:${sid}`;
+        const roundKey = `sectionExercisesRound:${sid}`;
+        let arr = []; try{ arr = JSON.parse(localStorage.getItem(key)||'[]')||[]; }catch{ arr=[]; }
+        if (!arr[idx]) return;
+        let round = 1; try{ round = Math.max(1, Number(localStorage.getItem(roundKey)||'1')||1); }catch{}
+        if (!Array.isArray(arr[idx].fbRounds)) arr[idx].fbRounds = (arr[idx].fb? [String(arr[idx].fb)] : []);
+        const rIndex = round - 1; while (arr[idx].fbRounds.length <= rIndex) arr[idx].fbRounds.push('');
+        const prev = String(arr[idx].fbRounds[rIndex]||'');
+        arr[idx].fbRounds[rIndex] = prev + String(delta||'');
+        localStorage.setItem(key, JSON.stringify(arr));
+        try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+        try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
+        try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`); if (sec) sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } })); }catch{}
+      }catch{}
+    };
+    // Stream improvement deltas into the exercise question when improving
+    const improveCtx = (function(){
+      try{
+        const sid = String((ctx && ctx.sourceId) || '') || '';
+        if (!sid) return null;
+        const rawP = localStorage.getItem(`sectionParking:${sid}`);
+        const park = rawP ? (JSON.parse(rawP)||{}) : {};
+        if (!park || String(park.improver||'') !== String(ownerId)) return null;
+        // Prefer fullscreen marker; else fall back to section DOM dataset
+        let v = localStorage.getItem(`sectionPendingImprove:${sid}`);
+        if (v==null){
+          const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`);
+          const ds = sec && sec.dataset ? sec.dataset.pendingImprove : undefined;
+          if (ds !== undefined) v = ds;
+        }
+        if (v==null) return null;
+        const idx = Math.max(0, Number(v)||0);
+        return { sid, idx };
+      }catch{ return null; }
+    })();
+    let improveBuf = '';
+    const appendDeltaToImprovement = (delta)=>{
+      try{
+        if (!improveCtx) return;
+        const { sid, idx } = improveCtx;
+        const key = `sectionExercises:${sid}`;
+        let arr = []; try{ arr = JSON.parse(localStorage.getItem(key)||'[]')||[]; }catch{ arr=[]; }
+        if (!arr[idx]) return;
+        improveBuf += String(delta||'');
+        arr[idx].q = String(improveBuf);
+        localStorage.setItem(key, JSON.stringify(arr));
+        try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+        try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
+        try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`); if (sec) sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } })); }catch{}
+      }catch{}
+    };
     let finalCitations = [];
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
@@ -631,6 +708,10 @@
               }
               // Also stream into connected/parked sections
               try{ appendDeltaToSections(d); }catch{}
+              // And stream into exercises feedback if active
+              try{ appendDeltaToFeedback(d); }catch{}
+              // And stream into exercises improvement (question text) if active
+              try{ appendDeltaToImprovement(d); }catch{}
             }
           } else if (kind === 'error'){
             throw new Error(String(obj?.error||'Strömfel'));
@@ -696,7 +777,24 @@
   // End section streaming sessions
   try{ streamedSids.forEach(sid=>{ if (window.sectionStream && window.sectionStream.end) window.sectionStream.end(sid); }); }catch{}
     // Completion event
-    try{ const src = (payload && payload.sourceId) ? String(payload.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: true } })); }catch{}
+    try{
+      // If grading, clear pending marker (both fullscreen key and live section dataset)
+      if (feedbackCtx && feedbackCtx.sid){
+        try{ localStorage.removeItem(`sectionPendingFeedback:${feedbackCtx.sid}`); }catch{}
+        try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${feedbackCtx.sid}"]`); if (sec && sec.dataset) delete sec.dataset.pendingFeedback; }catch{}
+        try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+        try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: feedbackCtx.sid } })); }catch{}
+      }
+      // If improving, clear pending marker too (both fullscreen key and live section dataset)
+      if (improveCtx && improveCtx.sid){
+        try{ localStorage.removeItem(`sectionPendingImprove:${improveCtx.sid}`); }catch{}
+        try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${improveCtx.sid}"]`); if (sec && sec.dataset) delete sec.dataset.pendingImprove; }catch{}
+        try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+        try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: improveCtx.sid } })); }catch{}
+      }
+      const src = (ctx && ctx.sourceId) ? String(ctx.sourceId) : null;
+      window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: true } }));
+    }catch{}
     return { reply: finalText, citations: finalCitations };
   };
   let triedFallback = false;

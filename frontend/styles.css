@@ -46,7 +46,9 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 }
 .panel.board-section .ex-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .panel.board-section .ex-q-focus{
-  flex:1; min-height:0; overflow:auto; outline:none; white-space:pre-wrap; line-height:1.5; font-size:14px; color:#e6e6ec;
+  /* Keep a consistent viewport-based height so content scrolls instead of resizing the panel */
+  height:40vh; max-height:50vh;
+  flex:none; min-height:0; overflow:auto; outline:none; white-space:pre-wrap; line-height:1.5; font-size:14px; color:#e6e6ec;
   background:transparent; border:1px dashed #2a2a35; border-radius:8px; padding:8px;
 }
 /* Normalize markdown inside question so size doesn’t jump between items */

@@ -9,7 +9,8 @@
   function ensureStyles(){
     if (document.getElementById('bubbleEffectStyles')) return;
   const css = `
-  .fx-bubble-layer{ position:absolute; inset:0; pointer-events:none; overflow:visible; z-index:30; }
+  /* Layer sits inside a positioned host; keep above card loaders (z:20) but below menus/tooltips */
+  .fx-bubble-layer{ position:absolute; inset:0; pointer-events:none; overflow:visible; z-index:40; }
   .fx-bubble{ position:absolute; max-width: 60%; transform-origin: center; will-change: transform, opacity; animation: bubble-float var(--bubble-float-dur, 20s) linear forwards; background:transparent; }
   .fx-bubble-i{ color:#e8e8ff; padding:8px 12px; border-radius:999px; border:1px solid rgba(140,160,255,.35);
       background: transparent;
@@ -52,6 +53,11 @@
       if (!host) throw new Error('BubbleEffect requires a host element');
       ensureStyles();
       this.host = host;
+      // Make sure host creates a positioning context for the absolute layer
+      try{
+        const cs = getComputedStyle(this.host);
+        if (!cs || cs.position === 'static') this.host.style.position = 'relative';
+      }catch{}
   this.opts = Object.assign({ startOffsetY: -72, dur: 20000 }, options||{});
   this.layer = host.querySelector(':scope > .fx-bubble-layer');
   if (!this.layer){ this.layer = document.createElement('div'); this.layer.className='fx-bubble-layer'; host.appendChild(this.layer); }
