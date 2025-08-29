@@ -18,20 +18,20 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 
 /* Node Board */
 #nodeBoard{position:relative;width:100%;z-index:1500;padding:14px 16px 6px 16px;backdrop-filter:blur(2px);height:auto;overflow:visible}
-#nodeBoard .nb-sections{display:grid;grid-template-columns:repeat(3,minmax(240px,1fr));gap:12px;padding-right:6px}
+#nodeBoard .nb-sections{display:grid;grid-template-columns:repeat(3,minmax(280px,1fr));gap:14px;padding-right:6px}
 #nodeBoard .nb-sec{position:relative;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:8px 8px 12px;background:rgba(0,0,0,0.25)}
 #nodeBoard .nb-title{position:relative;z-index:1100;font-weight:600;letter-spacing:.2px;margin:2px 0 8px 4px}
 #nodeBoard .nb-grid{position:relative;height:320px;min-height:320px;background-image:linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px);background-size:24px 100%, 100% 24px;border-radius:8px}
 #nodeBoard .nb-grid::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.12) 15%, rgba(255,255,255,0.12) 85%, transparent 100%);border-bottom-left-radius:8px;border-bottom-right-radius:8px;pointer-events:none}
 
-.layout{overflow:auto;padding:0 18px 96px}
-.content{padding:16px 0 96px}
-.panel{position:relative;z-index:2000;border:1px solid #23232b;background:linear-gradient(180deg,#121219,#0e0e14);border-radius:12px;box-shadow:var(--shadow);margin-bottom:12px}
+.layout{overflow:auto;padding:0 10px 96px}
+.content{padding:8px 0 96px}
+.panel{position:relative;z-index:2000;border:1px solid #23232b;background:linear-gradient(180deg,#121219,#0e0e14);border-radius:12px;box-shadow:var(--shadow);margin-bottom:10px}
 .panel .head{display:flex;align-items:baseline;gap:10px;padding:10px 72px 10px 12px;border-bottom:1px solid #23232b;position:relative}
 .panel .head h2{margin:0;font-size:16px}
 .panel .body{padding:12px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.grid{display:grid;grid-template-columns:1.1fr 1fr;gap:12px}
+@media (max-width:1100px){.grid{grid-template-columns:1fr}}
 
 /* Exercises focus split view (Övningsblock) */
 .panel.board-section .ex-left,
@@ -201,7 +201,7 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 .conn-point.io-out:hover::after{ content:'Output'; }
 
 /* Flyout chat panel (visual only) */
-.panel-flyout{position:fixed;z-index:11020;max-width:92vw;max-height:85vh;display:flex;flex-direction:column;background:linear-gradient(180deg,var(--panel),#0f0f13);border:1px solid #23232b;border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,0.6);opacity:0;transform:scale(.85);transition:opacity .22s ease, transform .22s cubic-bezier(.18,.7,.2,1.02);pointer-events:none}
+.panel-flyout{position:fixed;z-index:11020;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;background:linear-gradient(180deg,var(--panel),#0f0f13);border:1px solid #23232b;border-radius:12px;box-shadow:0 18px 48px rgba(0,0,0,0.6);opacity:0;transform:scale(.85);transition:opacity .22s ease, transform .22s cubic-bezier(.18,.7,.2,1.02);pointer-events:none}
 .panel-flyout{min-width:280px;min-height:200px}
 .panel-flyout.show{opacity:1;transform:scale(1);pointer-events:auto}
 .panel-flyout .drawer-head{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid #23232b;cursor:move}
