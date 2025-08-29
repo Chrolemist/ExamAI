@@ -630,13 +630,23 @@
       <button class="icon-btn" data-close>✕</button>
     </header>
     <div class="settings collapsed" data-role="settings">
-      <label>Modell
+      <label>Modell (text)
         <select data-role="model">
-          <option value="gpt-4o-mini">gpt-4o-mini</option>
+          <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+          <option value="gpt-4o">gpt-4o</option>
+          <option value="gpt-4.1-turbo">gpt-4.1-turbo</option>
           <option value="gpt-5">gpt-5</option>
-          <option value="gpt-5-mini" selected>gpt-5-mini</option>
+          <option value="gpt-5-mini">gpt-5-mini</option>
           <option value="gpt-5-nano">gpt-5-nano</option>
           <option value="3o">3o</option>
+        </select>
+      </label>
+      <label>Modell (Python)
+        <select data-role="modelPy">
+          <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+          <option value="gpt-4o">gpt-4o</option>
+          <option value="gpt-4.1-turbo">gpt-4.1-turbo</option>
+          <option value="gpt-5">gpt-5</option>
         </select>
       </label>
       <label>Copilot-namn
@@ -694,6 +704,14 @@
       <label>API-nyckel (denna copilot)
         <input type="password" placeholder="Valfri – annars används global" data-role="apiKey" />
       </label>
+      <fieldset style="margin:8px 0; padding:8px; border:1px solid #28283a; border-radius:8px;">
+        <legend class="subtle" style="padding:0 6px;">Verktyg</legend>
+        <label class="inline"><input type="checkbox" data-role="enableTools" /> Tillåt verktyg (function calling)</label>
+        <div class="subtle" style="margin-left:22px;">Aktivera t.ex. Python‑verktyget så att modellen kan köra kod.</div>
+        <label class="inline" style="margin-top:6px; display:block;">
+          <input type="checkbox" data-role="forcePython" /> Kräv Python vid beräkningar (tvinga run_python)
+        </label>
+      </fieldset>
     </div>
     <div class="messages" data-role="messages"></div>
     <div class="attachments hidden" data-role="attachments" aria-label="Bilagor (drag & släpp)"></div>
@@ -774,7 +792,8 @@
         try{ const cur = readSaved(); const next = Object.assign({}, cur, partial||{}); localStorage.setItem(lsKey(ownerId), JSON.stringify(next)); }catch{}
       };
       const by = (sel)=>panel.querySelector(sel);
-      const modelEl = by('[data-role="model"]');
+  const modelEl = by('[data-role="model"]');
+  const modelPyEl = by('[data-role="modelPy"]');
       const nameEl = by('[data-role="name"]');
       const topicEl = by('[data-role="topic"]');
       const roleEl = by('[data-role="role"]');
@@ -798,7 +817,9 @@
       
       const renderEl = by('[data-role="renderMode"]');
   // Web search settings removed from CoWorker; handled by Internet node
-      const apiKeyEl = by('[data-role="apiKey"]');
+  const apiKeyEl = by('[data-role="apiKey"]');
+  const enableToolsEl = by('[data-role="enableTools"]');
+  const forcePythonEl = by('[data-role="forcePython"]');
       const keyBadge = by('[data-role="keyStatus"]');
       const roleBadge = by('[data-role="roleBadge"]');
       const headerNameEl = panel.querySelector('.drawer-head .meta .name');
@@ -847,7 +868,8 @@
       };
       const saved = readSaved();
       // Initialize controls from saved settings
-      if (saved.model && modelEl) modelEl.value = saved.model;
+  if (saved.model && modelEl) modelEl.value = saved.model;
+  if (saved.modelPy && modelPyEl) modelPyEl.value = saved.modelPy;
       if (saved.name && nameEl) { nameEl.value = saved.name; updateName(saved.name); }
       if (saved.topic && topicEl) topicEl.value = saved.topic;
       if (saved.role && roleEl) roleEl.value = saved.role;
@@ -875,11 +897,28 @@
       
       if (saved.renderMode && renderEl) renderEl.value = saved.renderMode;
   // no web settings for coworker anymore
-      if (saved.apiKey && apiKeyEl) { apiKeyEl.value = saved.apiKey; }
+  if (saved.apiKey && apiKeyEl) { apiKeyEl.value = saved.apiKey; }
+      if (enableToolsEl){
+        if (saved.enableTools === undefined){
+          enableToolsEl.checked = true;
+          try{ persist({ enableTools: true }); }catch{}
+        } else {
+          enableToolsEl.checked = !!saved.enableTools;
+        }
+      }
+      if (forcePythonEl){
+        if (saved.forcePython === undefined){
+          forcePythonEl.checked = true;
+          try{ persist({ forcePython: true }); }catch{}
+        } else {
+          forcePythonEl.checked = !!saved.forcePython;
+        }
+      }
       updateKeyBadge();
       updateRoleBadge();
       // Wire events to persist immediately
-      modelEl?.addEventListener('change', ()=>persist({ model: modelEl.value }));
+  modelEl?.addEventListener('change', ()=>persist({ model: modelEl.value }));
+  modelPyEl?.addEventListener('change', ()=>persist({ modelPy: modelPyEl.value }));
       nameEl?.addEventListener('input', ()=>{ const v=nameEl.value||''; updateName(v); persist({ name: v }); });
       topicEl?.addEventListener('input', ()=>{ persist({ topic: topicEl.value||'' }); updateRoleBadge(); });
       roleEl?.addEventListener('input', ()=>{ persist({ role: roleEl.value||'' }); updateRoleBadge(); });
@@ -901,7 +940,9 @@
       
       renderEl?.addEventListener('change', ()=>persist({ renderMode: renderEl.value }));
   // removed web listeners
-      apiKeyEl?.addEventListener('input', ()=>{ persist({ apiKey: apiKeyEl.value||'' }); updateKeyBadge(); });
+  apiKeyEl?.addEventListener('input', ()=>{ persist({ apiKey: apiKeyEl.value||'' }); updateKeyBadge(); });
+  enableToolsEl?.addEventListener('change', ()=>{ persist({ enableTools: !!enableToolsEl.checked }); });
+  forcePythonEl?.addEventListener('change', ()=>{ persist({ forcePython: !!forcePythonEl.checked }); });
     }catch{}
   // Render historical messages if any
     try{
@@ -1092,6 +1133,18 @@
     author.textContent = authorName;
   const b=document.createElement('div'); b.className='bubble '+(who==='user'?'user':'');
     const textEl=document.createElement('div'); textEl.className='msg-text';
+    // If executed tool code is available, show a collapsible section above the text
+    try{
+      const td = meta && meta.tool_debug ? meta.tool_debug : null;
+      const code = td && td.name === 'run_python' ? String(td.code||'') : '';
+      if (code){
+        const details = document.createElement('details'); details.open = false; details.style.marginBottom='6px';
+        const summary = document.createElement('summary'); summary.textContent = 'Visa Pythonkoden som kördes';
+        const pre = document.createElement('pre'); pre.className = 'tool-code'; pre.textContent = code;
+        details.appendChild(summary); details.appendChild(pre);
+        b.appendChild(details);
+      }
+    }catch{}
     // Determine if this panel should render markdown for assistant messages (coworker) or for user panel mode
   let renderMode = 'md';
     try{

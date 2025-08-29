@@ -100,6 +100,10 @@ def create_app():
         from .routes.sliding import sliding_bp  # type: ignore
     except Exception:
         from routes.sliding import sliding_bp  # type: ignore
+    try:
+        from .routes.tools import tools_bp  # type: ignore
+    except Exception:
+        from routes.tools import tools_bp  # type: ignore
 
     app.register_blueprint(chat_bp)
     app.register_blueprint(upload_bp)
@@ -108,6 +112,7 @@ def create_app():
     app.register_blueprint(rag_bp)
     app.register_blueprint(summarize_bp)
     app.register_blueprint(sliding_bp)
+    app.register_blueprint(tools_bp)
     return app
 
 

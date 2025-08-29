@@ -6,6 +6,7 @@
 // - O: Lägg nya visuella effekter som separata helpers utan att röra routing.
 // - I: Exportera ett litet API (startConnection, finalizeConnection, updateConnectionsFor, routeMessageFrom).
 // - D: requestAIReply/internet-reply bör vara injicerbara beroenden (t.ex. window.requestAIReply) i stället för direkt fetch.
+console.log('[DEBUG] connect.js loaded with tool debugging enabled');
 (function(){
   const svg = () => window.svg;
   const { ensureDefs, makePath, makeHitPath, drawPath, triggerFlowEffect } = (window.svgHelpers||{});
@@ -14,7 +15,11 @@
   function enqueueNodeWork(targetId, task){
     try{
       const q = window.__nodeQueues.get(targetId) || Promise.resolve();
-      const next = q.then(async ()=>{ try{ await task(); }catch(e){ console.warn('[queue] task error for', targetId, e); } });
+      const next = q.then(async ()=>{ try{ await task(); }catch(e){
+        // Ignore benign aborts to reduce console noise when streams are canceled or superseded
+        try{ if (e && (e._aborted || e.name==='AbortError' || /\babort(ed)?\b/i.test(String(e.message||'')))) return; }catch{}
+        console.warn('[queue] task error for', targetId, e);
+      } });
       // Keep chain; don't drop errors to avoid breaking sequence
       window.__nodeQueues.set(targetId, next.catch(()=>{}));
       return next;
@@ -261,6 +266,7 @@
 
   // Backend integration: request an AI reply for a coworker node
   function requestAIReply(ownerId, ctx){
+    console.log('[DEBUG] requestAIReply called for ownerId:', ownerId, 'ctx:', ctx);
     if (!ownerId || !ctx || !ctx.text) return;
     // Turn on thinking glow on the coworker while request is in-flight
     function setThinking(id, on){
@@ -290,7 +296,8 @@
   const signal = controller.signal;
   try{ inflight.set(ownerId, controller); }catch{}
     // Gather settings from coworker panel if present, else from Graph/localStorage
-  let model = 'gpt-5-mini';
+  let model = 'gpt-4o-mini';
+  let modelPy = '';
   let systemPrompt = '';
     let apiKey = '';
     let maxTokens = 1000;
@@ -364,6 +371,7 @@
       } else {
         const s = readSaved();
         if (s.model) model = s.model;
+        if (s.modelPy) modelPy = s.modelPy;
         if (s.maxTokens) maxTokens = Math.min(30000, Math.max(256, Number(s.maxTokens)||1000));
         if (s.apiKey) apiKey = s.apiKey;
         const includeRole = !!s.useRole;
@@ -471,14 +479,47 @@
     // Coerce unsupported/legacy model aliases to a safe default, but preserve gpt-5* defaults
     try{
       const ml = (model||'').toLowerCase();
-      // If empty or clearly invalid, fall back to gpt-5-mini as default
-      if (!ml || ml === 'mini') model = 'gpt-5-mini';
-      // Keep gpt-5 family as-is; map old experimental aliases to gpt-5-mini
-      else if (ml === '3o' || ml === 'o3') model = 'gpt-5-mini';
+      // If empty or clearly invalid, fall back to gpt-4o-mini as default
+      if (!ml || ml === 'mini') model = 'gpt-4o-mini';
+      // Keep gpt-4 family as-is; map old experimental aliases to gpt-4o-mini
+      else if (ml === '3o' || ml === 'o3') model = 'gpt-4o-mini';
       // Otherwise, leave user-selected models untouched
     }catch{}
   // No client-side clipping
   const body = { model, max_tokens: maxTokens, noClip: true };
+  let toolsEnabled = false;
+  // Optional: expose run_python tool to the model when enabled in node settings
+  try{
+    const sRaw = localStorage.getItem(`nodeSettings:${ownerId}`);
+    const sCfg = sRaw ? (JSON.parse(sRaw)||{}) : {};
+    toolsEnabled = (sCfg.enableTools !== false);
+    if (toolsEnabled){
+      // Use the dedicated Python model when tools are active; default to a stable Python-capable model
+      body.model = sCfg.modelPy || 'gpt-4o-mini';
+      // Advertise the Python tool
+      body.tools = [
+        {
+          type: 'function',
+          function: {
+            name: 'run_python',
+            description: 'Kör Pythonkod och returnerar resultatet som text. Använd print() för att skriva ut det slutliga svaret så att det visas i stdout.',
+            parameters: {
+              type: 'object',
+              properties: { code: { type: 'string', description: 'Pythonkod att köra, inklusive print() för output' } },
+              required: ['code']
+            }
+          }
+        }
+      ];
+      // Optional: force the tool for this turn
+      if (sCfg.forcePython){
+        body.tool_choice = { type: 'function', function: { name: 'run_python' } };
+      }
+      // Hint the model to actually print final answers
+      const toolHint = 'Om en uppgift innebär beräkning, lista, filtrering eller kod, använd verktyget run_python. Skriv ut slutresultatet med print() så att det syns i stdout.';
+      systemPrompt = systemPrompt ? (systemPrompt + '\n\n' + toolHint) : toolHint;
+    }
+  }catch{}
   // If we have attachments, enable simple pagewise mode (one page per step)
   let hasMaterials = false;
   try { hasMaterials = Array.isArray(requestAIReply._lastAttachments) && requestAIReply._lastAttachments.length > 0; } catch {}
@@ -499,12 +540,16 @@
   try{
     const redacted = Object.assign({}, body);
     if (redacted.apiKey) redacted.apiKey = '<REDACTED>';
-    console.debug('[requestAIReply] apiBase=%s payload=%o', apiBase || '<auto>', redacted);
+    console.log('[DEBUG] About to make request. apiBase=%s payload=%o', apiBase || '<auto>', redacted);
+    console.log('[DEBUG] API key present:', !!(body.apiKey));
   }catch(e){}
   // JSON (non-streaming) request helper
-  const sendJSONOnce = (payload)=> fetch(apiBase + '/chat', {
+  const sendJSONOnce = (payload)=> {
+    console.log('[DEBUG] sendJSONOnce called with payload:', payload);
+    return fetch(apiBase + '/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal
     }).then(async r=>{
+      console.log('[DEBUG] sendJSONOnce response status:', r.status);
       const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || '';
       if (!r.ok) {
         if (/application\/json/i.test(String(ct||''))) {
@@ -516,8 +561,11 @@
         }
       }
       if (!/application\/json/i.test(String(ct||''))) { const _ = await r.text().catch(()=>null); throw new Error('Oväntat svar (ej JSON)'); }
-      return r.json();
-  });
+      const jsonData = await r.json();
+      console.log('[DEBUG] sendJSONOnce JSON response:', jsonData);
+      return jsonData;
+    });
+  };
   // NDJSON streaming helper (expects application/x-ndjson)
   const sendStreamOnce = async (payload)=>{
     const res = await fetch(apiBase + '/chat/stream', {
@@ -563,12 +611,17 @@
         if (shouldScroll){ ctx.list.__autoScrolling = true; ctx.list.scrollTop = ctx.list.scrollHeight; setTimeout(()=>{ try{ ctx.list.__autoScrolling=false; }catch{} }, 0); }
       }catch{}
       ensureStreamUI._el = { row, bubble:b, textEl, metaEl:meta, panel:ctx.panel, list:ctx.list };
+      try{
+        window.__streamBubbleByOwner = window.__streamBubbleByOwner || new Map();
+        window.__streamBubbleByOwner.set(ownerId, ensureStreamUI._el);
+      }catch{}
       return ensureStreamUI._el;
     };
     // Autoscroll helpers: pause autoscroll if user scrolled within last 5s
     function wireAutoscrollGuard(list){ try{ if(!list || list.__autoscrollHooked) return; list.__autoscrollHooked = true; list.addEventListener('scroll', ()=>{ try{ if (list.__autoScrolling) return; list.dataset.lastUserScrollTs = String(Date.now()); }catch{} }); }catch{} }
     function shouldAutoscrollNow(list){ try{ const atBottom = (list.scrollTop + list.clientHeight) >= (list.scrollHeight - 8); if (atBottom) return true; const last = Number(list.dataset.lastUserScrollTs||0); if (!last) return false; return (Date.now() - last) >= 5000; }catch{ return true; } }
-    let acc = '';
+  let acc = '';
+  let toolPending = false;
     // Track sections we stream into, to avoid duplicate full append on completion
     const streamedSids = new Set();
     const findParkedSectionIds = ()=>{
@@ -591,9 +644,15 @@
       const targets = findParkedSectionIds();
       targets.forEach(sid=>{
         try{
-          if (window.sectionStream && window.sectionStream.begin) window.sectionStream.begin(sid);
+          // Begin stream once per section id
+          if (!streamedSids.has(sid)){
+            if (window.sectionStream && window.sectionStream.begin) window.sectionStream.begin(sid);
+            if (typeof window.appendToSectionStreamBegin === 'function') window.appendToSectionStreamBegin(sid);
+            streamedSids.add(sid);
+          }
+          // Write delta to persisted raw and re-render DOM live
           if (window.sectionStream && window.sectionStream.delta) window.sectionStream.delta(sid, d);
-          streamedSids.add(sid);
+          if (typeof window.appendToSectionStreamDelta === 'function') window.appendToSectionStreamDelta(sid, d);
         }catch{}
       });
     };
@@ -638,7 +697,7 @@
         try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`); if (sec) sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } })); }catch{}
       }catch{}
     };
-    // Stream improvement deltas into the exercise question when improving
+  // Stream improvement deltas into the exercise question when improving
     const improveCtx = (function(){
       try{
         const sid = String((ctx && ctx.sourceId) || '') || '';
@@ -674,10 +733,12 @@
         try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`); if (sec) sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } })); }catch{}
       }catch{}
     };
-    let finalCitations = [];
-    const reader = res.body.getReader();
+  let finalCitations = [];
+  const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
-    let done=false, aborted=false;
+  let done=false, aborted=false;
+  let bailForTools=false;
+  let toolPendingTs=0;
     try{
       let leftover='';
       while(true){
@@ -687,12 +748,73 @@
         let data = leftover + chunk;
         const lines = data.split(/\r?\n/);
         leftover = lines.pop() || '';
-        for (const line of lines){
+  for (const line of lines){
           const t = String(line||'').trim(); if (!t) continue;
           let obj=null; try{ obj = JSON.parse(t); }catch{ continue; }
           const kind = String(obj?.type||'');
           if (kind === 'meta'){
-            // could contain citations preview; ignore for now
+            // If server signals pending tool calls, abort stream and fall back to JSON path
+            try{
+              if (String(obj?.note||'') === 'tool_calls_pending'){
+    toolPending = true;
+    if (!toolPendingTs) toolPendingTs = Date.now();
+                console.log('[DEBUG] Tool calls detected, grace period before bailing');
+                // Show a small inline status in the streaming bubble before we fallback
+                try{
+                  const ui = ensureStreamUI();
+                  if (ui && ui.metaEl){
+                    const tools = Array.isArray(obj?.tools) ? obj.tools.filter(Boolean) : [];
+                    const isPy = tools.some(t => String(t).toLowerCase() === 'run_python');
+                    const toolTxt = tools.length ? (tools.join(', ')) : 'verktyg';
+                    ui.metaEl.innerHTML = '';
+                    // Collapsible placeholder shown immediately
+                    const details = document.createElement('details');
+                    details.open = false; details.dataset.kind = 'tool-live';
+                    const summary = document.createElement('summary'); summary.textContent = isPy ? 'Python (live) – visa' : `${toolTxt} (live) – visa`;
+                    const pre = document.createElement('pre'); pre.className='tool-code'; pre.textContent = '…';
+                    details.appendChild(summary); details.appendChild(pre);
+                    // Small spinner hint next to the placeholder
+                    const hint = document.createElement('div');
+                    hint.className = 'subtle';
+                    const sp = document.createElement('i'); sp.className = 'inline-spinner';
+                    const txt = document.createElement('span'); txt.textContent = isPy ? 'Kör Python…' : `Kör ${toolTxt}…`;
+                    hint.appendChild(sp); hint.appendChild(txt);
+                    ui.metaEl.appendChild(details);
+                    ui.metaEl.appendChild(hint);
+                  }
+                }catch{}
+              }
+            }catch{}
+          } else if (kind === 'tool_delta'){
+            // Live tool argument deltas (e.g., Python code being constructed)
+            try{
+              const nm = String(obj?.name||'');
+              const arg = String(obj?.arguments_delta||'');
+              if (nm && arg){
+                const ui = ensureStreamUI();
+                if (ui && ui.metaEl){
+                  // Maintain a growing code buffer per owner for the current stream
+                  window.__liveToolBuf = window.__liveToolBuf || new Map();
+                  const prev = window.__liveToolBuf.get(ownerId) || '';
+                  const next = prev + arg;
+                  window.__liveToolBuf.set(ownerId, next);
+                  // Update existing collapsible placeholder if present; else create one
+                  let details = ui.metaEl.querySelector('details[data-kind="tool-live"]');
+                  if (!details){
+                    ui.metaEl.innerHTML = '';
+                    details = document.createElement('details');
+                    details.open = false; details.dataset.kind = 'tool-live';
+                    const summary = document.createElement('summary'); summary.textContent = (nm==='run_python') ? 'Python (live) – visa' : (nm + ' (live) – visa');
+                    const pre = document.createElement('pre'); pre.className='tool-code'; pre.textContent = next;
+                    details.appendChild(summary); details.appendChild(pre);
+                    ui.metaEl.appendChild(details);
+                  } else {
+                    const pre = details.querySelector('pre.tool-code') || (()=>{ const p=document.createElement('pre'); p.className='tool-code'; details.appendChild(p); return p; })();
+                    pre.textContent = next;
+                  }
+                }
+              }
+            }catch{}
           } else if (kind === 'delta'){
             const d = String(obj?.delta||'');
             if (d){
@@ -719,17 +841,26 @@
             try{ if (Array.isArray(obj?.citations)) finalCitations = obj.citations; }catch{}
             done = true;
           }
-        }
+  }
+  // If a tool call is pending, allow a short grace window to receive live tool deltas before bailing
+  if (toolPending && toolPendingTs && (Date.now() - toolPendingTs) >= 900){ bailForTools = true; }
+  if (bailForTools) break;
       }
     }catch(e){
       if (e && (e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))){ aborted=true; const err=new Error('ABORTED'); err._aborted=true; throw err; }
       throw e;
     }
+    if (toolPending){
+      console.log('[DEBUG] Tool pending detected, throwing TOOL_PENDING');
+      const err = new Error('TOOL_PENDING');
+      throw err;
+    }
     // Finalize UI render: convert to markdown if configured and append citations
-    const ui = ensureStreamUI();
-    let finalText = String(acc||'');
+  const ui = ensureStreamUI();
+  let finalText = String(acc||'');
     // Clean MER_SIDOR if present in non-pgwise flows (should not appear)
-    try{ finalText = finalText.replace(/\bMER_SIDOR\b/g,'').trim(); }catch{}
+  try{ finalText = finalText.replace(/\bMER_SIDOR\b/g,'').trim(); }catch{}
+  if (!finalText) finalText = 'Tomt svar från AI';
     // Update graph and propagate
     let ts = Date.now();
     const meta = { ts, citations: Array.isArray(finalCitations)?finalCitations:[] };
@@ -775,7 +906,12 @@
   // Route onward; avoid duplicating full append into sections we streamed into
   try{ const routedMeta = { author, who:'assistant', ts, citations: Array.isArray(finalCitations)?finalCitations:[], skipSectionFinalAppend: true }; if(window.routeMessageFrom) window.routeMessageFrom(ownerId, finalText, routedMeta); }catch{}
   // End section streaming sessions
-  try{ streamedSids.forEach(sid=>{ if (window.sectionStream && window.sectionStream.end) window.sectionStream.end(sid); }); }catch{}
+  try{
+    streamedSids.forEach(sid=>{
+      try{ if (window.sectionStream && window.sectionStream.end) window.sectionStream.end(sid); }catch{}
+      try{ if (typeof window.appendToSectionStreamEnd === 'function') window.appendToSectionStreamEnd(sid); }catch{}
+    });
+  }catch{}
     // Completion event
     try{
       // If grading, clear pending marker (both fullscreen key and live section dataset)
@@ -814,18 +950,122 @@
     throw err;
   });
   // Pagewise auto-continue: if model asks for MER_SIDOR and backend indicates more pages, request next window.
-  const handleFinal = (data)=>{
+  let triedNoTools = false;
+  const handleFinal = async (data)=>{
+    console.log('[DEBUG] handleFinal called with data:', data);
     let reply = '';
     try{ reply = String(data?.reply || ''); }catch{ reply = ''; }
-    if (!reply) reply = data?.error ? `Fel: ${data.error}` : 'Tomt svar från AI';
+    console.log('[DEBUG] Extracted reply:', reply);
+    if (!reply) {
+      // One opportunistic retry with a safer fallback model if we haven't tried already
+      if (!triedFallback){
+        try{
+          triedFallback = true;
+          const fallbackBody = Object.assign({}, body, { model: 'gpt-4o-mini' });
+          const data2 = await sendJSONOnce(fallbackBody);
+          return await handleFinal(data2);
+        }catch{}
+      }
+      // If tools were enabled, try once more with tools disabled to force a pure text reply
+      if (!triedNoTools && toolsEnabled){
+        try{
+          triedNoTools = true;
+          const bodyNoTools = Object.assign({}, body);
+          delete bodyNoTools.tools;
+          const data3 = await sendJSONOnce(bodyNoTools);
+          return await handleFinal(data3);
+        }catch{}
+      }
+      reply = data?.error ? `Fel: ${data.error}` : 'Tomt svar från AI';
+    }
     // Remove any stray MER_SIDOR token from final display
-    try{ reply = reply.replace(/\bMER_SIDOR\b/g, '').trim(); }catch{}
+  try{ reply = reply.replace(/\bMER_SIDOR\b/g, '').trim(); }catch{}
+  if (!reply) {
+    // Final guard: one last try without tools if still enabled and not tried
+    if (!triedNoTools && toolsEnabled){
+      try{
+        triedNoTools = true;
+        const bodyNoTools = Object.assign({}, body); delete bodyNoTools.tools;
+        const data4 = await sendJSONOnce(bodyNoTools);
+        let r4 = '';
+        try{ r4 = String(data4?.reply||''); }catch{ r4=''; }
+        if (r4) reply = r4;
+      }catch{}
+    }
+    if (!reply) reply = 'Tomt svar från AI';
+  }
     const citations = (function(){ try{ return Array.isArray(data?.citations) ? data.citations : []; }catch{ return []; } })();
     let ts = Date.now();
-    const meta = { ts, citations };
+  const meta = { ts, citations };
     try{ if (Array.isArray(requestAIReply._lastAttachments)) meta.attachments = requestAIReply._lastAttachments; }catch{}
-    try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
-  try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
+  // Propagate executed tool debug info so non-stream UI can render a collapsible code block
+  try{ if (data && data.tool_debug) meta.tool_debug = data.tool_debug; }catch{}
+    // If a streaming bubble exists (created before tool fallback), reuse it instead of adding a new row
+    let reused = false;
+    try{
+      const map = window.__streamBubbleByOwner;
+      const ui = map && map.get ? map.get(ownerId) : null;
+      if (ui && ui.textEl){
+        let injectedToolCode = false;
+        // If backend provided executed tool code, show it above the reply
+        try{
+          const td = data && data.tool_debug ? data.tool_debug : null;
+          const code = td && td.name==='run_python' ? String(td.code||'') : '';
+          if (code && ui.metaEl){
+            const details = document.createElement('details');
+            details.open = false;
+            const summary = document.createElement('summary'); summary.textContent = 'Visa Pythonkoden som kördes';
+            const pre = document.createElement('pre'); pre.className='tool-code'; pre.textContent = code;
+            details.appendChild(summary); details.appendChild(pre);
+            ui.metaEl.innerHTML='';
+            ui.metaEl.appendChild(details);
+            // keep a small timestamp under the details
+            const timeEl = document.createElement('div'); timeEl.className='subtle'; timeEl.style.marginTop='4px'; timeEl.textContent = (window.formatTime? window.formatTime(ts) : '');
+            ui.metaEl.appendChild(timeEl);
+            injectedToolCode = true;
+          }
+        }catch{}
+        // choose render mode from the owner panel if possible
+        let renderMode = 'md';
+        try{
+          const panel = ui.panel || [...document.querySelectorAll('.panel-flyout')].find(p => p.dataset.ownerId === ownerId);
+          const sel = panel && panel.querySelector ? panel.querySelector('[data-role="renderMode"]') : null;
+          if (sel && sel.value) renderMode = String(sel.value);
+          else { const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if (raw){ const s=JSON.parse(raw)||{}; if (s.renderMode) renderMode = String(s.renderMode); } }
+        }catch{}
+        // render into the existing bubble
+        if (renderMode === 'md' && window.mdToHtml){
+          try{
+            const html = window.mdToHtml(reply);
+            if (typeof window.sanitizeHtml === 'function') ui.textEl.innerHTML = window.sanitizeHtml(html);
+            else ui.textEl.innerHTML = html;
+          }catch{ ui.textEl.textContent = reply; }
+        } else { ui.textEl.textContent = reply; }
+        // citations + time
+        try{
+          const cites = Array.isArray(citations) ? citations : [];
+          if (cites.length){
+            const box = document.createElement('div'); box.className='subtle'; box.style.marginTop='6px'; box.style.fontSize='12px';
+            const parts = cites.map((c,i)=>{ const title = (c?.title||c?.url||`Källa ${i+1}`); const safe = String(title).replace(/[\n\r]+/g,' '); const url = String(c?.url||'#'); return `<a href="${url}" target="_blank" rel="noopener noreferrer">[${i+1}] ${safe}<\/a>`; });
+            box.innerHTML = parts.join(' ');
+            const old = ui.bubble.querySelectorAll('.subtle'); old.forEach((el,idx)=>{ if(idx>0) el.remove(); });
+            ui.bubble.appendChild(box);
+          }
+        }catch{}
+        try{
+          // Clear live tool buffer and finalize meta timestamp (keep details block if injected)
+          if (window.__liveToolBuf && window.__liveToolBuf.delete) window.__liveToolBuf.delete(ownerId);
+          if (ui.metaEl && !injectedToolCode) ui.metaEl.textContent = (window.formatTime? window.formatTime(ts) : '');
+        }catch{}
+        reused = true;
+      }
+      if (map && map.delete) map.delete(ownerId);
+    }catch{}
+    if (!reused){
+      // If not reusing a stream bubble, add assistant message normally; any executed code will be shown in meta via a details block
+      try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, reply, 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
+      try{ if(window.receiveMessage) window.receiveMessage(ownerId, reply, 'assistant', meta); }catch{}
+    }
     try{ const routedMeta = { author, who:'assistant', ts, citations }; if(window.routeMessageFrom) window.routeMessageFrom(ownerId, reply, routedMeta); }catch{}
   // New: append reply into any board section that has this coworker selected as its Input (Inmatning)
     try{
@@ -954,7 +1194,7 @@
           arr[idx].fbRounds[rIndex] = prev ? (prev + '\n\n' + String(reply||'')) : String(reply||'');
           localStorage.setItem(keyEx, JSON.stringify(arr));
           localStorage.removeItem(k);
-          try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
+                   try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
           try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
           // If a section is also present in this tab, inform it too
           try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`); if (sec) sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id: sid } })); }catch{}
@@ -964,26 +1204,29 @@
   // Announce completion to UI listeners (use body.sourceId if present)
   try{ const src = (body && body.sourceId) ? String(body.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: true } })); }catch{}
   };
-  const doStep = (pgStart, step)=>{
+  const doStep = async (pgStart, step)=>{
+    console.log('[DEBUG] doStep called with pgStart:', pgStart, 'step:', step);
     const payload = Object.assign({}, body);
     if (payload.pgwise && typeof pgStart === 'number') payload.pgwise.startPage = pgStart;
-    return tryRequest(payload).then(data=>{
-      const pw = data && data.pagewise;
-      const wantsMore = !!(pw && pw.enabled && pw.modelRequestedMore && pw.hasMore);
-      if (wantsMore && step < 5){
-        // Don't show this intermediate reply (likely contains MER_SIDOR); immediately fetch next window.
-        const nextStart = Number(pw.nextStartPage)|| (pgStart+1);
-        return doStep(nextStart, step+1);
-      }
-      // Final step: render normally
-      handleFinal(data);
-      return data;
-    });
+    console.log('[DEBUG] Making JSON request with payload:', payload);
+    const data = await tryRequest(payload);
+    console.log('[DEBUG] Got JSON response:', data);
+    const pw = data && data.pagewise;
+    const wantsMore = !!(pw && pw.enabled && pw.modelRequestedMore && pw.hasMore);
+    if (wantsMore && step < 5){
+      // Don't show this intermediate reply (likely contains MER_SIDOR); immediately fetch next window.
+      const nextStart = Number(pw.nextStartPage)|| (pgStart+1);
+      return doStep(nextStart, step+1);
+    }
+    // Final step: render normally (await to ensure UI update before returning)
+    await handleFinal(data);
+    return data;
   };
   // Announce start for UI (e.g., show cancel button)
   try{ window.dispatchEvent(new CustomEvent('ai-request-started', { detail:{ ownerId, sourceId: ctx && ctx.sourceId ? String(ctx.sourceId) : null } })); }catch{}
   // Prefer streaming when no pagewise (materials) are involved; fallback to JSON path on error
-  const preferStream = (!hasMaterials) || fromCoworker;
+  // Prefer stream when not pagewise; if tools are enabled we still try stream first and fallback to JSON when server signals tool_calls_pending
+  const preferStream = ((!hasMaterials) || fromCoworker);
   const startPromise = (preferStream ? (async ()=>{
     const basePayload = Object.assign({}, body);
     try{ return await sendStreamOnce(basePayload); }
@@ -991,7 +1234,19 @@
       // Allow fallback if server doesn't support stream or other non-abort error
       if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) throw e;
       // If NO_STREAM marker, just use JSON path
-      if (String(e?.message||'')==='NO_STREAM') return await doStep(_pgStart, 0);
+      if (String(e?.message||'')==='NO_STREAM' || String(e?.message||'')==='TOOL_PENDING') {
+        console.log('[DEBUG] Fallback to JSON due to:', e?.message);
+        // For tool calls, make a clean JSON request without pagewise to avoid complications
+        if (String(e?.message||'')==='TOOL_PENDING') {
+          const cleanPayload = Object.assign({}, body);
+          delete cleanPayload.pgwise; // Remove pagewise for tool calls
+          return tryRequest(cleanPayload).then(data => {
+            handleFinal(data);
+            return data;
+          });
+        }
+        return await doStep(_pgStart, 0);
+      }
       // Try model fallback once for stream
       if (!triedFallback){
         triedFallback = true;
