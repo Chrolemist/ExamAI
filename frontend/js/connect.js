@@ -8,35 +8,13 @@
 // - D: requestAIReply/internet-reply bör vara injicerbara beroenden (t.ex. window.requestAIReply) i stället för direkt fetch.
 (function(){
   const svg = () => window.svg;
+  const { ensureDefs, makePath, makeHitPath, drawPath, triggerFlowEffect } = (window.svgHelpers||{});
   // Track a selected connection for keyboard deletion
   let _selectedConn = null;
   // simulation toggle
   // AI-simulering borttagen
   // path helpers
   /** Ensure the gradient defs exist once per page. */
-  function ensureDefs(){
-    const s = svg(); if (!s) return;
-    if (s.querySelector('defs')) return;
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    const grad = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
-    grad.id = 'flowGrad'; grad.setAttribute('x1','0'); grad.setAttribute('y1','0'); grad.setAttribute('x2','1'); grad.setAttribute('y2','0');
-    const s1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop'); s1.setAttribute('offset','0%'); s1.setAttribute('stop-color','rgba(124,92,255,0.9)');
-    const s2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop'); s2.setAttribute('offset','100%'); s2.setAttribute('stop-color','rgba(0,212,255,0.9)');
-    grad.appendChild(s1); grad.appendChild(s2);
-    defs.appendChild(grad);
-    s.appendChild(defs);
-  }
-  /** Create an invisible, thick stroke path used only for hit-testing. */
-  function makeHitPath(){
-    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    p.setAttribute('fill', 'none');
-    p.setAttribute('stroke', 'rgba(0,0,0,0)');
-    p.setAttribute('stroke-width', '12');
-    p.setAttribute('stroke-linecap', 'round');
-    p.style.cursor = 'pointer';
-    svg()?.appendChild(p);
-    return p;
-  }
   /** Is the pointer near any interactive IO point (node or panel)? */
   function isNearAnyIO(x, y, radius=20){
     const ios = document.querySelectorAll('.conn-point, .panel .head .section-io');
@@ -48,74 +26,9 @@
     return false;
   }
   /** Create a new SVG path for a connection (animated while dragging). */
-  function makePath(animated=false){
-    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    p.setAttribute('fill', 'none');
-    p.setAttribute('stroke', 'url(#flowGrad)');
-    p.setAttribute('stroke-width', '3');
-    p.setAttribute('stroke-linecap', 'round');
-  // Allow events for permanent paths (hover/delete), but the SVG container itself ignores events
-  p.style.pointerEvents = 'stroke';
-  p.style.cursor = 'pointer';
-    if (animated) {
-      p.style.filter = 'drop-shadow(0 2px 10px rgba(124,92,255,0.25))';
-      p.setAttribute('stroke-dasharray', '16 12');
-      p.animate([{ strokeDashoffset: 0 }, { strokeDashoffset: -28 }], { duration: 800, iterations: Infinity });
-    }
-    ensureDefs();
-    svg()?.appendChild(p);
-    return p;
-  }
-  /** Draw a cubic Bezier path that flips bend direction depending on geometry. */
-  function drawPath(path, x1, y1, x2, y2){
-    const dx = x2 - x1, dy = y2 - y1;
-    const adx = Math.abs(dx), ady = Math.abs(dy);
-    let c1x, c1y, c2x, c2y;
-    if (adx >= ady) {
-      // Predominantly horizontal: bend left/right; flip when x crosses
-      const sign = dx >= 0 ? 1 : -1;
-      const cx = Math.max(40, adx * 0.4);
-      c1x = x1 + sign * cx; c1y = y1 + ( (y1 + y2)/2 - y1 ) * 0.2; // slight pull toward mid-y
-      c2x = x2 - sign * cx; c2y = y2 + ( (y1 + y2)/2 - y2 ) * 0.2;
-    } else {
-      // Predominantly vertical: bend up/down; flip when y crosses
-      const signY = dy >= 0 ? 1 : -1;
-      const cy = Math.max(40, ady * 0.4);
-      c1x = x1 + dx * 0.2; c1y = y1 + signY * cy;
-      c2x = x2 - dx * 0.2; c2y = y2 - signY * cy;
-    }
-    path.setAttribute('d', `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`);
-  }
 
   /** Briefly animate a connection path to simulate data flow. */
-  function triggerFlowEffect(conn, opts){
-    const path = conn?.pathEl; if(!path) return;
-    try{
-      // glow
-      const prevFilter = path.style.filter;
-      path.style.filter = 'drop-shadow(0 2px 10px rgba(124,92,255,0.35))';
-      // dash animation pulse
-      const prevDash = path.getAttribute('stroke-dasharray');
-      path.setAttribute('stroke-dasharray','16 12');
-      // Choose direction: if source is fromId we flow start->end (-offset), if from toId we flow end->start (+offset)
-      let toOffset = -28;
-      try{
-        const src = opts && opts.sourceId;
-        if (src){
-          if (src === conn.toId) toOffset = 28; // reverse
-          else if (src === conn.fromId) toOffset = -28; // forward
-        }
-      }catch{}
-      const anim = path.animate([{ strokeDashoffset: 0 }, { strokeDashoffset: toOffset }], { duration: 650, iterations: 1, easing:'linear' });
-      anim.addEventListener?.('finish', ()=>{
-        // restore shortly after
-        path.setAttribute('stroke-dasharray', prevDash || '');
-        path.style.filter = prevFilter || '';
-      });
-      // fallback restore just in case
-      setTimeout(()=>{ path.setAttribute('stroke-dasharray', prevDash || ''); path.style.filter = prevFilter || ''; }, 800);
-    }catch{}
-  }
+  // triggerFlowEffect provided by helpers
 
   /** Find one-hop targets reachable from an owner via its OUT ports. */
   function getOutgoingTargets(ownerId){
@@ -171,14 +84,152 @@
   // Never propagate attachments out of a node; keep only safe metadata like citations
   if (baseMeta && baseMeta.attachments) delete baseMeta.attachments;
   const routedMeta = Object.assign(baseMeta, { ts, via: `${conn.fromId}->${conn.toId}`, from: sourceId, author: (author||'Incoming') });
+  // Smart chunking for large payloads going into coworker nodes to avoid 400s
+  try{
+    const host = document.querySelector(`.fab[data-id="${targetId}"]`);
+    const isCoworkerTarget = !!(host && host.dataset.type === 'coworker');
+    const srcHost = document.querySelector(`.fab[data-id="${sourceId}"]`);
+    const isCoworkerSource = !!(srcHost && srcHost.dataset.type === 'coworker');
+    // Settings-driven backpressure & chunkning (remove controller):
+    // Read coworker settings of source node (controls) and apply when sending to another coworker
+    const readNodeSettings = (id)=>{ try{ const raw = localStorage.getItem(`nodeSettings:${id}`); return raw ? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
+    const srcSettings = readNodeSettings(sourceId);
+  const { approxTokens, estimateChunkBudget, makeLineBatches, smartChunk } = (window.chunking||{});
+  // smartChunk now provided by helpers
+    const maybeChunk = ()=>{
+      if (!isCoworkerTarget) return false;
+      // Backpressure: coworker → coworker sends N lines at a time and waits for stream completion when enabled
+      const chunkEnabled = !!srcSettings.chunkingEnabled;
+      const allowNodeToNode = (srcSettings.chunkNodeToNode!==undefined) ? !!srcSettings.chunkNodeToNode : true;
+  const useLines = (srcSettings.chunkUseLines!==undefined) ? !!srcSettings.chunkUseLines : true;
+  const useNumbering = !!srcSettings.chunkUseNumbering;
+      const useTokens = !!srcSettings.chunkUseTokens;
+      const batchSize = Math.max(1, Math.min(50, Number(srcSettings.chunkBatchSize||3)));
+      const tokenSize = Math.max(200, Math.min(2000, Number(srcSettings.chunkTokenSize||800)));
+      // 1) Numbered chunking (strongest) → strict backpressure per numbered block
+      if (isCoworkerSource && chunkEnabled && allowNodeToNode && useNumbering && window.chunking && typeof window.chunking.splitByNumbering==='function'){
+        const parts = window.chunking.splitByNumbering(text);
+        if (Array.isArray(parts) && parts.length>1){
+          (async ()=>{
+            for (let i=0;i<parts.length;i++){
+              const part = parts[i]; const N = parts.length; const idx=i+1;
+              const payload = part;
+              const ts2 = Date.now();
+              const meta2 = Object.assign({}, routedMeta, { ts: ts2 });
+              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
+              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
+              try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
+              try{ if (window.requestAIReply) await window.requestAIReply(targetId, { text: payload, sourceId }); }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
+            }
+          })();
+          return true;
+        }
+      }
+      // 2) Line chunking
+      if (isCoworkerSource && chunkEnabled && allowNodeToNode && useLines){
+        const parts = makeLineBatches(text, batchSize);
+        if (Array.isArray(parts) && parts.length>1){
+          (async ()=>{
+            for (let i=0;i<parts.length;i++){
+              const part = parts[i]; const N = parts.length; const idx=i+1;
+              const payload = part;
+              const ts2 = Date.now();
+              const meta2 = Object.assign({}, routedMeta, { ts: ts2 });
+              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
+              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
+              try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
+              try{ if (window.requestAIReply) await window.requestAIReply(targetId, { text: payload, sourceId }); }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
+            }
+          })();
+          return true;
+        }
+      }
+      // Token-based chunking (optional): when enabled and oversized for configured tokenSize
+      if (isCoworkerTarget && chunkEnabled && allowNodeToNode && useTokens){
+        const totalT = approxTokens(text);
+        const maxT = tokenSize || estimateChunkBudget();
+        if (totalT > maxT){
+          const parts = smartChunk(text, maxT);
+          if (!parts || parts.length<=1) return false;
+          (async ()=>{
+            for (let i=0;i<parts.length;i++){
+              const part = parts[i]; const N = parts.length; const idx=i+1;
+              const payload = part;
+              const ts2 = Date.now();
+              const meta2 = Object.assign({}, routedMeta, { ts: ts2 });
+              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
+              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
+              try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
+              try{ if (window.requestAIReply) await window.requestAIReply(targetId, { text: payload, sourceId }); }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
+            }
+          })();
+          return true;
+        }
+      }
+      // Legacy fallback: auto token chunking when dramatically oversized and no explicit tokens setting
+      const totalT = approxTokens(text);
+      const budget = estimateChunkBudget();
+      if (totalT <= Math.max(1000, Math.floor(budget*1.25))) return false;
+      const parts = smartChunk(text);
+      if (!parts || parts.length<=1) return false;
+      (async ()=>{
+        for (let i=0;i<parts.length;i++){
+          const part = parts[i]; const N = parts.length; const idx=i+1;
+          const payload = part;
+          const ts2 = Date.now();
+          const meta2 = Object.assign({}, routedMeta, { ts: ts2 });
+          try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
+          try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
+          try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
+          try{ if (window.requestAIReply) await window.requestAIReply(targetId, { text: payload, sourceId }); }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
+        }
+      })();
+      return true;
+    };
+    if (maybeChunk()) return;
+  }catch{}
+  // Default single-shot route
   try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, whoForTarget, routedMeta); }catch{}
   try{ if(window.receiveMessage) window.receiveMessage(targetId, text, whoForTarget, routedMeta); }catch{}
-  // If the target is a board section, append content there as well
+  // If the target is a board section, append content there as well (unless caller streamed deltas already)
     try{
       const targetEl = document.querySelector(`.panel.board-section[data-section-id="${targetId}"]`);
       if (targetEl && window.appendToSection){
-    // Sections decide their own render mode; just pass text
-    window.appendToSection(targetId, text);
+    const skip = !!(payload && payload.meta && payload.meta.skipSectionFinalAppend);
+    if (!skip){
+    // Sections decide their own render mode; apply chunking if source coworker opted in
+    const readNodeSettings = (id)=>{ try{ const raw = localStorage.getItem(`nodeSettings:${id}`); return raw ? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
+    const srcSettings = readNodeSettings(sourceId);
+    const chunkEnabled = !!srcSettings.chunkingEnabled;
+    const allowToSection = (srcSettings.chunkToSection!==undefined) ? !!srcSettings.chunkToSection : true;
+  const useLines = (srcSettings.chunkUseLines!==undefined) ? !!srcSettings.chunkUseLines : true;
+  const useNumbering = !!srcSettings.chunkUseNumbering;
+    const useTokens = !!srcSettings.chunkUseTokens;
+    const batchSize = Math.max(1, Math.min(50, Number(srcSettings.chunkBatchSize||3)));
+    const tokenSize = Math.max(200, Math.min(2000, Number(srcSettings.chunkTokenSize||800)));
+    if (chunkEnabled && allowToSection && window.chunking){
+      const txt = String(text||'');
+      // Prefer numbered chunking if enabled
+      if (useNumbering && window.chunking && typeof window.chunking.splitByNumbering==='function'){
+        const parts = window.chunking.splitByNumbering(txt);
+        if (Array.isArray(parts) && parts.length>1){ parts.forEach(part=> window.appendToSection(targetId, part)); return; }
+      }
+      // Else prefer line chunking if enabled
+      if (useLines && typeof window.chunking.makeLineBatches==='function'){
+        const parts = window.chunking.makeLineBatches(txt, batchSize);
+        if (Array.isArray(parts) && parts.length>1){ parts.forEach(part=> window.appendToSection(targetId, part)); return; }
+      }
+      // Else token chunking if enabled and oversized
+      if (useTokens && typeof window.chunking.approxTokens==='function' && typeof window.chunking.smartChunk==='function'){
+        const totalT = window.chunking.approxTokens(txt);
+        if (totalT > tokenSize){ const parts = window.chunking.smartChunk(txt, tokenSize); if (Array.isArray(parts) && parts.length>1){ parts.forEach(part=> window.appendToSection(targetId, part)); return; } }
+      }
+      // Default: single append
+      window.appendToSection(targetId, text);
+    } else {
+      window.appendToSection(targetId, text);
+    }
+    }
       }
     }catch{}
     // If the receiving node is a coworker, request a real AI reply from backend
@@ -412,9 +463,11 @@
   // If we have attachments, enable simple pagewise mode (one page per step)
   let hasMaterials = false;
   try { hasMaterials = Array.isArray(requestAIReply._lastAttachments) && requestAIReply._lastAttachments.length > 0; } catch {}
+  // Detect origin to decide if we still want streaming despite attachments
+  let fromCoworker = false; try{ const srcEl = ctx && ctx.sourceId ? document.querySelector(`.fab[data-id="${ctx.sourceId}"]`) : null; fromCoworker = !!(srcEl && srcEl.dataset.type==='coworker'); }catch{}
   let _pgStart = 1;
-  // Simplified: no UI or stored setting; enable pgwise with default window size (backend default)
-  if (hasMaterials) body.pgwise = { enable: true, startPage: _pgStart };
+  // Enable pgwise only when not coming from a coworker (to keep streaming/backpressure pipelines smooth)
+  if (hasMaterials && !fromCoworker) body.pgwise = { enable: true, startPage: _pgStart };
   if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
     if (apiKey) body.apiKey = apiKey;
@@ -489,6 +542,34 @@
       return ensureStreamUI._el;
     };
     let acc = '';
+    // Track sections we stream into, to avoid duplicate full append on completion
+    const streamedSids = new Set();
+    const findParkedSectionIds = ()=>{
+      const ids = new Set();
+      try{
+        document.querySelectorAll('.panel.board-section').forEach(sec=>{
+          const sid = sec?.dataset?.sectionId || '';
+          if (!sid) return;
+          try{
+            const raw = localStorage.getItem(`sectionParking:${sid}`);
+            const cfg = raw ? (JSON.parse(raw)||{}) : {};
+            if (cfg && String(cfg.input||'') === String(ownerId)) ids.add(sid);
+          }catch{}
+        });
+      }catch{}
+      return [...ids];
+    };
+    const appendDeltaToSections = (delta)=>{
+      const d = String(delta||''); if (!d) return;
+      const targets = findParkedSectionIds();
+      targets.forEach(sid=>{
+        try{
+          if (window.sectionStream && window.sectionStream.begin) window.sectionStream.begin(sid);
+          if (window.sectionStream && window.sectionStream.delta) window.sectionStream.delta(sid, d);
+          streamedSids.add(sid);
+        }catch{}
+      });
+    };
     let finalCitations = [];
     const reader = res.body.getReader();
     const decoder = new TextDecoder('utf-8');
@@ -510,10 +591,16 @@
             // could contain citations preview; ignore for now
           } else if (kind === 'delta'){
             const d = String(obj?.delta||'');
-            if (d){ acc += d; const ui = ensureStreamUI(); if (ui){ try{ ui.textEl.textContent = acc; ui.list.scrollTop = ui.list.scrollHeight; }catch{} } }
+            if (d){
+              acc += d;
+              const ui = ensureStreamUI();
+              if (ui){ try{ ui.textEl.textContent = acc; ui.list.scrollTop = ui.list.scrollHeight; }catch{} }
+              // Also stream into connected/parked sections
+              try{ appendDeltaToSections(d); }catch{}
+            }
           } else if (kind === 'error'){
             throw new Error(String(obj?.error||'Strömfel'));
-          } else if (kind === 'done'){
+           } else if (kind === 'done'){
             try{ if (Array.isArray(obj?.citations)) finalCitations = obj.citations; }catch{}
             done = true;
           }
@@ -564,8 +651,10 @@
         if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', meta);
       }
     }catch{ try{ if(!ensureStreamUI._el) if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', meta); }catch{} }
-    // Route onward
-    try{ const routedMeta = { author, who:'assistant', ts, citations: Array.isArray(finalCitations)?finalCitations:[] }; if(window.routeMessageFrom) window.routeMessageFrom(ownerId, finalText, routedMeta); }catch{}
+  // Route onward; avoid duplicating full append into sections we streamed into
+  try{ const routedMeta = { author, who:'assistant', ts, citations: Array.isArray(finalCitations)?finalCitations:[], skipSectionFinalAppend: true }; if(window.routeMessageFrom) window.routeMessageFrom(ownerId, finalText, routedMeta); }catch{}
+  // End section streaming sessions
+  try{ streamedSids.forEach(sid=>{ if (window.sectionStream && window.sectionStream.end) window.sectionStream.end(sid); }); }catch{}
     // Completion event
     try{ const src = (payload && payload.sourceId) ? String(payload.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: true } })); }catch{}
     return { reply: finalText, citations: finalCitations };
@@ -609,12 +698,9 @@
           if (!sid) return;
           const raw = localStorage.getItem(`sectionParking:${sid}`);
           const cfg = raw ? (JSON.parse(raw)||{}) : {};
-          // 1) Input append
+          // 1) Input append (dropdown-selected coworker only)
           if (cfg && String(cfg.input||'') === String(ownerId)){
-            // Avoid duplicate if this coworker is already cabled directly to this section (routeMessageFrom already appended)
-            let connected = false;
-            try{ connected = (window.state?.connections||[]).some(c => ( (c.fromId===ownerId && c.toId===sid) || (c.toId===ownerId && c.fromId===sid) )); }catch{}
-            if (!connected && window.appendToSection) window.appendToSection(sid, reply);
+            if (window.appendToSection) window.appendToSection(sid, reply);
           }
           // 2) Improver update: if section awaits improvement from this coworker, update that specific question text
           let pendingImproveIdx = null;
@@ -759,7 +845,7 @@
   // Announce start for UI (e.g., show cancel button)
   try{ window.dispatchEvent(new CustomEvent('ai-request-started', { detail:{ ownerId, sourceId: ctx && ctx.sourceId ? String(ctx.sourceId) : null } })); }catch{}
   // Prefer streaming when no pagewise (materials) are involved; fallback to JSON path on error
-  const preferStream = !hasMaterials;
+  const preferStream = (!hasMaterials) || fromCoworker;
   const startPromise = (preferStream ? (async ()=>{
     const basePayload = Object.assign({}, body);
     try{ return await sendStreamOnce(basePayload); }
@@ -813,6 +899,7 @@
     // Clear inflight state
     try{ if (inflight.get(ownerId) === controller) inflight.delete(ownerId); }catch{}
   });
+  return startPromise;
   }
 
   // Expose cancel helper
@@ -949,7 +1036,7 @@
   }
   /** Begin a live connection line from a conn-point until pointerup. */
   function startConnection(fromEl, fromCp){
-  const tmpPath = makePath(); let lastHover=null;
+  const tmpPath = makePath(svg()); let lastHover=null;
   // Show the cable above panels while dragging for better visibility
   const s = svg && svg();
   const prevZ = s ? s.style.zIndex : '';
@@ -984,8 +1071,8 @@
     if (!target && (fromIsUser || fromIsCoworker)) target = findClosestConnPoint(p.x, p.y, 18, baseFilter);
     if (!target) return;
     const toEl = target.closest('.fab, .panel, .panel-flyout');
-  const path = makePath(false);
-  const hit = makeHitPath();
+  const path = makePath(svg(), false);
+  const hit = makeHitPath(svg());
   const a = anchorOf(fromEl, fromCp); const b = anchorOf(toEl, target); drawPath(path, a.x, a.y, b.x, b.y); drawPath(hit, a.x, a.y, b.x, b.y);
     const fromId = fromEl.dataset.id || fromEl.dataset.sectionId; const toId = toEl.dataset.id || toEl.dataset.sectionId;
   const conn = { fromId, toId, pathEl: path, hitEl: hit, fromCp, toCp: target };

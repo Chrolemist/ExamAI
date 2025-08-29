@@ -584,6 +584,31 @@
         <div class="subtle"><span data-role="maxTokensValue">1000</span></div>
       </label>
       
+      <fieldset style="margin:8px 0; padding:8px; border:1px solid #28283a; border-radius:8px;">
+        <legend class="subtle" style="padding:0 6px;">Chunkning</legend>
+        <label class="inline">
+          <input type="checkbox" data-role="chunkEnable" /> Aktivera chunkning
+        </label>
+        <div data-role="chunkScope" style="margin-left:20px; display:grid; gap:6px; margin-top:6px;">
+          <label class="inline"><input type="checkbox" data-role="chunkNodeToNode" checked /> Mellan noder</label>
+          <label class="inline"><input type="checkbox" data-role="chunkToSection" checked /> Till sektioner</label>
+          <div style="display:grid; gap:6px;">
+            <label class="inline"><input type="checkbox" data-role="chunkUseLines" checked /> Radchunkning (rader/batch)</label>
+            <label style="margin-left:22px;">
+              <input type="range" min="1" max="50" step="1" value="3" data-role="chunkAgg" />
+              <div class="subtle"><span data-role="chunkAggValue">3</span> rader/batch</div>
+            </label>
+            <label class="inline"><input type="checkbox" data-role="chunkUseNumbering" /> Numrerad chunkning (1., 2), 3: ...)</label>
+            <div class="subtle" style="margin-left:22px;">Splitta per numrerad rubrik så att varje del (t.ex. 1–10) blir en egen prompt.</div>
+            <label class="inline"><input type="checkbox" data-role="chunkUseTokens" /> Tokenchunkning (tokens/batch)</label>
+            <label style="margin-left:22px;">
+              <input type="range" min="200" max="2000" step="50" value="800" data-role="chunkToken" />
+              <div class="subtle"><span data-role="chunkTokenValue">800</span> tokens/batch</div>
+            </label>
+          </div>
+        </div>
+      </fieldset>
+      
       <label>Visningsläge
         <select data-role="renderMode">
           <option value="raw">Rå text</option>
@@ -681,6 +706,18 @@
   const selfReplyEl = by('[data-role="selfReply"]');
       const maxTokEl = by('[data-role="maxTokens"]');
       const maxTokVal = by('[data-role="maxTokensValue"]');
+  // Chunking controls
+  const chunkEnableEl = by('[data-role="chunkEnable"]');
+  const chunkScopeWrap = by('[data-role="chunkScope"]');
+  const chunkNodeToNodeEl = by('[data-role="chunkNodeToNode"]');
+  const chunkToSectionEl = by('[data-role="chunkToSection"]');
+  const chunkAggEl = by('[data-role="chunkAgg"]');
+  const chunkAggVal = by('[data-role="chunkAggValue"]');
+  const chunkUseLinesEl = by('[data-role="chunkUseLines"]');
+  const chunkUseTokensEl = by('[data-role="chunkUseTokens"]');
+  const chunkTokenEl = by('[data-role="chunkToken"]');
+  const chunkTokenVal = by('[data-role="chunkTokenValue"]');
+  const chunkUseNumberingEl = by('[data-role="chunkUseNumbering"]');
       
       const renderEl = by('[data-role="renderMode"]');
   // Web search settings removed from CoWorker; handled by Internet node
@@ -740,6 +777,23 @@
       if (typeof saved.useRole === 'boolean' && useRoleEl) useRoleEl.checked = !!saved.useRole;
   if (typeof saved.selfPanelReply === 'boolean' && selfReplyEl) selfReplyEl.checked = !!saved.selfPanelReply; else if (selfReplyEl && saved.selfPanelReply === undefined) selfReplyEl.checked = true;
       if (saved.maxTokens && maxTokEl) { maxTokEl.value = String(saved.maxTokens); if(maxTokVal) maxTokVal.textContent = String(saved.maxTokens); }
+      // Initialize chunking
+      try{
+        const en = !!saved.chunkingEnabled; if (chunkEnableEl) chunkEnableEl.checked = en;
+        if (chunkScopeWrap) chunkScopeWrap.style.opacity = en ? '1' : '0.6';
+        if (chunkScopeWrap) chunkScopeWrap.style.pointerEvents = en ? '' : 'none';
+        if (chunkNodeToNodeEl) chunkNodeToNodeEl.checked = (saved.chunkNodeToNode!==undefined) ? !!saved.chunkNodeToNode : true;
+        if (chunkToSectionEl) chunkToSectionEl.checked = (saved.chunkToSection!==undefined) ? !!saved.chunkToSection : true;
+        if (chunkAggEl) chunkAggEl.value = String(Math.max(1, Math.min(50, Number(saved.chunkBatchSize||3))));
+        if (chunkAggVal) chunkAggVal.textContent = String(Math.max(1, Math.min(50, Number(saved.chunkBatchSize||3))));
+        // Defaults: use lines ON, use tokens OFF unless previously saved
+        if (chunkUseLinesEl) chunkUseLinesEl.checked = (saved.chunkUseLines!==undefined) ? !!saved.chunkUseLines : true;
+        if (chunkUseTokensEl) chunkUseTokensEl.checked = (saved.chunkUseTokens!==undefined) ? !!saved.chunkUseTokens : false;
+  if (chunkUseNumberingEl) chunkUseNumberingEl.checked = (saved.chunkUseNumbering!==undefined) ? !!saved.chunkUseNumbering : false;
+        const tokSize = Math.max(200, Math.min(2000, Number(saved.chunkTokenSize||800)));
+        if (chunkTokenEl) chunkTokenEl.value = String(tokSize);
+        if (chunkTokenVal) chunkTokenVal.textContent = String(tokSize);
+      }catch{}
       
       if (saved.renderMode && renderEl) renderEl.value = saved.renderMode;
   // no web settings for coworker anymore
@@ -754,6 +808,17 @@
       useRoleEl?.addEventListener('change', ()=>{ persist({ useRole: !!useRoleEl.checked }); updateRoleBadge(); });
   selfReplyEl?.addEventListener('change', ()=>{ persist({ selfPanelReply: !!selfReplyEl.checked }); });
       maxTokEl?.addEventListener('input', ()=>{ const v=Math.max(256, Math.min(30000, Number(maxTokEl.value)||1000)); if(maxTokVal) maxTokVal.textContent=String(v); persist({ maxTokens: v }); });
+      // Chunking listeners
+      const updateChunkUI = ()=>{ try{ const en = !!(chunkEnableEl && chunkEnableEl.checked); if (chunkScopeWrap){ chunkScopeWrap.style.opacity = en ? '1' : '0.6'; chunkScopeWrap.style.pointerEvents = en ? '' : 'none'; } }catch{} };
+      chunkEnableEl?.addEventListener('change', ()=>{ persist({ chunkingEnabled: !!chunkEnableEl.checked }); updateChunkUI(); });
+  chunkNodeToNodeEl?.addEventListener('change', ()=>{ persist({ chunkNodeToNode: !!chunkNodeToNodeEl.checked }); });
+  chunkToSectionEl?.addEventListener('change', ()=>{ persist({ chunkToSection: !!chunkToSectionEl.checked }); });
+  chunkAggEl?.addEventListener('input', ()=>{ const n=Math.max(1, Math.min(50, Number(chunkAggEl.value)||3)); if (chunkAggVal) chunkAggVal.textContent=String(n); persist({ chunkBatchSize: n }); });
+  chunkUseLinesEl?.addEventListener('change', ()=>{ persist({ chunkUseLines: !!chunkUseLinesEl.checked }); });
+  chunkUseTokensEl?.addEventListener('change', ()=>{ persist({ chunkUseTokens: !!chunkUseTokensEl.checked }); });
+  chunkUseNumberingEl?.addEventListener('change', ()=>{ persist({ chunkUseNumbering: !!chunkUseNumberingEl.checked }); });
+  chunkTokenEl?.addEventListener('input', ()=>{ const n=Math.max(200, Math.min(2000, Number(chunkTokenEl.value)||800)); if (chunkTokenVal) chunkTokenVal.textContent = String(n); persist({ chunkTokenSize: n }); });
+      updateChunkUI();
       
       renderEl?.addEventListener('change', ()=>persist({ renderMode: renderEl.value }));
   // removed web listeners
@@ -1201,9 +1266,10 @@
           return raw ? JSON.parse(raw) : {};
         }catch{ return {}; }
       };
-      const settings = getSecSettings();
-    const modeNow = (sec?.dataset.mode) || settings.mode || settings.renderMode || 'md';
-  const readSecMode = ()=> ((sec?.dataset.mode) || settings.mode || settings.renderMode || 'md');
+  const settings = getSecSettings();
+  // Prefer saved renderMode first; dataset.mode is only a transient UI flag
+  const modeNow = settings.renderMode || settings.mode || (sec?.dataset.mode) || 'md';
+  const readSecMode = ()=> (settings.renderMode || settings.mode || (sec?.dataset.mode) || 'md');
       // If in exercises mode and a pending feedback index exists, store incoming text as feedback
       if (modeNow === 'exercises'){
         try{
@@ -1990,20 +2056,71 @@
             sec.setAttribute('data-mode','exercises');
             try{ sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id } })); }catch{}
           } else if (mode === 'md' && window.mdToHtml){
-            // ensure layout is reset to single-column
+            // ensure layout is reset to single-column and remove any exercises UI
+            sec.removeAttribute('data-mode');
+            try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
             try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
             renderMarkdown();
           } else if (mode === 'html'){
+            // clear exercises flag/UI and render stored HTML
+            sec.removeAttribute('data-mode');
+            try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
             try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
             const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
             localStorage.setItem(`sectionRaw:${id}`, src);
             note.innerHTML = sanitizeHtml(src);
             note.dataset.rendered = '1';
+          } else {
+            // raw text mode on initial render: clear exercises, reset layout, and show plain text
+            sec.removeAttribute('data-mode');
+            try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
+            try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
+            const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
+            localStorage.setItem(`sectionRaw:${id}`, src);
+            note.textContent = src;
+            delete note.dataset.rendered;
           }
         }
       });
     }catch{}
   }
+  // Section streaming helpers: build content incrementally without adding extra newlines per chunk
+  try{
+    window.__sectionStreamState = window.__sectionStreamState || new Map();
+    window.appendToSectionStreamBegin = function(sectionId){
+      try{
+        const id = String(sectionId||''); if (!id) return;
+        if (window.__sectionStreamState.has(id)) return; // already begun
+        const base = localStorage.getItem(`sectionRaw:${id}`) || '';
+        window.__sectionStreamState.set(id, { base, buf: '' });
+      }catch{}
+    };
+    window.appendToSectionStreamDelta = function(sectionId, delta){
+      try{
+        const id = String(sectionId||''); if (!id) return;
+        const st = window.__sectionStreamState.get(id);
+        if (!st){ window.appendToSectionStreamBegin(id); return window.appendToSectionStreamDelta(id, delta); }
+        st.buf += String(delta||'');
+        const combined = st.base + st.buf;
+        localStorage.setItem(`sectionRaw:${id}`, combined);
+        // Re-render according to saved renderMode
+        const sec = document.querySelector(`.panel.board-section[data-section-id="${id}"]`);
+        const note = sec ? sec.querySelector('.note') : null; if (!note) return;
+        let mode = 'md';
+        try{ const raw = localStorage.getItem(`sectionSettings:${id}`); if (raw){ const s = JSON.parse(raw)||{}; if (s.renderMode) mode = String(s.renderMode); } }catch{}
+        if (mode === 'md' && window.mdToHtml){
+          try{ note.innerHTML = sanitizeHtml(window.mdToHtml(combined)); note.dataset.rendered = '1'; }catch{ note.textContent = combined; delete note.dataset.rendered; }
+        } else if (mode === 'html'){
+          try{ note.innerHTML = sanitizeHtml(combined); note.dataset.rendered = '1'; }catch{ note.textContent = combined; delete note.dataset.rendered; }
+        } else {
+          note.textContent = combined; delete note.dataset.rendered;
+        }
+      }catch{}
+    };
+    window.appendToSectionStreamEnd = function(sectionId){
+      try{ const id = String(sectionId||''); window.__sectionStreamState.delete(id); }catch{}
+    };
+  }catch{}
   // Utilities to import questions into a section as exercise blocks
   (function(){
     function parseQuestions(text){
