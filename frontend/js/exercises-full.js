@@ -162,7 +162,64 @@
       }
     });
   }
-  function toggleLayout(){ const l = loadLayout(); l.free = !l.free; saveLayout(l); applyLayout(); }
+  function toggleLayout(){
+    const l = loadLayout();
+    const goingFree = !l.free;
+    if (goingFree){
+      // Capture current fixed (grid) positions/sizes relative to the main container
+      try{
+        const cont = els.main.getBoundingClientRect();
+        // Predict container offset in free mode (so saved coords preserve viewport position)
+        let deltaX = 0, deltaY = 0;
+        try{
+          const wrap = document.querySelector('.fx-wrap');
+          if (wrap){
+            const prevVis = wrap.style.visibility;
+            wrap.style.visibility = 'hidden';
+            wrap.classList.add('free');
+            const contAfter = els.main.getBoundingClientRect();
+            wrap.classList.remove('free');
+            wrap.style.visibility = prevVis;
+            deltaX = Math.round(cont.left - contAfter.left);
+            deltaY = Math.round(cont.top - contAfter.top);
+          }
+        }catch{}
+        const snap = (el)=>{
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return {
+            x: Math.round((r.left - cont.left) + deltaX),
+            y: Math.round((r.top - cont.top) + deltaY),
+            w: Math.round(r.width),
+            h: Math.round(r.height)
+          };
+        };
+        const next = Object.assign({}, l, { free: true });
+        const q = snap(els.cards.q); if (q) next.q = q;
+        const a = snap(els.cards.a); if (a) next.a = a;
+        const f = snap(els.cards.f); if (f) next.f = f;
+        const t = snap(els.cards.t); if (t) next.t = t;
+        // If Theory exists, clamp its Y so it starts below Q/A/F stack when entering free layout
+        try{
+          if (next.t){
+            const rQ = els.cards.q?.getBoundingClientRect();
+            const rA = els.cards.a?.getBoundingClientRect();
+            const rF = els.cards.f?.getBoundingClientRect();
+            const bottoms = [rQ?.bottom, rA?.bottom, rF?.bottom].filter(v=>Number.isFinite(v));
+            if (bottoms.length){
+              const minTopAbs = Math.max.apply(null, bottoms);
+              const minY = Math.max(0, Math.round(minTopAbs - cont.top) + 12 + deltaY);
+              if (next.t.y < minY) next.t.y = minY;
+            }
+          }
+        }catch{}
+        saveLayout(next);
+      }catch{ l.free = true; saveLayout(l); }
+    } else {
+      l.free = false; saveLayout(l);
+    }
+    applyLayout();
+  }
 
   function persistCard(card){
   const name = card.id==='cardQ'?'q': card.id==='cardA'?'a': card.id==='cardF'?'f':'t';
@@ -178,6 +235,23 @@
       if (window.makeDraggableWithin && handle){
         window.makeDraggableWithin(els.main, c, handle, {
           enabled: ()=> loadLayout().free===true,
+          // Prevent Theory card (T) from covering Q/A/F: clamp its top within a safe band
+      bounds: (el, cont)=>{
+            try{
+              if (el.id === 'cardT'){
+        const rQ = els.cards.q?.getBoundingClientRect();
+        const rA = els.cards.a?.getBoundingClientRect();
+        const rF = els.cards.f?.getBoundingClientRect();
+        const rc = cont.getBoundingClientRect();
+        // Keep Theory strictly below the Q/A/F stack: anchor to their maximum bottom + gap
+        const bottoms = [rQ?.bottom, rA?.bottom, rF?.bottom].filter(v=>Number.isFinite(v));
+        const minTopAbs = bottoms.length ? Math.max.apply(null, bottoms) : rc.top + 20;
+        const minY = Math.max(0, Math.round(minTopAbs - rc.top) + 12);
+        return { minX: 0, minY, maxX: rc.width - el.offsetWidth, maxY: rc.height - el.offsetHeight };
+              }
+            }catch{}
+            return { minX: 0, minY: 0, maxX: cont.clientWidth - c.offsetWidth, maxY: cont.clientHeight - c.offsetHeight };
+          },
           onEnd: ()=> persistCard(c),
         });
       }

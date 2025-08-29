@@ -9,8 +9,20 @@
       if(!active) return;
       const p = point(e);
       const dx = p.x - sx, dy = p.y - sy;
-      const left = clamp(sl + dx, 0, Math.max(0, crect.width - el.offsetWidth));
-      const top  = clamp(st + dy, 0, Math.max(0, crect.height - el.offsetHeight));
+      // Default bounds are container edges
+      let minX = 0, minY = 0, maxX = Math.max(0, crect.width - el.offsetWidth), maxY = Math.max(0, crect.height - el.offsetHeight);
+      // Optional dynamic bounds from opts.bounds()
+      try{
+        const b = opts && (typeof opts.bounds==='function' ? opts.bounds(el, container) : opts && opts.bounds);
+        if (b){
+          if (Number.isFinite(b.minX)) minX = b.minX;
+          if (Number.isFinite(b.minY)) minY = b.minY;
+          if (Number.isFinite(b.maxX)) maxX = b.maxX;
+          if (Number.isFinite(b.maxY)) maxY = b.maxY;
+        }
+      }catch{}
+      const left = clamp(sl + dx, minX, maxX);
+      const top  = clamp(st + dy, minY, maxY);
       el.style.left = left + 'px';
       el.style.top  = top + 'px';
       if (opts && typeof opts.onMove==='function') { try{ opts.onMove(left, top); }catch{} }

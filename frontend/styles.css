@@ -36,6 +36,7 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 /* Exercises focus split view (Övningsblock) */
 .panel.board-section .ex-left,
 .panel.board-section .ex-right{
+  position:relative;
   border:1px solid #23232b;
   border-radius:8px;
   padding:8px;
@@ -309,7 +310,7 @@ svg#connLayer{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:non
 }
 
 /* Loading overlay + RGB spinner (dark theme) */
-.loader-overlay{position:absolute;inset:0;display:none;place-items:center;/* removed blur to keep bubbles visible */background:rgba(7,7,11,0.28);border-radius:10px;z-index:20}
+.loader-overlay{position:absolute;inset:0;display:none;place-items:center;/* keep subtle dim */background:rgba(7,7,11,0.28);border-radius:10px;z-index:100}
 .loader-overlay.show{display:grid}
 .spinner-rgb{width:64px;height:64px;border-radius:50%;
   background:conic-gradient(from 0deg,#7c5cff, #00d4ff, #7c5cff);
