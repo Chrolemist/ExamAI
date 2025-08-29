@@ -479,6 +479,7 @@
             </label>
             <label class="inline"><input type="checkbox" data-role="chunkUseNumbering" /> Numrerad chunkning (1., 2), 3: ...)</label>
             <div class="subtle" style="margin-left:22px;">Splitta per numrerad rubrik så att varje del (t.ex. 1–10) blir en egen prompt.</div>
+            <label class="inline" style="margin-left:22px;"><input type="checkbox" data-role="chunkTrimNumberedPreamble" /> Trimma preambel före numrerad lista till nästa nod</label>
           </div>
         </div>
       </fieldset>
@@ -559,6 +560,7 @@
     const chunkToSectionEl = panel.querySelector('[data-role="chunkToSection"]');
     const chunkUseLinesEl = panel.querySelector('[data-role="chunkUseLines"]');
     const chunkUseNumberingEl = panel.querySelector('[data-role="chunkUseNumbering"]');
+  const chunkTrimNumPreEl = panel.querySelector('[data-role="chunkTrimNumberedPreamble"]');
     const chunkAggEl = panel.querySelector('[data-role="chunkAgg"]');
     const chunkAggVal = panel.querySelector('[data-role="chunkAggValue"]');
     const savedU = readSavedU();
@@ -568,6 +570,7 @@
     if (chunkToSectionEl) chunkToSectionEl.checked = (savedU.chunkToSection!==undefined) ? !!savedU.chunkToSection : true;
     if (chunkUseLinesEl) chunkUseLinesEl.checked = (savedU.chunkUseLines!==undefined) ? !!savedU.chunkUseLines : true;
     if (chunkUseNumberingEl) chunkUseNumberingEl.checked = (savedU.chunkUseNumbering!==undefined) ? !!savedU.chunkUseNumbering : false;
+  if (chunkTrimNumPreEl) chunkTrimNumPreEl.checked = (savedU.chunkTrimNumberedPreamble!==undefined) ? !!savedU.chunkTrimNumberedPreamble : false;
     if (chunkAggEl){ const n=Math.max(1, Math.min(50, Number(savedU.chunkBatchSize||3))); chunkAggEl.value=String(n); if (chunkAggVal) chunkAggVal.textContent=String(n); }
     const updateChunkUIU = ()=>{ try{ const en = !!chunkEnableEl?.checked; if (chunkScopeWrap){ chunkScopeWrap.style.opacity = en ? '1' : '0.6'; chunkScopeWrap.style.pointerEvents = en ? '' : 'none'; } }catch{} };
     chunkEnableEl?.addEventListener('change', ()=>{ persistU({ chunkingEnabled: !!chunkEnableEl.checked }); updateChunkUIU(); });
@@ -575,6 +578,7 @@
     chunkToSectionEl?.addEventListener('change', ()=>persistU({ chunkToSection: !!chunkToSectionEl.checked }));
     chunkUseLinesEl?.addEventListener('change', ()=>persistU({ chunkUseLines: !!chunkUseLinesEl.checked }));
     chunkUseNumberingEl?.addEventListener('change', ()=>persistU({ chunkUseNumbering: !!chunkUseNumberingEl.checked }));
+  chunkTrimNumPreEl?.addEventListener('change', ()=>persistU({ chunkTrimNumberedPreamble: !!chunkTrimNumPreEl.checked }));
     chunkAggEl?.addEventListener('input', ()=>{ const n=Math.max(1, Math.min(50, Number(chunkAggEl.value)||3)); if (chunkAggVal) chunkAggVal.textContent=String(n); persistU({ chunkBatchSize: n }); });
   }catch{}
   panel.querySelector('[data-action="resetAll"]')?.addEventListener('click', ()=>{ panel._bubbleColorHex='#7c5cff'; panel._bubbleAlpha=0.10; panel._bgOn=true; const m=messagesEl; if(m) m.innerHTML=''; if(colorPicker) colorPicker.value=panel._bubbleColorHex; if(colorToggle) colorToggle.style.background=panel._bubbleColorHex; if(alphaEl) alphaEl.value='10'; if(alphaVal) alphaVal.textContent='10%'; if(fontTextSel){ fontTextSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._textFont=fontTextSel.value; if(messagesEl) messagesEl.style.fontFamily=panel._textFont; if(inputEl) inputEl.style.fontFamily=panel._textFont; } if(fontNameSel){ fontNameSel.value='system-ui, Segoe UI, Roboto, Arial, sans-serif'; panel._nameFont=fontNameSel.value; const hn=panel.querySelector('.drawer-head .meta .name'); if(hn) hn.style.fontFamily=panel._nameFont; const lab=hostEl.querySelector('.fab-label'); if(lab) lab.style.fontFamily=panel._nameFont; panel.querySelectorAll('.author-label').forEach(el=>{ el.style.fontFamily=panel._nameFont; }); } if(renderSel){ renderSel.value='md'; } applyBubbleStyles(); });
@@ -671,6 +675,7 @@
             </label>
             <label class="inline"><input type="checkbox" data-role="chunkUseNumbering" /> Numrerad chunkning (1., 2), 3: ...)</label>
             <div class="subtle" style="margin-left:22px;">Splitta per numrerad rubrik så att varje del (t.ex. 1–10) blir en egen prompt.</div>
+            <label class="inline" style="margin-left:22px;"><input type="checkbox" data-role="chunkTrimNumberedPreamble" /> Trimma preambel före numrerad lista till nästa nod</label>
             <label class="inline"><input type="checkbox" data-role="chunkUseTokens" /> Tokenchunkning (tokens/batch)</label>
             <label style="margin-left:22px;">
               <input type="range" min="200" max="2000" step="50" value="800" data-role="chunkToken" />
@@ -789,6 +794,7 @@
   const chunkTokenEl = by('[data-role="chunkToken"]');
   const chunkTokenVal = by('[data-role="chunkTokenValue"]');
   const chunkUseNumberingEl = by('[data-role="chunkUseNumbering"]');
+  const chunkTrimNumPreEl = by('[data-role\="chunkTrimNumberedPreamble\"]');
       
       const renderEl = by('[data-role="renderMode"]');
   // Web search settings removed from CoWorker; handled by Internet node
@@ -861,6 +867,7 @@
         if (chunkUseLinesEl) chunkUseLinesEl.checked = (saved.chunkUseLines!==undefined) ? !!saved.chunkUseLines : true;
         if (chunkUseTokensEl) chunkUseTokensEl.checked = (saved.chunkUseTokens!==undefined) ? !!saved.chunkUseTokens : false;
   if (chunkUseNumberingEl) chunkUseNumberingEl.checked = (saved.chunkUseNumbering!==undefined) ? !!saved.chunkUseNumbering : false;
+  if (chunkTrimNumPreEl) chunkTrimNumPreEl.checked = (saved.chunkTrimNumberedPreamble!==undefined) ? !!saved.chunkTrimNumberedPreamble : false;
         const tokSize = Math.max(200, Math.min(2000, Number(saved.chunkTokenSize||800)));
         if (chunkTokenEl) chunkTokenEl.value = String(tokSize);
         if (chunkTokenVal) chunkTokenVal.textContent = String(tokSize);
@@ -888,6 +895,7 @@
   chunkUseLinesEl?.addEventListener('change', ()=>{ persist({ chunkUseLines: !!chunkUseLinesEl.checked }); });
   chunkUseTokensEl?.addEventListener('change', ()=>{ persist({ chunkUseTokens: !!chunkUseTokensEl.checked }); });
   chunkUseNumberingEl?.addEventListener('change', ()=>{ persist({ chunkUseNumbering: !!chunkUseNumberingEl.checked }); });
+  chunkTrimNumPreEl?.addEventListener('change', ()=>{ persist({ chunkTrimNumberedPreamble: !!chunkTrimNumPreEl.checked }); });
   chunkTokenEl?.addEventListener('input', ()=>{ const n=Math.max(200, Math.min(2000, Number(chunkTokenEl.value)||800)); if (chunkTokenVal) chunkTokenVal.textContent = String(n); persist({ chunkTokenSize: n }); });
       updateChunkUI();
       

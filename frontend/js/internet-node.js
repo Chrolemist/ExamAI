@@ -165,6 +165,9 @@
         <label class="inline" style="margin-top:6px">
           <input type="checkbox" data-role="chunkNumbered" /> Numrerad chunkning (1., 2), 3: …)
         </label>
+        <label class="inline" style="margin-left:22px; margin-top:4px">
+          <input type="checkbox" data-role="chunkTrimNumberedPreamble" /> Trimma preambel före numrerad lista till nästa nod
+        </label>
         <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px; margin-top:6px">
           <label class="inline"><input type="checkbox" data-role="chunkLines" checked /> Radchunkning</label>
           <label>rader/batch
@@ -254,6 +257,7 @@
   const chNodeToNodeEl = by('[data-role="chunkNodeToNode"]');
   const chToSectionEl = by('[data-role="chunkToSection"]');
   const chNumberedEl = by('[data-role="chunkNumbered"]');
+  const chTrimNumPreEl = by('[data-role="chunkTrimNumberedPreamble"]');
   const chLinesEl = by('[data-role="chunkLines"]');
   const chBatchEl = by('[data-role="chunkBatchSize"]');
   const chBatchValEl = by('[data-role="chunkBatchSizeVal"]');
@@ -292,6 +296,7 @@
       if (typeof saved.chunkNodeToNode==='boolean' && chNodeToNodeEl) chNodeToNodeEl.checked = !!saved.chunkNodeToNode; else if (chNodeToNodeEl) chNodeToNodeEl.checked = true;
       if (typeof saved.chunkToSection==='boolean' && chToSectionEl) chToSectionEl.checked = !!saved.chunkToSection; else if (chToSectionEl) chToSectionEl.checked = true;
       if (typeof saved.chunkUseNumbering==='boolean' && chNumberedEl) chNumberedEl.checked = !!saved.chunkUseNumbering;
+  if (typeof saved.chunkTrimNumberedPreamble==='boolean' && chTrimNumPreEl) chTrimNumPreEl.checked = !!saved.chunkTrimNumberedPreamble;
       if (typeof saved.chunkUseLines==='boolean' && chLinesEl) chLinesEl.checked = !!saved.chunkUseLines; else if (chLinesEl) chLinesEl.checked = true;
       if (saved.chunkBatchSize && chBatchEl){ chBatchEl.value = String(Math.max(1, Math.min(50, Number(saved.chunkBatchSize)||3))); if(chBatchValEl) chBatchValEl.textContent = chBatchEl.value; }
       if (typeof saved.chunkUseTokens==='boolean' && chTokensEl) chTokensEl.checked = !!saved.chunkUseTokens;
@@ -345,6 +350,7 @@
   chNodeToNodeEl?.addEventListener('change', ()=>persist({ chunkNodeToNode: !!chNodeToNodeEl.checked }));
   chToSectionEl?.addEventListener('change', ()=>persist({ chunkToSection: !!chToSectionEl.checked }));
   chNumberedEl?.addEventListener('change', ()=>persist({ chunkUseNumbering: !!chNumberedEl.checked }));
+  chTrimNumPreEl?.addEventListener('change', ()=>persist({ chunkTrimNumberedPreamble: !!chTrimNumPreEl.checked }));
   chLinesEl?.addEventListener('change', ()=>persist({ chunkUseLines: !!chLinesEl.checked }));
   chBatchEl?.addEventListener('input', ()=>{ const v=Math.max(1, Math.min(50, Number(chBatchEl.value)||3)); if (chBatchValEl) chBatchValEl.textContent=String(v); persist({ chunkBatchSize: v }); });
   chTokensEl?.addEventListener('change', ()=>persist({ chunkUseTokens: !!chTokensEl.checked }));

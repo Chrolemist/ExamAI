@@ -9,6 +9,17 @@
 (function(){
   const svg = () => window.svg;
   const { ensureDefs, makePath, makeHitPath, drawPath, triggerFlowEffect } = (window.svgHelpers||{});
+  // Per-target queue: ensure a node waits for the downstream node to finish before sending the next payload
+  window.__nodeQueues = window.__nodeQueues || new Map();
+  function enqueueNodeWork(targetId, task){
+    try{
+      const q = window.__nodeQueues.get(targetId) || Promise.resolve();
+      const next = q.then(async ()=>{ try{ await task(); }catch(e){ console.warn('[queue] task error for', targetId, e); } });
+      // Keep chain; don't drop errors to avoid breaking sequence
+      window.__nodeQueues.set(targetId, next.catch(()=>{}));
+      return next;
+    }catch(e){ console.warn('[queue] enqueue failed', e); try{ return Promise.resolve().then(()=>task()); }catch{ return Promise.resolve(); } }
+  }
   // Track a selected connection for keyboard deletion
   let _selectedConn = null;
   // simulation toggle
@@ -111,24 +122,32 @@
       const tokenSize = Math.max(200, Math.min(2000, Number(srcSettings.chunkTokenSize||800)));
       // 1) Numbered chunking (strongest) → strict backpressure per numbered block
       if ((isCoworkerSource || isInternetSource || isUserSource) && chunkEnabled && allowNodeToNode && useNumbering && window.chunking && typeof window.chunking.splitByNumbering==='function'){
-        const parts = window.chunking.splitByNumbering(text);
+        let parts = window.chunking.splitByNumbering(text);
         if (Array.isArray(parts) && parts.length>1){
-          (async ()=>{
+          // Optional: trim any preamble before the first numbered item for downstream forwarding only
+          try{
+            const trimPre = !!srcSettings.chunkTrimNumberedPreamble;
+            if (trimPre){
+              const isNumHead = (s)=>/^\s*\d{1,3}[\.)\:\-–—]\s+/.test(String(s||''));
+              if (parts.length && !isNumHead(parts[0])) parts = parts.slice(1);
+            }
+          }catch{}
+          enqueueNodeWork(targetId, async ()=>{
             for (let i=0;i<parts.length;i++){
-              const part = parts[i]; const N = parts.length; const idx=i+1;
-              const payload = part;
+              const part = parts[i];
+              const payloadPart = part;
               const ts2 = Date.now();
               const meta2 = Object.assign({}, routedMeta, { ts: ts2 });
-              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
-              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
-              try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
+              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payloadPart, author, who: whoForTarget, ts: ts2 } })); }catch{}
+              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payloadPart, whoForTarget, meta2); }catch{}
+              try{ if(window.receiveMessage) window.receiveMessage(targetId, payloadPart, whoForTarget, meta2); }catch{}
               try{
                 const tType = host?.dataset?.type;
-                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payload, sourceId }); }
-                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payload, sourceId }); }
+                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payloadPart, sourceId }); }
+                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payloadPart, sourceId }); }
               }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
             }
-          })();
+          });
           return true;
         }
       }
@@ -136,22 +155,22 @@
       if ((isCoworkerSource || isInternetSource || isUserSource) && chunkEnabled && allowNodeToNode && useLines){
         const parts = makeLineBatches(text, batchSize);
         if (Array.isArray(parts) && parts.length>1){
-          (async ()=>{
+          enqueueNodeWork(targetId, async ()=>{
             for (let i=0;i<parts.length;i++){
-              const part = parts[i]; const N = parts.length; const idx=i+1;
-              const payload = part;
+              const part = parts[i];
+              const payloadPart = part;
               const ts2 = Date.now();
               const meta2 = Object.assign({}, routedMeta, { ts: ts2 });
-              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
-              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
-              try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
+              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payloadPart, author, who: whoForTarget, ts: ts2 } })); }catch{}
+              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payloadPart, whoForTarget, meta2); }catch{}
+              try{ if(window.receiveMessage) window.receiveMessage(targetId, payloadPart, whoForTarget, meta2); }catch{}
               try{
                 const tType = host?.dataset?.type;
-                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payload, sourceId }); }
-                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payload, sourceId }); }
+                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payloadPart, sourceId }); }
+                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payloadPart, sourceId }); }
               }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
             }
-          })();
+          });
           return true;
         }
       }
@@ -162,22 +181,22 @@
         if (totalT > maxT){
           const parts = smartChunk(text, maxT);
           if (!parts || parts.length<=1) return false;
-          (async ()=>{
+          enqueueNodeWork(targetId, async ()=>{
             for (let i=0;i<parts.length;i++){
-              const part = parts[i]; const N = parts.length; const idx=i+1;
-              const payload = part;
+              const part = parts[i];
+              const payloadPart = part;
               const ts2 = Date.now();
               const meta2 = Object.assign({}, routedMeta, { ts: ts2 });
-              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
-              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
-              try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
+              try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payloadPart, author, who: whoForTarget, ts: ts2 } })); }catch{}
+              try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payloadPart, whoForTarget, meta2); }catch{}
+              try{ if(window.receiveMessage) window.receiveMessage(targetId, payloadPart, whoForTarget, meta2); }catch{}
               try{
                 const tType = host?.dataset?.type;
-                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payload, sourceId }); }
-                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payload, sourceId }); }
+                if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payloadPart, sourceId }); }
+                else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payloadPart, sourceId }); }
               }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
             }
-          })();
+          });
           return true;
         }
       }
@@ -187,76 +206,44 @@
       if (totalT <= Math.max(1000, Math.floor(budget*1.25))) return false;
       const parts = smartChunk(text);
       if (!parts || parts.length<=1) return false;
-      (async ()=>{
+      enqueueNodeWork(targetId, async ()=>{
         for (let i=0;i<parts.length;i++){
-          const part = parts[i]; const N = parts.length; const idx=i+1;
-          const payload = part;
+          const part = parts[i];
+          const payloadPart = part;
           const ts2 = Date.now();
           const meta2 = Object.assign({}, routedMeta, { ts: ts2 });
-          try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payload, author, who: whoForTarget, ts: ts2 } })); }catch{}
-          try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payload, whoForTarget, meta2); }catch{}
-          try{ if(window.receiveMessage) window.receiveMessage(targetId, payload, whoForTarget, meta2); }catch{}
+          try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payloadPart, author, who: whoForTarget, ts: ts2 } })); }catch{}
+          try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payloadPart, whoForTarget, meta2); }catch{}
+          try{ if(window.receiveMessage) window.receiveMessage(targetId, payloadPart, whoForTarget, meta2); }catch{}
           try{
             const tType = host?.dataset?.type;
-            if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payload, sourceId }); }
-            else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payload, sourceId }); }
+            if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payloadPart, sourceId }); }
+            else if (tType === 'internet' && window.requestInternetReply){ await window.requestInternetReply(targetId, { text: payloadPart, sourceId }); }
           }catch(e){ if (e && (e._aborted || e.name==='AbortError' || /aborted|abort/i.test(String(e.message||'')))) break; }
         }
-      })();
+      });
       return true;
     };
     if (maybeChunk()) return;
   }catch{}
-  // Default single-shot route
-  try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, whoForTarget, routedMeta); }catch{}
-  try{ if(window.receiveMessage) window.receiveMessage(targetId, text, whoForTarget, routedMeta); }catch{}
-  // If the target is a board section, append content there as well (unless caller streamed deltas already)
-    try{
+  // Default single-shot route (queued)
+  enqueueNodeWork(targetId, async ()=>{
+      if(window.graph) window.graph.addMessage(targetId, author||'Incoming', text, whoForTarget, routedMeta);
+      if(window.receiveMessage) window.receiveMessage(targetId, text, whoForTarget, routedMeta);
+      // If the target is a board section, append content there as well (unless caller streamed deltas already)
       const targetEl = document.querySelector(`.panel.board-section[data-section-id="${targetId}"]`);
       if (targetEl && window.appendToSection){
-    const skip = !!(payload && payload.meta && payload.meta.skipSectionFinalAppend);
-    if (!skip){
-    // Sections decide their own render mode; apply chunking if source coworker opted in
-    const readNodeSettings = (id)=>{ try{ const raw = localStorage.getItem(`nodeSettings:${id}`); return raw ? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
-    const srcSettings = readNodeSettings(sourceId);
-    const chunkEnabled = !!srcSettings.chunkingEnabled;
-    const allowToSection = (srcSettings.chunkToSection!==undefined) ? !!srcSettings.chunkToSection : true;
-  const useLines = (srcSettings.chunkUseLines!==undefined) ? !!srcSettings.chunkUseLines : true;
-  const useNumbering = !!srcSettings.chunkUseNumbering;
-    const useTokens = !!srcSettings.chunkUseTokens;
-    const batchSize = Math.max(1, Math.min(50, Number(srcSettings.chunkBatchSize||3)));
-    const tokenSize = Math.max(200, Math.min(2000, Number(srcSettings.chunkTokenSize||800)));
-    if (chunkEnabled && allowToSection && window.chunking){
-      const txt = String(text||'');
-      // Prefer numbered chunking if enabled
-      if (useNumbering && window.chunking && typeof window.chunking.splitByNumbering==='function'){
-        const parts = window.chunking.splitByNumbering(txt);
-        if (Array.isArray(parts) && parts.length>1){ parts.forEach(part=> window.appendToSection(targetId, part)); return; }
+        const skip = !!(payload && payload.meta && payload.meta.skipSectionFinalAppend);
+        if (!skip){
+          // Simple final append; section streaming already handled during coworker stream
+          window.appendToSection(targetId, text);
+        }
       }
-      // Else prefer line chunking if enabled
-      if (useLines && typeof window.chunking.makeLineBatches==='function'){
-        const parts = window.chunking.makeLineBatches(txt, batchSize);
-        if (Array.isArray(parts) && parts.length>1){ parts.forEach(part=> window.appendToSection(targetId, part)); return; }
-      }
-      // Else token chunking if enabled and oversized
-      if (useTokens && typeof window.chunking.approxTokens==='function' && typeof window.chunking.smartChunk==='function'){
-        const totalT = window.chunking.approxTokens(txt);
-        if (totalT > tokenSize){ const parts = window.chunking.smartChunk(txt, tokenSize); if (Array.isArray(parts) && parts.length>1){ parts.forEach(part=> window.appendToSection(targetId, part)); return; } }
-      }
-      // Default: single append
-      window.appendToSection(targetId, text);
-    } else {
-      window.appendToSection(targetId, text);
-    }
-    }
-      }
-    }catch{}
-    // If the receiving node is a coworker, request a real AI reply from backend
-    try{
-      const host = document.querySelector(`.fab[data-id="${targetId}"]`);
-      if (host && host.dataset.type === 'coworker') requestAIReply(targetId, { text: String(text), sourceId, via: `${conn.fromId}->${conn.toId}` });
-      if (host && host.dataset.type === 'internet' && window.requestInternetReply) window.requestInternetReply(targetId, { text: String(text), sourceId, via: `${conn.fromId}->${conn.toId}` });
-    }catch{}
+      // If the receiving node is a coworker/internet, await backend reply to enforce sequencing
+      const host2 = document.querySelector(`.fab[data-id="${targetId}"]`);
+      if (host2 && host2.dataset.type === 'coworker' && window.requestAIReply) await window.requestAIReply(targetId, { text: String(text), sourceId, via: `${conn.fromId}->${conn.toId}` });
+      if (host2 && host2.dataset.type === 'internet' && window.requestInternetReply) await window.requestInternetReply(targetId, { text: String(text), sourceId, via: `${conn.fromId}->${conn.toId}` });
+  });
   }
 
   // Backend integration: request an AI reply for a coworker node
