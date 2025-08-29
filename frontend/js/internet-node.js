@@ -476,10 +476,13 @@
         const textEl=document.createElement('div'); textEl.className='msg-text'; textEl.textContent='';
         const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign = 'left'; meta.textContent='';
         b.appendChild(textEl); b.appendChild(meta); group.appendChild(authorEl); group.appendChild(b); row.appendChild(group); list.appendChild(row);
-        list.scrollTop = list.scrollHeight;
+        // only autoscroll if at bottom or inactive for 5s
+        try{ wireAutoscrollGuard(list); const shouldScroll = shouldAutoscrollNow(list); if (shouldScroll){ list.__autoScrolling=true; list.scrollTop = list.scrollHeight; setTimeout(()=>{ try{ list.__autoScrolling=false; }catch{} }, 0); } }catch{}
         ensureUI._el = { row, bubble:b, textEl, metaEl:meta, panel, list };
         return ensureUI._el;
       };
+      function wireAutoscrollGuard(list){ try{ if(!list || list.__autoscrollHooked) return; list.__autoscrollHooked = true; list.addEventListener('scroll', ()=>{ try{ if (list.__autoScrolling) return; list.dataset.lastUserScrollTs = String(Date.now()); }catch{} }); }catch{} }
+      function shouldAutoscrollNow(list){ try{ const atBottom = (list.scrollTop + list.clientHeight) >= (list.scrollHeight - 8); if (atBottom) return true; const last = Number(list.dataset.lastUserScrollTs||0); if (!last) return false; return (Date.now() - last) >= 5000; }catch{ return true; } }
       const reader = res.body.getReader(); const decoder = new TextDecoder('utf-8');
       let acc='';
       while(true){
@@ -488,7 +491,7 @@
         const lines = chunk.split(/\r?\n/);
         for (const line of lines){ const t = String(line||'').trim(); if(!t) continue; let obj=null; try{ obj = JSON.parse(t); }catch{ continue; }
           const type = String(obj?.type||'');
-          if (type === 'delta'){ const d = String(obj?.delta||''); if(d){ acc += d; const ui = ensureUI(); if(ui){ ui.textEl.textContent = acc; ui.list.scrollTop = ui.list.scrollHeight; } } }
+          if (type === 'delta'){ const d = String(obj?.delta||''); if(d){ acc += d; const ui = ensureUI(); if(ui){ try{ wireAutoscrollGuard(ui.list); const shouldScroll = shouldAutoscrollNow(ui.list); ui.textEl.textContent = acc; if (shouldScroll){ ui.list.__autoScrolling=true; ui.list.scrollTop = ui.list.scrollHeight; setTimeout(()=>{ try{ ui.list.__autoScrolling=false; }catch{} }, 0); } }catch{} } } }
         }
       }
       // finalize
@@ -500,7 +503,9 @@
           let renderMode = 'md'; try{ const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if(raw){ const s=JSON.parse(raw)||{}; if(s.renderMode) renderMode = String(s.renderMode); } }catch{}
           if (renderMode === 'md' && window.mdToHtml){ try{ ui.textEl.innerHTML = sanitizeHtml(window.mdToHtml(finalText)); }catch{ ui.textEl.textContent = finalText; } } else { ui.textEl.textContent = finalText; }
           if (ui.metaEl) ui.metaEl.textContent = formatTime(ts);
-          ui.list.scrollTop = ui.list.scrollHeight;
+          wireAutoscrollGuard(ui.list);
+          const shouldScroll = shouldAutoscrollNow(ui.list);
+          if (shouldScroll){ ui.list.__autoScrolling=true; ui.list.scrollTop = ui.list.scrollHeight; setTimeout(()=>{ try{ ui.list.__autoScrolling=false; }catch{} }, 0); }
         } else { if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', { ts }); }
       }catch{ try{ if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', { ts }); }catch{} }
       try{ if(window.routeMessageFrom) window.routeMessageFrom(ownerId, finalText, { author, who:'assistant', ts }); }catch{}

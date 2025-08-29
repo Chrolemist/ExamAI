@@ -556,10 +556,18 @@
       const meta=document.createElement('div'); meta.className='subtle'; meta.style.marginTop='6px'; meta.style.opacity='0.8'; meta.style.textAlign='left'; meta.textContent = '';
       b.appendChild(meta);
       group.appendChild(authorEl); group.appendChild(b); row.appendChild(group); ctx.list.appendChild(row);
-      ctx.list.scrollTop = ctx.list.scrollHeight;
+      // Autoscroll guard: only scroll if user is at bottom or inactive for 5s
+      try{
+        wireAutoscrollGuard(ctx.list);
+        const shouldScroll = shouldAutoscrollNow(ctx.list);
+        if (shouldScroll){ ctx.list.__autoScrolling = true; ctx.list.scrollTop = ctx.list.scrollHeight; setTimeout(()=>{ try{ ctx.list.__autoScrolling=false; }catch{} }, 0); }
+      }catch{}
       ensureStreamUI._el = { row, bubble:b, textEl, metaEl:meta, panel:ctx.panel, list:ctx.list };
       return ensureStreamUI._el;
     };
+    // Autoscroll helpers: pause autoscroll if user scrolled within last 5s
+    function wireAutoscrollGuard(list){ try{ if(!list || list.__autoscrollHooked) return; list.__autoscrollHooked = true; list.addEventListener('scroll', ()=>{ try{ if (list.__autoScrolling) return; list.dataset.lastUserScrollTs = String(Date.now()); }catch{} }); }catch{} }
+    function shouldAutoscrollNow(list){ try{ const atBottom = (list.scrollTop + list.clientHeight) >= (list.scrollHeight - 8); if (atBottom) return true; const last = Number(list.dataset.lastUserScrollTs||0); if (!last) return false; return (Date.now() - last) >= 5000; }catch{ return true; } }
     let acc = '';
     // Track sections we stream into, to avoid duplicate full append on completion
     const streamedSids = new Set();
@@ -613,7 +621,14 @@
             if (d){
               acc += d;
               const ui = ensureStreamUI();
-              if (ui){ try{ ui.textEl.textContent = acc; ui.list.scrollTop = ui.list.scrollHeight; }catch{} }
+              if (ui){
+                try{
+                  wireAutoscrollGuard(ui.list);
+                  const shouldScroll = shouldAutoscrollNow(ui.list);
+                  ui.textEl.textContent = acc;
+                  if (shouldScroll){ ui.list.__autoScrolling = true; ui.list.scrollTop = ui.list.scrollHeight; setTimeout(()=>{ try{ ui.list.__autoScrolling=false; }catch{} }, 0); }
+                }catch{}
+              }
               // Also stream into connected/parked sections
               try{ appendDeltaToSections(d); }catch{}
             }
@@ -649,6 +664,8 @@
           if (sel && sel.value) renderMode = String(sel.value);
           else { const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if (raw){ const s=JSON.parse(raw)||{}; if (s.renderMode) renderMode = String(s.renderMode); } }
         }catch{}
+  wireAutoscrollGuard(ui.list);
+  const stayDown = shouldAutoscrollNow(ui.list);
         if (renderMode === 'md' && window.mdToHtml){
           try{
             const html = window.mdToHtml(finalText);
@@ -668,8 +685,8 @@
             ui.bubble.appendChild(box);
           }
         }catch{}
-        if (ui.metaEl) ui.metaEl.textContent = (window.formatTime? window.formatTime(ts) : '');
-        ui.list.scrollTop = ui.list.scrollHeight;
+  if (ui.metaEl) ui.metaEl.textContent = (window.formatTime? window.formatTime(ts) : '');
+  if (stayDown){ ui.list.__autoScrolling = true; ui.list.scrollTop = ui.list.scrollHeight; setTimeout(()=>{ try{ ui.list.__autoScrolling=false; }catch{} }, 0); }
       } else {
         if(window.receiveMessage) window.receiveMessage(ownerId, finalText, 'assistant', meta);
       }

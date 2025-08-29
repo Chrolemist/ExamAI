@@ -1082,7 +1082,7 @@
       if (panel.classList.contains('user-node-panel') && who==='user') authorName = (panel._displayName||'').trim() || (meta && meta.author ? String(meta.author) : 'User');
     }catch{}
     author.textContent = authorName;
-    const b=document.createElement('div'); b.className='bubble '+(who==='user'?'user':'');
+  const b=document.createElement('div'); b.className='bubble '+(who==='user'?'user':'');
     const textEl=document.createElement('div'); textEl.className='msg-text';
     // Determine if this panel should render markdown for assistant messages (coworker) or for user panel mode
   let renderMode = 'md';
@@ -1322,7 +1322,15 @@
         b.appendChild(foot);
       }
     }catch{}
-    const metaEl=document.createElement('div'); metaEl.className='subtle'; metaEl.style.marginTop='6px'; metaEl.style.opacity='0.8'; metaEl.style.textAlign = (who==='user' ? 'right' : 'left'); const ts = meta?.ts || Date.now(); metaEl.textContent = formatTime(ts); b.appendChild(metaEl); group.appendChild(author); group.appendChild(b); row.appendChild(group); list.appendChild(row); list.scrollTop=list.scrollHeight;
+    const metaEl=document.createElement('div'); metaEl.className='subtle'; metaEl.style.marginTop='6px'; metaEl.style.opacity='0.8'; metaEl.style.textAlign = (who==='user' ? 'right' : 'left'); const ts = meta?.ts || Date.now(); metaEl.textContent = formatTime(ts); b.appendChild(metaEl); group.appendChild(author); group.appendChild(b); row.appendChild(group); list.appendChild(row);
+    // Autoscroll guard: only scroll if user at bottom or no user scroll in last 5s
+    try{
+      if (!list.__autoscrollHooked){ list.__autoscrollHooked = true; list.addEventListener('scroll', ()=>{ try{ if (list.__autoScrolling) return; list.dataset.lastUserScrollTs = String(Date.now()); }catch{} }); }
+      const atBottom = (list.scrollTop + list.clientHeight) >= (list.scrollHeight - 8);
+      const last = Number(list.dataset.lastUserScrollTs||0);
+      const inactive = last ? ((Date.now() - last) >= 5000) : false;
+      if (atBottom || inactive){ list.__autoScrolling = true; list.scrollTop = list.scrollHeight; setTimeout(()=>{ try{ list.__autoScrolling=false; }catch{} }, 0); }
+    }catch{}
   }
   /** Append text content into a board section (by sectionId) with optional Markdown rendering. */
   function appendToSection(sectionId, text, opts){
