@@ -111,17 +111,21 @@
   const { approxTokens, estimateChunkBudget, makeLineBatches, smartChunk } = (window.chunking||{});
   // smartChunk now provided by helpers
     const maybeChunk = ()=>{
-      if (!isCoworkerTarget) return false;
-      // Backpressure: coworker → coworker sends N lines at a time and waits for stream completion when enabled
+  // Determine if target is a board section
+  const targetIsSection = !!document.querySelector(`.panel.board-section[data-section-id="${targetId}"]`);
+  // Backpressure & chunking are controlled by source settings
       const chunkEnabled = !!srcSettings.chunkingEnabled;
       const allowNodeToNode = (srcSettings.chunkNodeToNode!==undefined) ? !!srcSettings.chunkNodeToNode : true;
+  const allowToSection = (srcSettings.chunkToSection!==undefined) ? !!srcSettings.chunkToSection : true;
   const useLines = (srcSettings.chunkUseLines!==undefined) ? !!srcSettings.chunkUseLines : true;
   const useNumbering = !!srcSettings.chunkUseNumbering;
       const useTokens = !!srcSettings.chunkUseTokens;
       const batchSize = Math.max(1, Math.min(50, Number(srcSettings.chunkBatchSize||3)));
       const tokenSize = Math.max(200, Math.min(2000, Number(srcSettings.chunkTokenSize||800)));
       // 1) Numbered chunking (strongest) → strict backpressure per numbered block
-      if ((isCoworkerSource || isInternetSource || isUserSource) && chunkEnabled && allowNodeToNode && useNumbering && window.chunking && typeof window.chunking.splitByNumbering==='function'){
+  if ((isCoworkerSource || isInternetSource || isUserSource) && chunkEnabled && useNumbering && window.chunking && typeof window.chunking.splitByNumbering==='function' && (
+      (allowNodeToNode && (isCoworkerTarget || isInternetTarget)) || (allowToSection && targetIsSection)
+    )){
         let parts = window.chunking.splitByNumbering(text);
         if (Array.isArray(parts) && parts.length>1){
           // Optional: trim any preamble before the first numbered item for downstream forwarding only
@@ -141,6 +145,8 @@
               try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payloadPart, author, who: whoForTarget, ts: ts2 } })); }catch{}
               try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payloadPart, whoForTarget, meta2); }catch{}
               try{ if(window.receiveMessage) window.receiveMessage(targetId, payloadPart, whoForTarget, meta2); }catch{}
+      // Append to section per chunk when target is a board section and allowed
+      try{ if (targetIsSection && allowToSection && window.appendToSection) window.appendToSection(targetId, payloadPart); }catch{}
               try{
                 const tType = host?.dataset?.type;
                 if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payloadPart, sourceId }); }
@@ -152,7 +158,9 @@
         }
       }
       // 2) Line chunking
-      if ((isCoworkerSource || isInternetSource || isUserSource) && chunkEnabled && allowNodeToNode && useLines){
+  if ((isCoworkerSource || isInternetSource || isUserSource) && chunkEnabled && useLines && (
+      (allowNodeToNode && (isCoworkerTarget || isInternetTarget)) || (allowToSection && targetIsSection)
+    )){
         const parts = makeLineBatches(text, batchSize);
         if (Array.isArray(parts) && parts.length>1){
           enqueueNodeWork(targetId, async ()=>{
@@ -164,6 +172,7 @@
               try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payloadPart, author, who: whoForTarget, ts: ts2 } })); }catch{}
               try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payloadPart, whoForTarget, meta2); }catch{}
               try{ if(window.receiveMessage) window.receiveMessage(targetId, payloadPart, whoForTarget, meta2); }catch{}
+      try{ if (targetIsSection && allowToSection && window.appendToSection) window.appendToSection(targetId, payloadPart); }catch{}
               try{
                 const tType = host?.dataset?.type;
                 if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payloadPart, sourceId }); }
@@ -175,7 +184,9 @@
         }
       }
       // Token-based chunking (optional): when enabled and oversized for configured tokenSize
-      if ((isCoworkerTarget || isInternetTarget) && chunkEnabled && allowNodeToNode && useTokens && !isUserSource){
+  if (chunkEnabled && useTokens && !isUserSource && (
+      (allowNodeToNode && (isCoworkerTarget || isInternetTarget)) || (allowToSection && targetIsSection)
+    )){
         const totalT = approxTokens(text);
         const maxT = tokenSize || estimateChunkBudget();
         if (totalT > maxT){
@@ -190,6 +201,7 @@
               try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payloadPart, author, who: whoForTarget, ts: ts2 } })); }catch{}
               try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payloadPart, whoForTarget, meta2); }catch{}
               try{ if(window.receiveMessage) window.receiveMessage(targetId, payloadPart, whoForTarget, meta2); }catch{}
+      try{ if (targetIsSection && allowToSection && window.appendToSection) window.appendToSection(targetId, payloadPart); }catch{}
               try{
                 const tType = host?.dataset?.type;
                 if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payloadPart, sourceId }); }
@@ -215,6 +227,7 @@
           try { conn.pathEl?.dispatchEvent(new CustomEvent('connection:transmit', { detail: { sourceId, text: payloadPart, author, who: whoForTarget, ts: ts2 } })); }catch{}
           try{ if(window.graph) window.graph.addMessage(targetId, author||'Incoming', payloadPart, whoForTarget, meta2); }catch{}
           try{ if(window.receiveMessage) window.receiveMessage(targetId, payloadPart, whoForTarget, meta2); }catch{}
+          try{ if (targetIsSection && allowToSection && window.appendToSection) window.appendToSection(targetId, payloadPart); }catch{}
           try{
             const tType = host?.dataset?.type;
             if (tType === 'coworker' && window.requestAIReply){ await window.requestAIReply(targetId, { text: payloadPart, sourceId }); }
