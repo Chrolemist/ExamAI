@@ -20,6 +20,8 @@
   const params = new URLSearchParams(location.search);
   const id = params.get('id') || '';
   const title = params.get('title') || '';
+  const embed = params.get('embed') === '1';
+  const wide = params.get('wide') === '1';
   document.getElementById('fxTitle').textContent = title ? `Övningar – ${title}` : 'Övningar';
 
   const key = (s)=> `sectionExercises:${s}`;
@@ -228,6 +230,8 @@
     const l = loadLayout(); l[name] = { x: Math.round(r.left - c.left), y: Math.round(r.top - c.top), w: Math.round(r.width), h: Math.round(r.height) }; saveLayout(l);
   }
   function initLayout(){
+    // If requested by parent, expand to viewport width
+    if (wide){ try{ const wrap=document.querySelector('.fx-wrap'); if (wrap){ wrap.classList.add('free'); wrap.style.maxWidth='100vw'; wrap.style.margin='0'; } }catch{} }
     Object.values(els.cards).forEach(c=>{
       if(!c) return;
       const handle = c.querySelector('.drag-handle');
@@ -267,10 +271,10 @@
     applyLayout();
   }
 
-  // Wire nav
+  // Wire nav (skip Close in embed)
   document.getElementById('fxPrev').addEventListener('click', ()=>{ const arr=getList(); const n=Math.max(0, getCursor()-1); setCursor(n); render(); });
   document.getElementById('fxNext').addEventListener('click', ()=>{ const arr=getList(); const n=Math.min(Math.max(0, arr.length-1), getCursor()+1); setCursor(n); render(); });
-  document.getElementById('fxClose').addEventListener('click', ()=>{ window.close(); });
+  if (!embed){ document.getElementById('fxClose').addEventListener('click', ()=>{ window.close(); }); }
   // Round dropdown wiring
   (function(){
     const btn = document.getElementById('fxRoundBtn'); const menu = document.getElementById('fxRoundMenu'); const reset = document.getElementById('fxRoundReset'); if(!btn||!menu||!reset) return;

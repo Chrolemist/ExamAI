@@ -301,6 +301,28 @@
     }catch{}
   // Restore sections (DOM content)
   restoreSections(data.sections||[]);
+  // Re-apply per-section render mode to match snapshot (after toolbars are ensured)
+  try{
+    // Ensure per-section toolbars/render selectors exist
+    try{ window.initBoardSectionSettings && window.initBoardSectionSettings(); }catch{}
+    const sectionState = data.sectionState || {};
+    Object.keys(sectionState||{}).forEach(id=>{
+      try{
+        const st = sectionState[id]||{};
+        const mode = st && st.settings && st.settings.renderMode ? String(st.settings.renderMode) : '';
+        if (!mode) return;
+        const sec = document.querySelector(`.panel.board-section[data-section-id="${CSS.escape(String(id))}"]`);
+        if (!sec) return;
+        const sel = sec.querySelector('select[data-role="secRenderMode"]');
+        if (!sel) return;
+        if (sel.value !== mode){ sel.value = mode; sel.dispatchEvent(new Event('change')); }
+        else {
+          // Force a one-time render sync for current mode without toggling value
+          sel.dispatchEvent(new Event('change'));
+        }
+      }catch{}
+    });
+  }catch{}
   // Notify UI that coworker list and labels may have changed (after nodes + parking restored)
   try{ window.dispatchEvent(new CustomEvent('coworkers-changed')); }catch{}
   // Refresh connection geometry once after a tick

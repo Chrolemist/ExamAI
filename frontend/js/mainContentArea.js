@@ -70,6 +70,13 @@
     try{
       const head = sec.querySelector('.head');
       if (head && !head.querySelector('[data-role="delSection"]')){
+        // Add numeric badge per section order
+        try{
+          const badge = document.createElement('span');
+          badge.setAttribute('data-role','secBadge');
+          Object.assign(badge.style,{ marginLeft:'8px', display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', border:'1px solid #3a3a4a', borderRadius:'999px', fontSize:'11px', color:'#ccc' });
+          head.appendChild(badge);
+        }catch{}
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn btn-ghost';
@@ -98,10 +105,20 @@
     const sec = createSectionDom(id, name);
     const main = document.querySelector('.layout .content');
     if (!main) return null;
-    const toolbar = main.querySelector('.board-sections-toolbar');
-    if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
+    // Place new section after the last existing section (bottom of the list)
+    const existing = main.querySelectorAll('.board-section');
+    if (existing && existing.length){
+      const last = existing[existing.length - 1];
+      if (last && last.parentNode){ last.parentNode.insertBefore(sec, last.nextSibling); }
+      else { main.appendChild(sec); }
+    } else {
+      const toolbar = main.querySelector('.board-sections-toolbar');
+      if (toolbar && toolbar.parentNode){ toolbar.parentNode.insertBefore(sec, toolbar.nextSibling); }
+      else { main.appendChild(sec); }
+    }
     wireSection(sec);
     const list = loadList(); list.push({ id, title: name }); saveList(list);
+  try{ updateBadges(); }catch{}
   /* sectionIOBoard deprecated */
   try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'add', id, title: name } })); }catch{}
     return sec;
@@ -124,7 +141,7 @@
         wireSection(sec);
   /* sectionIOBoard deprecated */
       });
-      saveList(list);
+  saveList(list); try{ updateBadges(); }catch{}
       return;
     }
     const list = loadList();
@@ -136,10 +153,25 @@
         if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
         wireSection(sec);
   /* sectionIOBoard deprecated */
-      });
+      }); try{ updateBadges(); }catch{}
     } else {
       addSection('Sektion 1');
     }
+  }
+
+  function updateBadges(){
+    const list = loadList();
+    const order = list.map(it=>String(it.id));
+    document.querySelectorAll('.board-section').forEach(sec=>{
+      try{
+        const id = sec.dataset.sectionId||'';
+        const idx = Math.max(0, order.indexOf(id));
+        const n = idx>=0 ? idx+1 : '';
+        const h = sec.querySelector('.head');
+        const b = h && h.querySelector('[data-role="secBadge"]');
+        if (b) b.textContent = n ? String(n) : '';
+      }catch{}
+    });
   }
 
   // Public API
@@ -173,6 +205,15 @@
           /* sectionIOBoard deprecated */
           // Refresh cables
           try{ const svg = document.getElementById('connLayer'); if (svg){ svg.querySelectorAll('path').forEach(p=>p.remove()); } }catch{}
+        });
+      }
+      const openFxBtn = document.getElementById('openFullScreenBtn');
+      if (openFxBtn){
+        openFxBtn.addEventListener('click', ()=>{
+          try{
+            const url = new URL(location.origin + location.pathname.replace(/[^\/]*$/, 'board-full.html'));
+            window.open(url.toString(), '_blank');
+          }catch{}
         });
       }
       restoreExisting();

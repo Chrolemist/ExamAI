@@ -1542,27 +1542,20 @@
           btnDeleteAll.type = 'button'; btnDeleteAll.textContent = 'Ta bort alla'; btnDeleteAll.className='btn btn-ghost';
       const btnClearAnswers = document.createElement('button');
       btnClearAnswers.type = 'button'; btnClearAnswers.textContent = 'Rensa alla svar'; btnClearAnswers.className='btn btn-ghost';
-          const btnFullscreen = document.createElement('button');
-          btnFullscreen.type = 'button'; btnFullscreen.textContent = 'Öppna helskärm'; btnFullscreen.className='btn';
-    exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnClearAnswers); exBar.appendChild(btnDeleteAll); exBar.appendChild(btnFullscreen);
+  exBar.appendChild(btnAdd); exBar.appendChild(btnGradeAll); exBar.appendChild(btnClearAnswers); exBar.appendChild(btnDeleteAll);
     // Parking slots for exercises: choose coworker nodes to act as Grader and Improver
     const parkWrap = document.createElement('div');
     parkWrap.style.display='flex'; parkWrap.style.gap='8px'; parkWrap.style.alignItems='center'; parkWrap.style.marginLeft='12px';
     const mkSel = (labelText)=>{ const wrap=document.createElement('label'); wrap.className='subtle'; wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='6px'; const span=document.createElement('span'); span.textContent=labelText; const sel=document.createElement('select'); sel.className='btn'; wrap.appendChild(span); wrap.appendChild(sel); return { wrap, sel, span }; };
   const selGrader = mkSel('Rättare:');
   const selImprover = mkSel('Förbättra fråga:');
-  // For Input, replace single select with multi-select UI (ordered)
-  const selInput = mkSel('Inmatning:');
-  // Remove the default single select, we'll inject our own container
-  try{ selInput.sel.remove(); }catch{}
-  const multiInputWrap = document.createElement('div');
-  multiInputWrap.className = 'multi-inputs';
-  Object.assign(multiInputWrap.style, { display:'flex', flexDirection:'row', gap:'6px', alignItems:'center', flexWrap:'nowrap', overflowX:'auto' });
-  const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-ghost'; addBtn.textContent='+'; addBtn.title='Lägg till inmatning'; Object.assign(addBtn.style,{ padding:'2px 8px' });
-  // Keep inputs inline with the toolbar and let the inputs area scroll horizontally if needed
-  Object.assign(selInput.wrap.style, { display:'flex', alignItems:'center', gap:'6px' });
-  selInput.wrap.appendChild(multiInputWrap); selInput.wrap.appendChild(addBtn);
-  parkWrap.appendChild(selGrader.wrap); parkWrap.appendChild(selImprover.wrap); parkWrap.appendChild(selInput.wrap);
+  // Inputs: chips + Hantera-popover (ordnad multi-val)
+  const inputsWrap = document.createElement('label'); inputsWrap.className='subtle'; Object.assign(inputsWrap.style,{ display:'flex', alignItems:'center', gap:'6px', maxWidth:'60%' });
+  const inputsLabel = document.createElement('span'); inputsLabel.textContent = 'Inmatning:';
+  const chipsWrap = document.createElement('div'); Object.assign(chipsWrap.style,{ display:'flex', alignItems:'center', gap:'6px', overflow:'hidden' });
+  const manageBtn = document.createElement('button'); manageBtn.type='button'; manageBtn.className='btn btn-ghost'; manageBtn.textContent='Hantera'; manageBtn.title='Välj och ordna inmatningar'; manageBtn.style.padding='2px 8px';
+  inputsWrap.appendChild(inputsLabel); inputsWrap.appendChild(chipsWrap); inputsWrap.appendChild(manageBtn);
+  parkWrap.appendChild(selGrader.wrap); parkWrap.appendChild(selImprover.wrap); parkWrap.appendChild(inputsWrap);
     exBar.appendChild(parkWrap);
     // Export dropdown: map this section's content as Theory into a chosen section's full-screen view
     try{
@@ -1611,15 +1604,6 @@
           head.appendChild(exBar);
           // Wire actions
           const grid = sec.querySelector('.body .grid') || sec.querySelector('.body');
-          btnFullscreen.addEventListener('click', ()=>{
-            try{
-              const title = (sec.querySelector('.head h2')?.textContent||'').trim();
-              const url = new URL(location.origin + location.pathname.replace(/[^\/]*$/, 'exercises-full.html'));
-              url.searchParams.set('id', id);
-              if (title) url.searchParams.set('title', title);
-              window.open(url.toString(), '_blank');
-            }catch{}
-          });
           // Storage helpers for focus UI
           const getExercises = ()=>{ try{ const raw = localStorage.getItem(`sectionExercises:${id}`); return raw? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
   const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
@@ -1645,9 +1629,10 @@
         try{
             const fillFromCoworkers = ()=>{
               const opts = [{ value:'', label:'— Välj nod —' }];
+              const idToLabel = new Map();
               document.querySelectorAll('.fab[data-type="coworker"]').forEach(el=>{
                 const value = el.dataset.id||''; const label = el.dataset.displayName || ('CoWorker '+value);
-                if (value) opts.push({ value, label });
+                if (value){ opts.push({ value, label }); idToLabel.set(value, label); }
               });
               const fill = (sel)=>{ sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); }); };
               // Render grader/improver as before
@@ -1657,26 +1642,87 @@
               fill(selGrader.sel); fill(selImprover.sel);
               if (prevGrader) selGrader.sel.value = prevGrader;
               if (prevImprover) selImprover.sel.value = prevImprover;
-              // Render Inputs (ordered list with numbering)
-              const renderInputs = ()=>{
-                // Clear
-                multiInputWrap.innerHTML='';
+              // Render chips for selected inputs (ordered)
+              const renderChips = ()=>{
+                chipsWrap.innerHTML='';
                 const values = getInputs();
-                const list = values.length ? values.slice() : ['']; // ensure at least one row
-                list.forEach((val, idx)=>{
-                  const row = document.createElement('div'); Object.assign(row.style,{ display:'inline-flex', alignItems:'center', gap:'6px' });
-                  const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'11px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'4px' });
-                  const sel = document.createElement('select'); sel.className='btn'; Object.assign(sel.style,{ minWidth:'160px', flex:'0 0 auto' }); fill(sel); sel.value = String(val||'');
-                  const del = document.createElement('button'); del.type='button'; del.textContent='–'; del.className='btn btn-ghost'; del.title='Ta bort'; del.style.padding='2px 6px';
-                  sel.addEventListener('change', ()=>{ const arr=getInputs(); arr[idx]=sel.value||''; setInputs(arr); renderInputs(); });
-                  del.addEventListener('click', ()=>{ const arr=getInputs(); arr.splice(idx,1); setInputs(arr); renderInputs(); });
-                  row.appendChild(badge); row.appendChild(sel); row.appendChild(del);
-                  multiInputWrap.appendChild(row);
+                const maxChips = 6;
+                const shown = values.slice(0, maxChips);
+                shown.forEach((id, idx)=>{
+                  const name = idToLabel.get(String(id)) || String(id);
+                  const chip = document.createElement('span');
+                  Object.assign(chip.style,{ display:'inline-flex', alignItems:'center', gap:'6px', padding:'2px 6px', border:'1px solid #3a3a4a', borderRadius:'999px', color:'#cfd3e3', background:'rgba(255,255,255,0.03)', fontSize:'12px', maxWidth:'160px' });
+                  const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'16px', height:'16px', alignItems:'center', justifyContent:'center', fontSize:'10px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'999px' });
+                  const label = document.createElement('span'); label.textContent = name; label.style.overflow='hidden'; label.style.textOverflow='ellipsis'; label.style.whiteSpace='nowrap';
+                  chip.appendChild(badge); chip.appendChild(label);
+                  chipsWrap.appendChild(chip);
                 });
+                if (values.length > maxChips){
+                  const more = document.createElement('span'); more.textContent = `+${values.length - maxChips}`; Object.assign(more.style,{ padding:'2px 6px', border:'1px dashed #3a3a4a', borderRadius:'999px', color:'#aaa', fontSize:'12px' }); chipsWrap.appendChild(more);
+                }
               };
-              // Wire add button
-              addBtn.onclick = ()=>{ const arr=getInputs(); arr.push(''); setInputs(arr); renderInputs(); };
-              renderInputs();
+              renderChips();
+              // Popover for managing inputs
+              const openManager = ()=>{
+                // Working copy
+                let sel = getInputs().filter(Boolean);
+                // All coworkers options without placeholder
+                const all = opts.filter(o=>o.value);
+                const anchor = manageBtn;
+                const r = anchor.getBoundingClientRect();
+                const pop = document.createElement('div');
+                Object.assign(pop.style,{ position:'fixed', left:Math.max(8, Math.min(window.innerWidth-360, r.left))+'px', top:(r.bottom+6)+'px', zIndex:'10080', width:'340px', maxHeight:'60vh', overflow:'auto', padding:'10px', background:'linear-gradient(180deg,#121219,#0e0e14)', border:'1px solid #23232b', borderRadius:'8px', boxShadow:'0 12px 28px rgba(0,0,0,0.55)' });
+                pop.setAttribute('role','dialog');
+                pop.innerHTML = '';
+                const title = document.createElement('div'); title.textContent='Hantera inmatningar'; Object.assign(title.style,{ fontWeight:'600', marginBottom:'8px' }); pop.appendChild(title);
+                const search = document.createElement('input'); search.type='search'; search.placeholder='Sök nod…'; Object.assign(search.style,{ width:'100%', marginBottom:'8px', padding:'6px 8px', background:'#0f0f14', border:'1px solid #2a2a35', color:'#e6e6ec', borderRadius:'6px' }); pop.appendChild(search);
+                const selWrap = document.createElement('div'); Object.assign(selWrap.style,{ display:'grid', gridTemplateColumns:'1fr', gap:'6px', marginBottom:'10px' }); pop.appendChild(selWrap);
+                const availWrap = document.createElement('div'); Object.assign(availWrap.style,{ display:'grid', gridTemplateColumns:'1fr', gap:'4px', marginBottom:'10px' }); pop.appendChild(availWrap);
+                const btns = document.createElement('div'); Object.assign(btns.style,{ display:'flex', justifyContent:'flex-end', gap:'8px' });
+                const cancel = document.createElement('button'); cancel.type='button'; cancel.className='btn btn-ghost'; cancel.textContent='Avbryt';
+                const save = document.createElement('button'); save.type='button'; save.className='btn'; save.textContent='Spara';
+                btns.appendChild(cancel); btns.appendChild(save); pop.appendChild(btns);
+                const renderLists = ()=>{
+                  selWrap.innerHTML=''; availWrap.innerHTML='';
+                  const filter = (search.value||'').toLowerCase();
+                  const labelOf = (id)=> idToLabel.get(String(id)) || String(id);
+                  // Selected (ordered)
+                  sel.forEach((id, idx)=>{
+                    const name = labelOf(id);
+                    if (filter && !name.toLowerCase().includes(filter)) return;
+                    const row = document.createElement('div'); Object.assign(row.style,{ display:'grid', gridTemplateColumns:'24px 1fr 24px 24px 24px', alignItems:'center', gap:'6px' });
+                    const badge = document.createElement('span'); badge.textContent=String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'10px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'999px' });
+                    const label = document.createElement('div'); label.textContent=name; label.className='subtle'; label.style.overflow='hidden'; label.style.textOverflow='ellipsis';
+                    const up = document.createElement('button'); up.type='button'; up.title='Flytta upp'; up.textContent='↑'; up.className='btn btn-ghost'; up.style.padding='0 6px';
+                    const down = document.createElement('button'); down.type='button'; down.title='Flytta ner'; down.textContent='↓'; down.className='btn btn-ghost'; down.style.padding='0 6px';
+                    const rem = document.createElement('button'); rem.type='button'; rem.title='Ta bort'; rem.textContent='✕'; rem.className='btn btn-ghost'; rem.style.padding='0 6px';
+                    up.onclick = ()=>{ if (idx>0){ const tmp=sel[idx-1]; sel[idx-1]=sel[idx]; sel[idx]=tmp; renderLists(); } };
+                    down.onclick = ()=>{ if (idx<sel.length-1){ const tmp=sel[idx+1]; sel[idx+1]=sel[idx]; sel[idx]=tmp; renderLists(); } };
+                    rem.onclick = ()=>{ sel = sel.filter(x=>x!==id); renderLists(); };
+                    row.appendChild(badge); row.appendChild(label); row.appendChild(up); row.appendChild(down); row.appendChild(rem);
+                    selWrap.appendChild(row);
+                  });
+                  // Available
+                  all.forEach(o=>{
+                    if (sel.includes(o.value)) return; // only show not selected
+                    if (filter && !o.label.toLowerCase().includes(filter)) return;
+                    const row = document.createElement('div'); Object.assign(row.style,{ display:'grid', gridTemplateColumns:'1fr 60px', alignItems:'center', gap:'6px' });
+                    const label = document.createElement('div'); label.textContent=o.label; label.className='subtle';
+                    const add = document.createElement('button'); add.type='button'; add.textContent='Lägg till'; add.className='btn btn-ghost'; add.style.padding='2px 6px';
+                    add.onclick = ()=>{ sel.push(o.value); renderLists(); };
+                    row.appendChild(label); row.appendChild(add);
+                    availWrap.appendChild(row);
+                  });
+                };
+                renderLists();
+                search.addEventListener('input', renderLists);
+                cancel.onclick = ()=>{ document.body.removeChild(pop); document.removeEventListener('click', onDocClick, true); };
+                save.onclick = ()=>{ setInputs(sel); renderChips(); document.body.removeChild(pop); document.removeEventListener('click', onDocClick, true); };
+                document.body.appendChild(pop);
+                const onDocClick = (e)=>{ if (!pop.contains(e.target) && e.target !== anchor){ cancel.onclick(); } };
+                setTimeout(()=> document.addEventListener('click', onDocClick, true), 0);
+              };
+              manageBtn.onclick = openManager;
             };
             // Initial fill
             fillFromCoworkers();
@@ -2022,64 +2068,90 @@
           tBar.appendChild(btnClear);
           // Parking selector for non-exercises modes: choose a coworker to auto-append replies as input
           try{
-            const parkWrap = document.createElement('label');
-            parkWrap.className = 'subtle';
-            parkWrap.style.display = 'flex';
-            parkWrap.style.alignItems = 'center';
-            parkWrap.style.gap = '6px';
-            parkWrap.style.marginLeft = '12px';
-            const span = document.createElement('span'); span.textContent = 'Inmatning:';
-            const multiInputWrap = document.createElement('div'); Object.assign(multiInputWrap.style, {
-              display:'flex', flexDirection:'row', gap:'6px', alignItems:'center', flexWrap:'nowrap',
-              overflowX:'auto', whiteSpace:'nowrap', maxWidth:'min(50%, 520px)'
-            });
-            const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-ghost'; addBtn.textContent='+'; addBtn.title='Lägg till inmatning'; addBtn.style.padding='2px 8px';
-            parkWrap.appendChild(span); parkWrap.appendChild(multiInputWrap); parkWrap.appendChild(addBtn);
-            tBar.appendChild(parkWrap);
+            const inputsWrap = document.createElement('label'); inputsWrap.className='subtle'; Object.assign(inputsWrap.style,{ display:'flex', alignItems:'center', gap:'6px', marginLeft:'12px', maxWidth:'60%' });
+            const labelSpan = document.createElement('span'); labelSpan.textContent='Inmatning:';
+            const chipsWrap = document.createElement('div'); Object.assign(chipsWrap.style,{ display:'flex', alignItems:'center', gap:'6px', overflow:'hidden' });
+            const manageBtn = document.createElement('button'); manageBtn.type='button'; manageBtn.className='btn btn-ghost'; manageBtn.textContent='Hantera'; manageBtn.title='Välj och ordna inmatningar'; manageBtn.style.padding='2px 8px';
+            inputsWrap.appendChild(labelSpan); inputsWrap.appendChild(chipsWrap); inputsWrap.appendChild(manageBtn);
+            tBar.appendChild(inputsWrap);
             const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
             const setParking = (obj)=>{ try{ localStorage.setItem(`sectionParking:${id}`, JSON.stringify(obj||{})); }catch{} };
             const getInputs = ()=>{ try{ const p=getParking(); if (Array.isArray(p.inputs)) return p.inputs.map(String); const one = p.input? String(p.input):''; return one?[one]:[]; }catch{ return []; } };
-            const setInputs = (arr)=>{
-              try{
-                const p = getParking();
-                const next = [];
-                const seen = new Set();
-                for (const v of (arr||[])){
-                  const s = String(v||'');
-                  if (s === '') { next.push(''); continue; }
-                  if (!seen.has(s)) { seen.add(s); next.push(s); }
-                }
-                p.inputs = next;
-                p.input = next.find(v=>v)!==undefined ? (next.find(v=>v) || null) : null;
-                setParking(p);
-              }catch{}
-            };
+            const setInputs = (arr)=>{ try{ const p=getParking(); p.inputs = (arr||[]).map(String); p.input = p.inputs.find(v=>v)||null; setParking(p); }catch{} };
             const fillFromCoworkers = ()=>{
               const opts = [{ value:'', label:'— Välj nod —' }];
+              const idToLabel = new Map();
               try{
                 document.querySelectorAll('.fab[data-type="coworker"]').forEach(el=>{
                   const value = el.dataset.id||''; const label = el.dataset.displayName || ('CoWorker '+value);
-                  if (value) opts.push({ value, label });
+                  if (value){ opts.push({ value, label }); idToLabel.set(value, label); }
                 });
               }catch{}
-              const fillSel = (sel)=>{ sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); }); };
-        const render = ()=>{
-                multiInputWrap.innerHTML='';
+              const renderChips = ()=>{
+                chipsWrap.innerHTML='';
                 const values = getInputs();
-                const list = values.length ? values.slice() : [''];
-                list.forEach((val, idx)=>{
-          const row = document.createElement('div'); Object.assign(row.style,{ display:'inline-flex', alignItems:'center', gap:'6px' });
-          const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'11px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'4px' });
-          const sel = document.createElement('select'); sel.className='btn'; sel.style.minWidth='160px'; fillSel(sel); sel.value = String(val||'');
-                  const del = document.createElement('button'); del.type='button'; del.textContent='–'; del.className='btn btn-ghost'; del.title='Ta bort'; del.style.padding='2px 6px';
-                  sel.addEventListener('change', ()=>{ const arr=getInputs(); arr[idx]=sel.value||''; setInputs(arr); render(); });
-                  del.addEventListener('click', ()=>{ const arr=getInputs(); arr.splice(idx,1); setInputs(arr); render(); });
-                  row.appendChild(badge); row.appendChild(sel); row.appendChild(del);
-                  multiInputWrap.appendChild(row);
+                const maxChips = 6;
+                const shown = values.slice(0, maxChips);
+                shown.forEach((id, idx)=>{
+                  const name = idToLabel.get(String(id)) || String(id);
+                  const chip = document.createElement('span');
+                  Object.assign(chip.style,{ display:'inline-flex', alignItems:'center', gap:'6px', padding:'2px 6px', border:'1px solid #3a3a4a', borderRadius:'999px', color:'#cfd3e3', background:'rgba(255,255,255,0.03)', fontSize:'12px', maxWidth:'160px' });
+                  const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'16px', height:'16px', alignItems:'center', justifyContent:'center', fontSize:'10px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'999px' });
+                  const lab = document.createElement('span'); lab.textContent = name; lab.style.overflow='hidden'; lab.style.textOverflow='ellipsis'; lab.style.whiteSpace='nowrap';
+                  chip.appendChild(badge); chip.appendChild(lab);
+                  chipsWrap.appendChild(chip);
                 });
+                if (values.length > maxChips){ const more = document.createElement('span'); more.textContent = `+${values.length - maxChips}`; Object.assign(more.style,{ padding:'2px 6px', border:'1px dashed #3a3a4a', borderRadius:'999px', color:'#aaa', fontSize:'12px' }); chipsWrap.appendChild(more); }
               };
-              addBtn.onclick = ()=>{ const arr=getInputs(); arr.push(''); setInputs(arr); render(); };
-              render();
+              renderChips();
+              const openManager = ()=>{
+                let sel = getInputs().filter(Boolean);
+                const all = opts.filter(o=>o.value);
+                const anchor = manageBtn; const r = anchor.getBoundingClientRect();
+                const pop = document.createElement('div');
+                Object.assign(pop.style,{ position:'fixed', left:Math.max(8, Math.min(window.innerWidth-360, r.left))+'px', top:(r.bottom+6)+'px', zIndex:'10080', width:'340px', maxHeight:'60vh', overflow:'auto', padding:'10px', background:'linear-gradient(180deg,#121219,#0e0e14)', border:'1px solid #23232b', borderRadius:'8px', boxShadow:'0 12px 28px rgba(0,0,0,0.55)' });
+                pop.setAttribute('role','dialog');
+                const title = document.createElement('div'); title.textContent='Hantera inmatningar'; Object.assign(title.style,{ fontWeight:'600', marginBottom:'8px' }); pop.appendChild(title);
+                const search = document.createElement('input'); search.type='search'; search.placeholder='Sök nod…'; Object.assign(search.style,{ width:'100%', marginBottom:'8px', padding:'6px 8px', background:'#0f0f14', border:'1px solid #2a2a35', color:'#e6e6ec', borderRadius:'6px' }); pop.appendChild(search);
+                const selWrap = document.createElement('div'); Object.assign(selWrap.style,{ display:'grid', gridTemplateColumns:'1fr', gap:'6px', marginBottom:'10px' }); pop.appendChild(selWrap);
+                const availWrap = document.createElement('div'); Object.assign(availWrap.style,{ display:'grid', gridTemplateColumns:'1fr', gap:'4px', marginBottom:'10px' }); pop.appendChild(availWrap);
+                const btns = document.createElement('div'); Object.assign(btns.style,{ display:'flex', justifyContent:'flex-end', gap:'8px' }); const cancel=document.createElement('button'); cancel.type='button'; cancel.className='btn btn-ghost'; cancel.textContent='Avbryt'; const save=document.createElement('button'); save.type='button'; save.className='btn'; save.textContent='Spara'; btns.appendChild(cancel); btns.appendChild(save); pop.appendChild(btns);
+                const renderLists = ()=>{
+                  selWrap.innerHTML=''; availWrap.innerHTML='';
+                  const filter = (search.value||'').toLowerCase();
+                  const labelOf = (id)=> idToLabel.get(String(id)) || String(id);
+                  sel.forEach((id, idx)=>{
+                    const name = labelOf(id); if (filter && !name.toLowerCase().includes(filter)) return;
+                    const row = document.createElement('div'); Object.assign(row.style,{ display:'grid', gridTemplateColumns:'24px 1fr 24px 24px 24px', alignItems:'center', gap:'6px' });
+                    const badge = document.createElement('span'); badge.textContent=String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'10px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'999px' });
+                    const lab = document.createElement('div'); lab.textContent=name; lab.className='subtle'; lab.style.overflow='hidden'; lab.style.textOverflow='ellipsis';
+                    const up=document.createElement('button'); up.type='button'; up.title='Flytta upp'; up.textContent='↑'; up.className='btn btn-ghost'; up.style.padding='0 6px';
+                    const down=document.createElement('button'); down.type='button'; down.title='Flytta ner'; down.textContent='↓'; down.className='btn btn-ghost'; down.style.padding='0 6px';
+                    const rem=document.createElement('button'); rem.type='button'; rem.title='Ta bort'; rem.textContent='✕'; rem.className='btn btn-ghost'; rem.style.padding='0 6px';
+                    up.onclick=()=>{ if (idx>0){ const tmp=sel[idx-1]; sel[idx-1]=sel[idx]; sel[idx]=tmp; renderLists(); } };
+                    down.onclick=()=>{ if (idx<sel.length-1){ const tmp=sel[idx+1]; sel[idx+1]=sel[idx]; sel[idx]=tmp; renderLists(); } };
+                    rem.onclick=()=>{ sel = sel.filter(x=>x!==id); renderLists(); };
+                    row.appendChild(badge); row.appendChild(lab); row.appendChild(up); row.appendChild(down); row.appendChild(rem);
+                    selWrap.appendChild(row);
+                  });
+                  all.forEach(o=>{
+                    if (sel.includes(o.value)) return; if (filter && !o.label.toLowerCase().includes(filter)) return;
+                    const row = document.createElement('div'); Object.assign(row.style,{ display:'grid', gridTemplateColumns:'1fr 60px', alignItems:'center', gap:'6px' });
+                    const lab = document.createElement('div'); lab.textContent=o.label; lab.className='subtle';
+                    const add=document.createElement('button'); add.type='button'; add.textContent='Lägg till'; add.className='btn btn-ghost'; add.style.padding='2px 6px'; add.onclick=()=>{ sel.push(o.value); renderLists(); };
+                    row.appendChild(lab); row.appendChild(add);
+                    availWrap.appendChild(row);
+                  });
+                };
+                renderLists();
+                search.addEventListener('input', renderLists);
+                const close=()=>{ try{ document.body.removeChild(pop); }catch{} document.removeEventListener('click', onDocClick, true); };
+                cancel.onclick = close; save.onclick = ()=>{ setInputs(sel); renderChips(); close(); };
+                document.body.appendChild(pop);
+                const onDocClick=(e)=>{ if (!pop.contains(e.target) && e.target!==manageBtn) close(); };
+                setTimeout(()=> document.addEventListener('click', onDocClick, true), 0);
+              };
+              manageBtn.onclick = openManager;
             };
             fillFromCoworkers();
             window.addEventListener('coworkers-changed', fillFromCoworkers);
@@ -2140,7 +2212,7 @@
             }catch{}
           });
         }
-        if (!head.querySelector('[data-role="secRenderMode"]')){
+  if (!head.querySelector('[data-role="secRenderMode"]')){
           const wrap = document.createElement('div');
           wrap.style.marginLeft = 'auto';
           wrap.style.display = 'flex';
@@ -2216,6 +2288,17 @@
           const io = head.querySelector('.section-io');
           if (io && io.parentElement === head){ head.insertBefore(wrap, io); }
           else { head.appendChild(wrap); }
+        } else {
+          // If selector already exists, still sync its value from saved settings and update toolbars
+          try{
+            const sel = head.querySelector('select[data-role="secRenderMode"]');
+            if (sel){
+              const raw = localStorage.getItem(`sectionSettings:${id}`);
+              const saved = raw ? JSON.parse(raw) : {};
+              if (saved.renderMode) sel.value = saved.renderMode;
+              updateToolbarVisibility(sel.value || 'raw');
+            }
+          }catch{}
         }
         // Note focus/blur: auto MD render on blur when mode=md
         const note = sec.querySelector('.note');
@@ -2271,20 +2354,21 @@
           editBtn.onclick = ()=>{ if (!editing) startEdit(); };
           // Only show edit button in Markdown mode
           const s = localStorage.getItem(`sectionSettings:${id}`);
-          const mode = s ? (JSON.parse(s).renderMode || 'md') : 'md';
+          const mode = s ? (JSON.parse(s).renderMode || 'raw') : 'raw';
           editBtn.style.display = (mode === 'md') ? '' : 'none';
-          // Initial render
-          if (mode === 'exercises'){
+          // Initial render: run once per section to avoid flipping modes on re-init
+          if (!sec.dataset.renderInitDone){
+            if (mode === 'exercises'){
             try{ const body = sec.querySelector('.body'); if (body){ body.style.display='grid'; body.style.gridTemplateColumns='1fr 1fr'; body.style.gap='12px'; } }catch{}
             sec.setAttribute('data-mode','exercises');
             try{ sec.dispatchEvent(new CustomEvent('exercises-data-changed', { detail:{ id } })); }catch{}
-          } else if (mode === 'md' && window.mdToHtml){
+            } else if (mode === 'md' && window.mdToHtml){
             // ensure layout is reset to single-column and remove any exercises UI
             sec.removeAttribute('data-mode');
             try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
             try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
             renderMarkdown();
-          } else if (mode === 'html'){
+            } else if (mode === 'html'){
             // clear exercises flag/UI and render stored HTML
             sec.removeAttribute('data-mode');
             try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
@@ -2293,7 +2377,7 @@
             localStorage.setItem(`sectionRaw:${id}`, src);
             note.innerHTML = sanitizeHtml(src);
             note.dataset.rendered = '1';
-          } else {
+            } else {
             // raw text mode on initial render: clear exercises, reset layout, and show plain text
             sec.removeAttribute('data-mode');
             try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
@@ -2302,7 +2386,36 @@
             localStorage.setItem(`sectionRaw:${id}`, src);
             note.textContent = src;
             delete note.dataset.rendered;
+            }
+            sec.dataset.renderInitDone = '1';
+          } else {
+            // On re-init, keep current content/layout; just ensure toolbar visibility matches saved mode
+            try{ updateToolbarVisibility(mode); }catch{}
           }
+          // Persist manual edits for raw/html modes so fullskärm updates live
+          const getMode = ()=>{ try{ const raw = localStorage.getItem(`sectionSettings:${id}`); if (raw){ const s=JSON.parse(raw)||{}; return String(s.renderMode||'raw'); } }catch{} return 'raw'; };
+          let saveTimer=null;
+          const saveNow = ()=>{
+            try{
+              const m = getMode(); if (m==='exercises') return; // exercises managed separately
+              if (editing && m==='md') return; // markdown textarea handles its own save
+              if (m==='html'){
+                const src = String(note.innerHTML||'');
+                localStorage.setItem(`sectionRaw:${id}`, src);
+              } else {
+                const src = String(note.innerText||'');
+                localStorage.setItem(`sectionRaw:${id}`, src);
+              }
+            }catch{}
+          };
+          note.addEventListener('input', (e)=>{
+            try{
+              if (e && e.target && e.target.classList && e.target.classList.contains('md-edit-area')) return;
+              if (saveTimer) clearTimeout(saveTimer);
+              saveTimer = setTimeout(saveNow, 300);
+            }catch{}
+          });
+          note.addEventListener('blur', ()=>{ try{ if (saveTimer) { clearTimeout(saveTimer); saveTimer=null; } saveNow(); }catch{} });
         }
       });
     }catch{}
