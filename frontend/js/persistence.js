@@ -102,8 +102,13 @@
         });
       }
     }catch{}
-    // Sections (title + html)
+    // Sections (title + html) and board order list
     const sections = collectSections();
+    let sectionList = [];
+    try{
+      const rawList = localStorage.getItem('boardSections:list:v1');
+      sectionList = rawList ? JSON.parse(rawList)||[] : [];
+    }catch{ sectionList = []; }
     // Per-section state (render mode/settings, exercises list, cursor, full-screen layout)
     const sectionState = {};
     try{
@@ -132,17 +137,17 @@
         try{ const rawGeom = localStorage.getItem(`panelGeom:${id}`); if (rawGeom) panelGeom[id] = JSON.parse(rawGeom)||null; }catch{}
       });
     }catch{}
-  return { version: 3, createdAt: Date.now(), nodes, connections, chat, sections, sectionState, nodeAttachments, panelGeom };
+  return { version: 3, createdAt: Date.now(), nodes, connections, chat, sections, sectionState, nodeAttachments, panelGeom, sectionList };
   }
 
   function restore(data){
     if (!data) return;
     // Clear current state
     try{
-      document.querySelectorAll('.fab').forEach(el=> el.remove());
-      (window.state?.connections||[]).splice(0);
-      document.querySelectorAll('#connLayer path').forEach(p=> p.remove());
-      if (window.graph){ window.graph = new window.Graph(); }
+  document.querySelectorAll('.fab').forEach(el=> el.remove());
+  (window.state?.connections||[]).splice(0);
+  document.querySelectorAll('#connLayer path').forEach(p=> p.remove());
+  if (window.graph){ window.graph = new window.Graph(); }
     }catch{}
     // Recreate nodes first
   (data.nodes||[]).forEach(n=>{
@@ -300,8 +305,20 @@
       const pg = data.panelGeom || {};
       Object.keys(pg||{}).forEach(id=>{ try{ if (pg[id]) localStorage.setItem(`panelGeom:${id}`, JSON.stringify(pg[id])); }catch{} });
     }catch{}
-  // Restore sections (DOM content)
-  restoreSections(data.sections||[]);
+  // Restore sections (DOM set) to exactly match snapshot
+  try{
+    const snapSecs = Array.isArray(data.sections) ? data.sections : [];
+    const ids = snapSecs.map(s => String(s.id||''));
+    // Write list and titles first
+    try{ localStorage.setItem('boardSections:list:v1', JSON.stringify((data.sectionList && data.sectionList.length) ? data.sectionList : snapSecs.map(s=>({ id:String(s.id||''), title:String((s.title||'').trim()) })))) }catch{}
+    snapSecs.forEach(s=>{ try{ localStorage.setItem(`boardSection:title:${s.id}`, s.title||''); }catch{} });
+    // Remove any extra sections not in snapshot
+    try{ document.querySelectorAll('.panel.board-section').forEach(sec=>{ const id=sec.dataset.sectionId||''; if (!ids.includes(id)) sec.remove(); }); }catch{}
+    // Now rebuild DOM to match order and content
+    try{ window.rebuildBoardSections && window.rebuildBoardSections(); }catch{}
+    // After DOM exists, inject saved HTML bodies
+    restoreSections(snapSecs);
+  }catch{}
   // Re-apply per-section render mode to match snapshot (after toolbars are ensured)
   try{
     // Ensure per-section toolbars/render selectors exist

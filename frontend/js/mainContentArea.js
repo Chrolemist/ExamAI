@@ -146,14 +146,18 @@
     }
     const list = loadList();
     if (list.length){
+      // Append in saved order to preserve order as-is (don’t insert before toolbar each time)
+      const toolbar = main?.querySelector('.board-sections-toolbar');
       list.forEach(it=>{
         const title = localStorage.getItem(LS_KEY_TITLE(it.id)) || it.title || '';
         const sec = createSectionDom(it.id, title);
-        const toolbar = main?.querySelector('.board-sections-toolbar');
-        if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
+        // Always append after whatever exists to keep list order stable
+        if (toolbar && !toolbar.nextSibling && main){ main.appendChild(sec); }
+        else { main.appendChild(sec); }
         wireSection(sec);
-  /* sectionIOBoard deprecated */
-      }); try{ updateBadges(); }catch{}
+        /* sectionIOBoard deprecated */
+      });
+      try{ updateBadges(); }catch{}
     } else {
       addSection('Sektion 1');
     }
@@ -174,12 +178,32 @@
     });
   }
 
+  // Public rebuild: remove all current sections and re-create from the saved list
+  function rebuildFromList(){
+    const main = document.querySelector('.layout .content'); if (!main) return;
+    // Remove existing sections
+    try{ main.querySelectorAll('.board-section').forEach(sec=> sec.remove()); }catch{}
+    // Rebuild in saved order
+    const list = loadList();
+    if (!list || !list.length){ return; }
+    list.forEach(it=>{
+      const title = localStorage.getItem(LS_KEY_TITLE(it.id)) || it.title || '';
+      const sec = createSectionDom(it.id, title);
+      main.appendChild(sec);
+      wireSection(sec);
+      /* sectionIOBoard deprecated */
+    });
+    try{ updateBadges(); }catch{}
+    try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'rebuild' } })); }catch{}
+  }
+
   // Public API
   window.addBoardSection = addSection;
   window.removeBoardSection = (id)=>{
     const sec = document.querySelector(`.board-section[data-section-id="${CSS.escape(id)}"]`);
   if (sec) removeSection(sec);
   };
+  window.rebuildBoardSections = rebuildFromList;
 
   window.addEventListener('DOMContentLoaded', ()=>{
     try{
