@@ -6,7 +6,6 @@
 // - O: Lägg nya fält i snapshot-objektet utan att bryta API. Versionera vid stora ändringar.
 (function(){
   const LS_PREFIX = 'snapshot:';
-  const LS_UI_COLLAPSED = 'snapshot:uiCollapsed';
 
   function collectSections(){
     const secs = [];
@@ -42,7 +41,18 @@
       const name = fab.dataset.displayName || '';
       let settings = {};
       try{ if (window.graph) settings = Object.assign({}, window.graph.getNodeSettings(id)); }catch{}
-      nodes.push({ id, type, x, y, name, settings });
+      // Persist current IO roles per side so toggles survive snapshot load
+      let io = [];
+      try{
+        fab.querySelectorAll('.conn-point').forEach(cp=>{
+          const side = (cp.getAttribute && (cp.getAttribute('data-side')||'')) || (cp.dataset && (cp.dataset.side||'')) || '';
+          const role = (cp.classList && cp.classList.contains('io-in')) ? 'in' : (cp.classList && cp.classList.contains('io-out')) ? 'out' : '';
+          if (side) io.push({ side, role });
+        });
+      }catch{}
+      const nodeObj = { id, type, x, y, name, settings };
+      if (io.length) nodeObj.io = io;
+      nodes.push(nodeObj);
     });
     // Connections: merge from Graph (ids only) and UI state (includes exact port endpoints)
     const connections = [];
@@ -134,7 +144,6 @@
       if (window.graph){ window.graph = new window.Graph(); }
     }catch{}
     // Recreate nodes first
-    const idMap = new Map();
   (data.nodes||[]).forEach(n=>{
       const el = window.createIcon ? window.createIcon(n.type, n.x, n.y) : null;
       if (!el) return;
@@ -164,8 +173,23 @@
         el.dataset.displayName = displayName;
         const lab = el.querySelector('.fab-label'); if(lab) lab.textContent = displayName;
       }catch{}
+      // Reapply saved conn-point IO roles before restoring connections
+      try{
+        if (Array.isArray(n.io) && n.io.length){
+          n.io.forEach(entry=>{
+            const side = String(entry && entry.side || '');
+            const role = String(entry && entry.role || '');
+            if (!side) return;
+            const cp = el.querySelector(`.conn-point[data-side="${side}"]`);
+            if (!cp) return;
+            if (role === 'in' || role === 'out'){
+              cp.classList.remove('io-in','io-out');
+              cp.classList.add(role === 'in' ? 'io-in' : 'io-out');
+            }
+          });
+        }
+      }catch{}
       try{ if (window.graph && n.settings) window.graph.setNodeSettings(el.dataset.id, n.settings); }catch{}
-      idMap.set(n.id, el.dataset.id);
     });
     // Helpers for robust connection restoration
   const pickOut = (el)=> el && (el.querySelector('.conn-point.io-out') || el.querySelector('.section-io[data-io="out"]') || el.querySelector('.conn-point'));

@@ -52,12 +52,7 @@
 			const addBtn = document.getElementById('addCopilotBtn');
 			// Legacy click-to-create handler removed; creation is now handled by the dropdown in index.html
 
-			// mark header IO points as connectable
-			document.querySelectorAll('.panel .head .section-io').forEach((io, idx) => {
-				const section = io.closest('.panel');
-				if (section && !section.dataset.sectionId) section.dataset.sectionId = 's' + idx;
-				if (window.makeConnPointInteractive) window.makeConnPointInteractive(io, section);
-			});
+			// Inline section IO was removed; no wiring needed here anymore
 
 			// keep paths and points fresh on resize
 			window.addEventListener('resize', () => {

@@ -52,7 +52,7 @@
     try{ localStorage.removeItem(`sectionExercises:${id}`); }catch{}
   try{ localStorage.removeItem(`sectionExercisesCursor:${id}`); }catch{}
   refreshAllConnections();
-  try{ window.sectionIOBoard && window.sectionIOBoard.remove(id); }catch{}
+  // Section IO Board is deprecated (no UI); no removal needed
   }
 
   function wireSection(sec){
@@ -62,7 +62,7 @@
       const h2 = sec.querySelector('.head h2');
       if (h2){
         const id = sec.dataset.sectionId || '';
-  const onChange = ()=>{ try{ const name=(h2.textContent||'').trim(); localStorage.setItem(LS_KEY_TITLE(id), name); if (window.sectionIOBoard) window.sectionIOBoard.rename(id, name); try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'rename', id, title: name } })); }catch{} }catch{} };
+  const onChange = ()=>{ try{ const name=(h2.textContent||'').trim(); localStorage.setItem(LS_KEY_TITLE(id), name); /* sectionIOBoard deprecated */ try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'rename', id, title: name } })); }catch{} }catch{} };
         h2.addEventListener('input', onChange);
         h2.addEventListener('blur', onChange);
       }
@@ -102,7 +102,7 @@
     if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
     wireSection(sec);
     const list = loadList(); list.push({ id, title: name }); saveList(list);
-    try{ window.sectionIOBoard && window.sectionIOBoard.add(id, name); }catch{}
+  /* sectionIOBoard deprecated */
   try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'add', id, title: name } })); }catch{}
     return sec;
   }
@@ -122,7 +122,7 @@
           list.push({ id, title: (h2.textContent||'').trim() });
         }
         wireSection(sec);
-        try{ window.sectionIOBoard && window.sectionIOBoard.add(id, (h2?.textContent||'').trim() || id); }catch{}
+  /* sectionIOBoard deprecated */
       });
       saveList(list);
       return;
@@ -135,7 +135,7 @@
         const toolbar = main?.querySelector('.board-sections-toolbar');
         if (toolbar && toolbar.nextSibling){ main.insertBefore(sec, toolbar.nextSibling); } else { main.appendChild(sec); }
         wireSection(sec);
-        try{ window.sectionIOBoard && window.sectionIOBoard.add(it.id, title); }catch{}
+  /* sectionIOBoard deprecated */
       });
     } else {
       addSection('Sektion 1');
@@ -170,7 +170,7 @@
           try{ saveList([]); }catch{}
           try{ window.dispatchEvent(new CustomEvent('board-sections-changed', { detail: { type: 'clear' } })); }catch{}
           // Clear IO board
-          try{ if (window.sectionIOBoard) window.sectionIOBoard.syncAll(); }catch{}
+          /* sectionIOBoard deprecated */
           // Refresh cables
           try{ const svg = document.getElementById('connLayer'); if (svg){ svg.querySelectorAll('path').forEach(p=>p.remove()); } }catch{}
         });
