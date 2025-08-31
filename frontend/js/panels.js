@@ -1532,6 +1532,7 @@
           exBar.setAttribute('data-role','exToolbar');
           exBar.style.display = 'flex';
           exBar.style.gap = '6px';
+          exBar.style.flexWrap = 'nowrap';
           exBar.style.marginLeft = '8px';
           const btnAdd = document.createElement('button');
           btnAdd.type = 'button'; btnAdd.textContent = 'Övningsblock +'; btnAdd.className='btn btn-ghost';
@@ -1556,8 +1557,10 @@
   try{ selInput.sel.remove(); }catch{}
   const multiInputWrap = document.createElement('div');
   multiInputWrap.className = 'multi-inputs';
-  Object.assign(multiInputWrap.style, { display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' });
-  const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-ghost'; addBtn.textContent='+'; addBtn.title='Lägg till inmatning'; addBtn.style.padding='2px 8px';
+  Object.assign(multiInputWrap.style, { display:'flex', flexDirection:'row', gap:'6px', alignItems:'center', flexWrap:'nowrap', overflowX:'auto' });
+  const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-ghost'; addBtn.textContent='+'; addBtn.title='Lägg till inmatning'; Object.assign(addBtn.style,{ padding:'2px 8px' });
+  // Keep inputs inline with the toolbar and let the inputs area scroll horizontally if needed
+  Object.assign(selInput.wrap.style, { display:'flex', alignItems:'center', gap:'6px' });
   selInput.wrap.appendChild(multiInputWrap); selInput.wrap.appendChild(addBtn);
   parkWrap.appendChild(selGrader.wrap); parkWrap.appendChild(selImprover.wrap); parkWrap.appendChild(selInput.wrap);
     exBar.appendChild(parkWrap);
@@ -1661,9 +1664,9 @@
                 const values = getInputs();
                 const list = values.length ? values.slice() : ['']; // ensure at least one row
                 list.forEach((val, idx)=>{
-                  const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='4px';
+                  const row = document.createElement('div'); Object.assign(row.style,{ display:'inline-flex', alignItems:'center', gap:'6px' });
                   const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'11px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'4px' });
-                  const sel = document.createElement('select'); sel.className='btn'; sel.style.minWidth='150px'; fill(sel); sel.value = String(val||'');
+                  const sel = document.createElement('select'); sel.className='btn'; Object.assign(sel.style,{ minWidth:'160px', flex:'0 0 auto' }); fill(sel); sel.value = String(val||'');
                   const del = document.createElement('button'); del.type='button'; del.textContent='–'; del.className='btn btn-ghost'; del.title='Ta bort'; del.style.padding='2px 6px';
                   sel.addEventListener('change', ()=>{ const arr=getInputs(); arr[idx]=sel.value||''; setInputs(arr); renderInputs(); });
                   del.addEventListener('click', ()=>{ const arr=getInputs(); arr.splice(idx,1); setInputs(arr); renderInputs(); });
@@ -2026,7 +2029,10 @@
             parkWrap.style.gap = '6px';
             parkWrap.style.marginLeft = '12px';
             const span = document.createElement('span'); span.textContent = 'Inmatning:';
-            const multiInputWrap = document.createElement('div'); Object.assign(multiInputWrap.style, { display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' });
+            const multiInputWrap = document.createElement('div'); Object.assign(multiInputWrap.style, {
+              display:'flex', flexDirection:'row', gap:'6px', alignItems:'center', flexWrap:'nowrap',
+              overflowX:'auto', whiteSpace:'nowrap', maxWidth:'min(50%, 520px)'
+            });
             const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-ghost'; addBtn.textContent='+'; addBtn.title='Lägg till inmatning'; addBtn.style.padding='2px 8px';
             parkWrap.appendChild(span); parkWrap.appendChild(multiInputWrap); parkWrap.appendChild(addBtn);
             tBar.appendChild(parkWrap);
@@ -2057,14 +2063,14 @@
                 });
               }catch{}
               const fillSel = (sel)=>{ sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); }); };
-              const render = ()=>{
+        const render = ()=>{
                 multiInputWrap.innerHTML='';
                 const values = getInputs();
                 const list = values.length ? values.slice() : [''];
                 list.forEach((val, idx)=>{
-                  const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='4px';
-                  const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'11px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'4px' });
-                  const sel = document.createElement('select'); sel.className='btn'; sel.style.minWidth='150px'; fillSel(sel); sel.value = String(val||'');
+          const row = document.createElement('div'); Object.assign(row.style,{ display:'inline-flex', alignItems:'center', gap:'6px' });
+          const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'11px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'4px' });
+          const sel = document.createElement('select'); sel.className='btn'; sel.style.minWidth='160px'; fillSel(sel); sel.value = String(val||'');
                   const del = document.createElement('button'); del.type='button'; del.textContent='–'; del.className='btn btn-ghost'; del.title='Ta bort'; del.style.padding='2px 6px';
                   sel.addEventListener('change', ()=>{ const arr=getInputs(); arr[idx]=sel.value||''; setInputs(arr); render(); });
                   del.addEventListener('click', ()=>{ const arr=getInputs(); arr.splice(idx,1); setInputs(arr); render(); });
