@@ -509,8 +509,9 @@
         panel._lastAssistantText = '';
       }catch{}
     });
-    const delBtnU=panel.querySelector('[data-action="delete"]'); delBtnU?.addEventListener('click', ()=>{
+  const delBtnU=panel.querySelector('[data-action="delete"]'); delBtnU?.addEventListener('click', ()=>{
       try{
+    if (!confirm('Är du säker på att du vill ta bort denna nod?')) return;
         const ownerId = panel.dataset.ownerId||'';
         // Remove UI node
         const host = ownerId ? document.querySelector(`.fab[data-id="${ownerId}"]`) : null;
@@ -744,8 +745,9 @@
         panel._lastAssistantText = '';
       }catch{}
     });
-    const delBtn=panel.querySelector('[data-action="delete"]'); delBtn?.addEventListener('click', ()=>{
+  const delBtn=panel.querySelector('[data-action="delete"]'); delBtn?.addEventListener('click', ()=>{
       try{
+    if (!confirm('Är du säker på att du vill ta bort denna nod?')) return;
         const ownerId = panel.dataset.ownerId||'';
         // Remove UI node
         const host = ownerId ? document.querySelector(`.fab[data-id="${ownerId}"]`) : null;
@@ -1620,7 +1622,22 @@
   const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
   const setParking = (obj)=>{ try{ localStorage.setItem(`sectionParking:${id}`, JSON.stringify(obj||{})); }catch{} };
   const getInputs = ()=>{ try{ const p=getParking(); if (Array.isArray(p.inputs)) return p.inputs.map(String); const one = p.input? String(p.input):''; return one?[one]:[]; }catch{ return []; } };
-  const setInputs = (arr)=>{ try{ const p=getParking(); const dedup=[]; const seen=new Set(); for(const v of (arr||[])){ const s=String(v||''); if(!s) continue; if(!seen.has(s)){ seen.add(s); dedup.push(s); } } p.inputs = dedup; p.input = dedup[0]||null; setParking(p); }catch{} };
+  const setInputs = (arr)=>{
+    try{
+      const p = getParking();
+      const next = [];
+      const seen = new Set();
+      for (const v of (arr||[])){
+        const s = String(v||'');
+        // Keep empty placeholders so the UI shows an extra row
+        if (s === '') { next.push(''); continue; }
+        if (!seen.has(s)) { seen.add(s); next.push(s); }
+      }
+      p.inputs = next; // preserve order + blanks
+      p.input = next.find(v=>v)!==undefined ? (next.find(v=>v) || null) : null; // first non-empty for backward compat
+      setParking(p);
+    }catch{}
+  };
         // Populate parking selectors with coworker nodes and persist selection
         try{
             const fillFromCoworkers = ()=>{
@@ -2016,7 +2033,21 @@
             const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
             const setParking = (obj)=>{ try{ localStorage.setItem(`sectionParking:${id}`, JSON.stringify(obj||{})); }catch{} };
             const getInputs = ()=>{ try{ const p=getParking(); if (Array.isArray(p.inputs)) return p.inputs.map(String); const one = p.input? String(p.input):''; return one?[one]:[]; }catch{ return []; } };
-            const setInputs = (arr)=>{ try{ const p=getParking(); const dedup=[]; const seen=new Set(); for(const v of (arr||[])){ const s=String(v||''); if(!s) continue; if(!seen.has(s)){ seen.add(s); dedup.push(s); } } p.inputs = dedup; p.input = dedup[0]||null; setParking(p); }catch{} };
+            const setInputs = (arr)=>{
+              try{
+                const p = getParking();
+                const next = [];
+                const seen = new Set();
+                for (const v of (arr||[])){
+                  const s = String(v||'');
+                  if (s === '') { next.push(''); continue; }
+                  if (!seen.has(s)) { seen.add(s); next.push(s); }
+                }
+                p.inputs = next;
+                p.input = next.find(v=>v)!==undefined ? (next.find(v=>v) || null) : null;
+                setParking(p);
+              }catch{}
+            };
             const fillFromCoworkers = ()=>{
               const opts = [{ value:'', label:'— Välj nod —' }];
               try{
