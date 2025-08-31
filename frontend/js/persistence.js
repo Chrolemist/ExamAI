@@ -44,18 +44,42 @@
       try{ if (window.graph) settings = Object.assign({}, window.graph.getNodeSettings(id)); }catch{}
       nodes.push({ id, type, x, y, name, settings });
     });
-    // Connections: merge from Graph (nodes-only) and UI state (includes section I/O) and de-duplicate
+    // Connections: merge from Graph (ids only) and UI state (includes exact port endpoints)
     const connections = [];
     try{
-      const seen = new Set();
-      const pushConn = (fromId, toId)=>{
-        if (!fromId || !toId) return; const k = fromId+"->"+toId; if (seen.has(k)) return; seen.add(k); connections.push({ fromId, toId });
+      const seen = new Map(); // key -> object stored
+      const portDesc = (cp)=>{
+        try{
+          if (!cp) return null;
+          const kind = cp.classList && cp.classList.contains('section-io') ? 'section-io' : 'conn-point';
+          const role = (cp.classList && cp.classList.contains('io-in')) ? 'in' : (cp.classList && cp.classList.contains('io-out')) ? 'out' : (cp.getAttribute && (cp.getAttribute('data-io')||''));
+          const side = (cp.getAttribute && (cp.getAttribute('data-side')||'')) || (cp.dataset && (cp.dataset.side||'')) || '';
+          return { kind, role: String(role||''), side: String(side||'') };
+        }catch{ return null; }
+      };
+      const pushConn = (fromId, toId, fromCp, toCp)=>{
+        if (!fromId || !toId) return;
+        const k = String(fromId)+"->"+String(toId);
+        const existing = seen.get(k);
+        const fromPort = portDesc(fromCp);
+        const toPort = portDesc(toCp);
+        if (existing){
+          // Upgrade with port info if missing
+          if (!existing.fromPort && fromPort) existing.fromPort = fromPort;
+          if (!existing.toPort && toPort) existing.toPort = toPort;
+          return;
+        }
+        const obj = { fromId, toId };
+        if (fromPort) obj.fromPort = fromPort;
+        if (toPort) obj.toPort = toPort;
+        seen.set(k, obj);
+        connections.push(obj);
       };
       if (window.graph && Array.isArray(window.graph.connections)){
         window.graph.connections.forEach(c=> pushConn(c.fromId, c.toId));
       }
       if (window.state && Array.isArray(window.state.connections)){
-        window.state.connections.forEach(c=> pushConn(c.fromId, c.toId));
+        window.state.connections.forEach(c=> pushConn(c.fromId, c.toId, c.fromCp, c.toCp));
       }
     }catch{}
     // Chat logs per node
@@ -97,7 +121,7 @@
         try{ const rawGeom = localStorage.getItem(`panelGeom:${id}`); if (rawGeom) panelGeom[id] = JSON.parse(rawGeom)||null; }catch{}
       });
     }catch{}
-    return { version: 2, createdAt: Date.now(), nodes, connections, chat, sections, sectionState, nodeAttachments, panelGeom };
+  return { version: 3, createdAt: Date.now(), nodes, connections, chat, sections, sectionState, nodeAttachments, panelGeom };
   }
 
   function restore(data){
@@ -146,6 +170,39 @@
     // Helpers for robust connection restoration
   const pickOut = (el)=> el && (el.querySelector('.conn-point.io-out') || el.querySelector('.section-io[data-io="out"]') || el.querySelector('.conn-point'));
   const pickIn  = (el)=> el && (el.querySelector('.conn-point.io-in')  || el.querySelector('.section-io[data-io="in"]')  || el.querySelector('.conn-point'));
+  const resolvePort = (hostEl, desc, fallbackRole)=>{
+    try{
+      if (!hostEl) return null;
+      const d = desc || {};
+      const kind = String(d.kind||'');
+      const role = String(d.role||'') || String(fallbackRole||'');
+      const side = String(d.side||'');
+      // Prefer exact kind first
+      if (kind === 'conn-point'){
+        let list = hostEl.querySelectorAll('.conn-point');
+        list = Array.from(list).filter(el=>{
+          if (role === 'in' && !el.classList.contains('io-in')) return false;
+          if (role === 'out' && !el.classList.contains('io-out')) return false;
+          return true;
+        });
+        if (side){
+          const bySide = list.find(el => (el.getAttribute('data-side')||el.dataset?.side||'') === side);
+          if (bySide) return bySide;
+        }
+        return list[0] || null;
+      }
+      if (kind === 'section-io'){
+        const sel = role ? `.section-io[data-io="${role}"]` : '.section-io';
+        let el = hostEl.querySelector(sel);
+        if (!el) el = hostEl.querySelector('.section-io');
+        return el || null;
+      }
+      // Unknown kind; fall back by role
+      if (role === 'out') return pickOut(hostEl);
+      if (role === 'in') return pickIn(hostEl);
+      return hostEl.querySelector('.conn-point') || hostEl.querySelector('.section-io') || null;
+    }catch{ return null; }
+  };
     const hasConn = (fromId, toId)=>{
       try{ return (window.state?.connections||[]).some(c=>c.fromId===fromId && c.toId===toId); }catch{ return false; }
     };
@@ -167,15 +224,23 @@
   const a = document.querySelector(`.fab[data-id="${c.fromId}"]`) || document.querySelector(`.panel.board-section[data-section-id="${c.fromId}"]`) || document.querySelector(`.panel[data-section-id="${c.fromId}"]`);
   const b = document.querySelector(`.fab[data-id="${c.toId}"]`) || document.querySelector(`.panel.board-section[data-section-id="${c.toId}"]`) || document.querySelector(`.panel[data-section-id="${c.toId}"]`);
         if (!a || !b) return;
-        const fromCp = pickOut(a); const toCp = pickIn(b);
+        // Prefer exact saved ports when available
+        let fromCp = null, toCp = null;
+        try{ fromCp = resolvePort(a, c.fromPort, 'out'); }catch{}
+        try{ toCp = resolvePort(b, c.toPort, 'in'); }catch{}
+        if (!fromCp) fromCp = pickOut(a);
+        if (!toCp) toCp = pickIn(b);
         if (!fromCp || !toCp) return;
         const fromId = a.dataset.id || a.dataset.sectionId; const toId = b.dataset.id || b.dataset.sectionId;
         if (!fromId || !toId || hasConn(fromId, toId)) return;
-        // Simulate a pointerup at the target conn-point center to reuse finalizeConnection wiring
+        // Create the connection using exact endpoints to preserve ports
         try{
-          const r = toCp.getBoundingClientRect();
-          const fake = { clientX: r.left + r.width/2, clientY: r.top + r.height/2 };
-          if (window.finalizeConnection) window.finalizeConnection(a, fromCp, fake);
+          if (window.createConnectionDirect) window.createConnectionDirect(a, fromCp, b, toCp);
+          else if (window.finalizeConnection) {
+            const r = toCp.getBoundingClientRect();
+            const fake = { clientX: r.left + r.width/2, clientY: r.top + r.height/2 };
+            window.finalizeConnection(a, fromCp, fake);
+          }
         }catch{}
       });
     };

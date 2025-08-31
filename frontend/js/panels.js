@@ -1548,7 +1548,15 @@
     const mkSel = (labelText)=>{ const wrap=document.createElement('label'); wrap.className='subtle'; wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='6px'; const span=document.createElement('span'); span.textContent=labelText; const sel=document.createElement('select'); sel.className='btn'; wrap.appendChild(span); wrap.appendChild(sel); return { wrap, sel, span }; };
   const selGrader = mkSel('Rättare:');
   const selImprover = mkSel('Förbättra fråga:');
+  // For Input, replace single select with multi-select UI (ordered)
   const selInput = mkSel('Inmatning:');
+  // Remove the default single select, we'll inject our own container
+  try{ selInput.sel.remove(); }catch{}
+  const multiInputWrap = document.createElement('div');
+  multiInputWrap.className = 'multi-inputs';
+  Object.assign(multiInputWrap.style, { display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' });
+  const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-ghost'; addBtn.textContent='+'; addBtn.title='Lägg till inmatning'; addBtn.style.padding='2px 8px';
+  selInput.wrap.appendChild(multiInputWrap); selInput.wrap.appendChild(addBtn);
   parkWrap.appendChild(selGrader.wrap); parkWrap.appendChild(selImprover.wrap); parkWrap.appendChild(selInput.wrap);
     exBar.appendChild(parkWrap);
     // Export dropdown: map this section's content as Theory into a chosen section's full-screen view
@@ -1611,6 +1619,8 @@
           const getExercises = ()=>{ try{ const raw = localStorage.getItem(`sectionExercises:${id}`); return raw? (JSON.parse(raw)||[]) : []; }catch{ return []; } };
   const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
   const setParking = (obj)=>{ try{ localStorage.setItem(`sectionParking:${id}`, JSON.stringify(obj||{})); }catch{} };
+  const getInputs = ()=>{ try{ const p=getParking(); if (Array.isArray(p.inputs)) return p.inputs.map(String); const one = p.input? String(p.input):''; return one?[one]:[]; }catch{ return []; } };
+  const setInputs = (arr)=>{ try{ const p=getParking(); const dedup=[]; const seen=new Set(); for(const v of (arr||[])){ const s=String(v||''); if(!s) continue; if(!seen.has(s)){ seen.add(s); dedup.push(s); } } p.inputs = dedup; p.input = dedup[0]||null; setParking(p); }catch{} };
         // Populate parking selectors with coworker nodes and persist selection
         try{
             const fillFromCoworkers = ()=>{
@@ -1620,14 +1630,33 @@
                 if (value) opts.push({ value, label });
               });
               const fill = (sel)=>{ sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); }); };
-                const cur = getParking();
-                const prevGrader = cur && cur.grader ? String(cur.grader) : '';
-                const prevImprover = cur && cur.improver ? String(cur.improver) : '';
-                const prevInput = cur && cur.input ? String(cur.input) : '';
-                fill(selGrader.sel); fill(selImprover.sel); fill(selInput.sel);
-                if (prevGrader) selGrader.sel.value = prevGrader;
-                if (prevImprover) selImprover.sel.value = prevImprover;
-                if (prevInput) selInput.sel.value = prevInput;
+              // Render grader/improver as before
+              const cur = getParking();
+              const prevGrader = cur && cur.grader ? String(cur.grader) : '';
+              const prevImprover = cur && cur.improver ? String(cur.improver) : '';
+              fill(selGrader.sel); fill(selImprover.sel);
+              if (prevGrader) selGrader.sel.value = prevGrader;
+              if (prevImprover) selImprover.sel.value = prevImprover;
+              // Render Inputs (ordered list with numbering)
+              const renderInputs = ()=>{
+                // Clear
+                multiInputWrap.innerHTML='';
+                const values = getInputs();
+                const list = values.length ? values.slice() : ['']; // ensure at least one row
+                list.forEach((val, idx)=>{
+                  const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='4px';
+                  const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'11px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'4px' });
+                  const sel = document.createElement('select'); sel.className='btn'; sel.style.minWidth='150px'; fill(sel); sel.value = String(val||'');
+                  const del = document.createElement('button'); del.type='button'; del.textContent='–'; del.className='btn btn-ghost'; del.title='Ta bort'; del.style.padding='2px 6px';
+                  sel.addEventListener('change', ()=>{ const arr=getInputs(); arr[idx]=sel.value||''; setInputs(arr); renderInputs(); });
+                  del.addEventListener('click', ()=>{ const arr=getInputs(); arr.splice(idx,1); setInputs(arr); renderInputs(); });
+                  row.appendChild(badge); row.appendChild(sel); row.appendChild(del);
+                  multiInputWrap.appendChild(row);
+                });
+              };
+              // Wire add button
+              addBtn.onclick = ()=>{ const arr=getInputs(); arr.push(''); setInputs(arr); renderInputs(); };
+              renderInputs();
             };
             // Initial fill
             fillFromCoworkers();
@@ -1635,7 +1664,7 @@
             window.addEventListener('coworkers-changed', fillFromCoworkers);
             selGrader.sel.addEventListener('change', ()=>{ const p=getParking(); p.grader = selGrader.sel.value||null; setParking(p); });
             selImprover.sel.addEventListener('change', ()=>{ const p=getParking(); p.improver = selImprover.sel.value||null; setParking(p); });
-              selInput.sel.addEventListener('change', ()=>{ const p=getParking(); p.input = selInput.sel.value||null; setParking(p); });
+            // Input changes handled by per-row selectors above
         }catch{}
           const setExercises = (arr)=>{ try{ localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(arr||[])); }catch{} };
           // pending feedback target index (store transiently on section)
@@ -1980,11 +2009,14 @@
             parkWrap.style.gap = '6px';
             parkWrap.style.marginLeft = '12px';
             const span = document.createElement('span'); span.textContent = 'Inmatning:';
-            const sel = document.createElement('select'); sel.className = 'btn';
-            parkWrap.appendChild(span); parkWrap.appendChild(sel);
+            const multiInputWrap = document.createElement('div'); Object.assign(multiInputWrap.style, { display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' });
+            const addBtn = document.createElement('button'); addBtn.type='button'; addBtn.className='btn btn-ghost'; addBtn.textContent='+'; addBtn.title='Lägg till inmatning'; addBtn.style.padding='2px 8px';
+            parkWrap.appendChild(span); parkWrap.appendChild(multiInputWrap); parkWrap.appendChild(addBtn);
             tBar.appendChild(parkWrap);
             const getParking = ()=>{ try{ const raw = localStorage.getItem(`sectionParking:${id}`); return raw? (JSON.parse(raw)||{}) : {}; }catch{ return {}; } };
             const setParking = (obj)=>{ try{ localStorage.setItem(`sectionParking:${id}`, JSON.stringify(obj||{})); }catch{} };
+            const getInputs = ()=>{ try{ const p=getParking(); if (Array.isArray(p.inputs)) return p.inputs.map(String); const one = p.input? String(p.input):''; return one?[one]:[]; }catch{ return []; } };
+            const setInputs = (arr)=>{ try{ const p=getParking(); const dedup=[]; const seen=new Set(); for(const v of (arr||[])){ const s=String(v||''); if(!s) continue; if(!seen.has(s)){ seen.add(s); dedup.push(s); } } p.inputs = dedup; p.input = dedup[0]||null; setParking(p); }catch{} };
             const fillFromCoworkers = ()=>{
               const opts = [{ value:'', label:'— Välj nod —' }];
               try{
@@ -1993,13 +2025,27 @@
                   if (value) opts.push({ value, label });
                 });
               }catch{}
-              sel.innerHTML='';
-              opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); });
-              try{ const cur = getParking(); const prev = cur && cur.input ? String(cur.input) : ''; if (prev) sel.value = prev; }catch{}
+              const fillSel = (sel)=>{ sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); }); };
+              const render = ()=>{
+                multiInputWrap.innerHTML='';
+                const values = getInputs();
+                const list = values.length ? values.slice() : [''];
+                list.forEach((val, idx)=>{
+                  const row = document.createElement('div'); row.style.display='flex'; row.style.alignItems='center'; row.style.gap='4px';
+                  const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'11px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'4px' });
+                  const sel = document.createElement('select'); sel.className='btn'; sel.style.minWidth='150px'; fillSel(sel); sel.value = String(val||'');
+                  const del = document.createElement('button'); del.type='button'; del.textContent='–'; del.className='btn btn-ghost'; del.title='Ta bort'; del.style.padding='2px 6px';
+                  sel.addEventListener('change', ()=>{ const arr=getInputs(); arr[idx]=sel.value||''; setInputs(arr); render(); });
+                  del.addEventListener('click', ()=>{ const arr=getInputs(); arr.splice(idx,1); setInputs(arr); render(); });
+                  row.appendChild(badge); row.appendChild(sel); row.appendChild(del);
+                  multiInputWrap.appendChild(row);
+                });
+              };
+              addBtn.onclick = ()=>{ const arr=getInputs(); arr.push(''); setInputs(arr); render(); };
+              render();
             };
             fillFromCoworkers();
             window.addEventListener('coworkers-changed', fillFromCoworkers);
-            sel.addEventListener('change', ()=>{ const p=getParking(); p.input = sel.value||null; setParking(p); });
           }catch{}
           // Export dropdown (non-exercises too)
           try{

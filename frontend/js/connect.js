@@ -342,7 +342,11 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
           }
           if (combined.length){
             const lines = combined.map((it, i)=>`[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`);
-            const guide = 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
+            const single = (combined.length === 1);
+            const guide = (single
+              ? 'Material för denna fråga (endast 1 bilaga: använd alltid [1,sida] direkt efter varje påstående som stöds, t.ex. [1,7]; lägg fullständiga källor längst ned):\n'
+              : 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n'
+            ) + lines.join('\n');
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
             // Stash for meta to allow footnotes rendering
             requestAIReply._lastAttachments = combined;
@@ -398,7 +402,11 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
           }
           if (combined.length){
             const lines = combined.map((it, i)=>`[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`);
-            const guide = 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n' + lines.join('\n');
+            const single = (combined.length === 1);
+            const guide = (single
+              ? 'Material för denna fråga (endast 1 bilaga: använd alltid [1,sida] direkt efter varje påstående som stöds, t.ex. [1,7]; lägg fullständiga källor längst ned):\n'
+              : 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n'
+            ) + lines.join('\n');
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
             requestAIReply._lastAttachments = combined;
             // Include attachment contents as a 'Bilaga:' message so backend sees materials
@@ -1076,8 +1084,11 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
           if (!sid) return;
           const raw = localStorage.getItem(`sectionParking:${sid}`);
           const cfg = raw ? (JSON.parse(raw)||{}) : {};
-          // 1) Input append (dropdown-selected coworker only)
-          if (cfg && String(cfg.input||'') === String(ownerId)){
+          // 1) Input append: if this coworker is configured as an input for the section (supports multiple ordered inputs)
+          const inputs = Array.isArray(cfg?.inputs) ? cfg.inputs.map(String) : [];
+          const singleInput = String(cfg?.input||'');
+          const isInput = (inputs.length ? inputs.includes(String(ownerId)) : (singleInput && singleInput === String(ownerId)));
+          if (isInput){
             if (window.appendToSection) window.appendToSection(sid, reply);
           }
           // 2) Improver update: if section awaits improvement from this coworker, update that specific question text
@@ -1455,6 +1466,32 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
     };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   }
+  /** Programmatically create a connection using exact endpoints (no hit-testing). */
+  function createConnectionDirect(fromEl, fromCp, toEl, toCp){
+    try{
+      if (!fromEl || !fromCp || !toEl || !toCp) return;
+      const a = anchorOf(fromEl, fromCp);
+      const b = anchorOf(toEl, toCp);
+      const path = makePath(svg(), false);
+      const hit = makeHitPath(svg());
+      drawPath(path, a.x, a.y, b.x, b.y);
+      drawPath(hit, a.x, a.y, b.x, b.y);
+      const fromId = fromEl.dataset.id || fromEl.dataset.sectionId;
+      const toId = toEl.dataset.id || toEl.dataset.sectionId;
+      const conn = { fromId, toId, pathEl: path, hitEl: hit, fromCp, toCp };
+      window.state.connections.push(conn);
+      wireConnectionDeleteUI(conn);
+      try{ path.addEventListener('connection:transmit', (ev)=>{ try{ triggerFlowEffect(conn, ev?.detail); }catch{} }); }catch{}
+      if (fromId && toId && window.graph) window.graph.connect(fromId, toId);
+      // Ensure stable section ids if needed
+      try{
+        const aEl = document.querySelector(`[data-id="${fromId}"]`) || document.querySelector(`[data-section-id="${fromId}"]`);
+        const bEl = document.querySelector(`[data-id="${toId}"]`) || document.querySelector(`[data-section-id="${toId}"]`);
+        const ensureSecId = (el)=>{ if (!el) return; if (el.classList.contains('panel') && el.classList.contains('board-section')){ if (!el.dataset.sectionId){ el.dataset.sectionId = 's'+Math.random().toString(36).slice(2,6); } } };
+        ensureSecId(aEl); ensureSecId(bEl);
+      }catch{}
+    }catch{}
+  }
   /** On pointerup, snap to a target conn-point (if found) and finalize path + state. */
   function finalizeConnection(fromEl, fromCp, e){
     const p = window.pointFromEvent(e); const fromIsIn=fromCp.classList.contains('io-in'); const fromIsOut=fromCp.classList.contains('io-out');
@@ -1502,6 +1539,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   window.makeConnPointInteractive = makeConnPointInteractive;
   window.startConnection = startConnection;
   window.finalizeConnection = finalizeConnection;
+  window.createConnectionDirect = createConnectionDirect;
   window.anchorOf = anchorOf;
   window.findClosestConnPoint = findClosestConnPoint;
   window.updateConnectionsFor = updateConnectionsFor;
