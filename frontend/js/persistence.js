@@ -6,6 +6,7 @@
 // - O: Lägg nya fält i snapshot-objektet utan att bryta API. Versionera vid stora ändringar.
 (function(){
   const LS_PREFIX = 'snapshot:';
+  const LS_LAST_USED = 'snapshot:last-used';
 
   function collectSections(){
     const secs = [];
@@ -332,7 +333,10 @@
   function saveSnapshot(name){
     if (!name) return { ok:false, error:'namn krävs' };
     const key = LS_PREFIX + name;
-    try{ localStorage.setItem(key, JSON.stringify(snapshot())); return { ok:true, key };
+    try{
+      localStorage.setItem(key, JSON.stringify(snapshot()));
+      try{ localStorage.setItem(LS_LAST_USED, String(name)); }catch{}
+      return { ok:true, key };
     }catch(e){ return { ok:false, error: String(e) } }
   }
 
@@ -361,7 +365,8 @@
       if (!raw) return { ok:false, error:'saknas' };
       const data = JSON.parse(raw);
       restore(data);
-      return { ok:true };
+  try{ localStorage.setItem(LS_LAST_USED, String(name)); }catch{}
+  return { ok:true };
     }catch(e){ return { ok:false, error: String(e) } }
   }
 
@@ -375,4 +380,13 @@
   window.loadSnapshot = loadSnapshot;
   window.listSnapshots = listSnapshots;
   window.deleteSnapshot = deleteSnapshot;
+  // Auto-load last used snapshot on full page load
+  window.addEventListener('load', ()=>{
+    try{
+      const last = localStorage.getItem(LS_LAST_USED);
+      if (!last) return;
+      const res = loadSnapshot(last);
+      if (!res || res.ok !== true){ try{ localStorage.removeItem(LS_LAST_USED); }catch{} }
+    }catch{}
+  });
 })();

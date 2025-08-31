@@ -39,6 +39,7 @@
     empty: document.getElementById('fxEmpty'),
     main: document.getElementById('fxMain'),
     btnLayout: document.getElementById('fxLayout'),
+    controls: document.querySelector('.fx-controls'),
     cards: {
       q: document.getElementById('cardQ'),
       a: document.getElementById('cardA'),
@@ -46,6 +47,30 @@
   t: document.getElementById('cardT'),
     },
   };
+
+  // Visual indicator for layout mode (fast vs fritt)
+  let layoutBadge = null;
+  function ensureLayoutBadge(){
+    try{
+      if (layoutBadge && layoutBadge.isConnected) return layoutBadge;
+      layoutBadge = document.createElement('span');
+      layoutBadge.id = 'fxLayoutBadge';
+      Object.assign(layoutBadge.style, {
+        marginLeft: '8px', padding: '2px 8px',
+        border: '1px solid #3a3a4a', borderRadius: '999px',
+        fontSize: '12px', color: '#e6e6ec', opacity: .9,
+        background: 'rgba(255,255,255,0.03)'
+      });
+      if (els.controls) els.controls.insertBefore(layoutBadge, els.btnLayout?.nextSibling || null);
+      return layoutBadge;
+    }catch{ return null; }
+  }
+  function updateLayoutUI(isFree){
+    try{
+      if (els.btnLayout){ els.btnLayout.textContent = isFree ? 'Layoutläge: Fritt' : 'Layoutläge: Fast'; }
+      const b = ensureLayoutBadge(); if (b){ b.textContent = isFree ? 'Fritt läge' : 'Fast läge'; }
+    }catch{}
+  }
 
   function getList(){ try{ const raw = localStorage.getItem(key(id)); return raw? (JSON.parse(raw)||[]) : []; }catch{ return []; } }
   function setList(arr){ try{ localStorage.setItem(key(id), JSON.stringify(arr||[])); dispatchChanged(); }catch{} }
@@ -149,6 +174,7 @@
   const wrap = document.querySelector('.fx-wrap');
   if (wrap){ wrap.classList.toggle('free', free); }
     els.main.style.display = free ? 'block' : 'grid';
+  updateLayoutUI(free);
     Object.entries(els.cards).forEach(([k,card])=>{
       if (!card) return;
       if (free){
@@ -295,6 +321,8 @@
     }catch{}
   }); })();
   if (els.btnLayout){ els.btnLayout.addEventListener('click', toggleLayout); }
+  // Initialize layout badge state once on load
+  try{ updateLayoutUI(!!(loadLayout().free)); }catch{}
   // Question improver mini-chat
   (function(){
     const inp = document.getElementById('fxQChat'); const send = document.getElementById('fxQSend'); if (!inp || !send) return;
