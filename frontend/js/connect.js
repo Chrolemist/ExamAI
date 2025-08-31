@@ -535,10 +535,31 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   // Detect origin to decide if we still want streaming despite attachments
   let fromCoworker = false; try{ const srcEl = ctx && ctx.sourceId ? document.querySelector(`.fab[data-id="${ctx.sourceId}"]`) : null; fromCoworker = !!(srcEl && srcEl.dataset.type==='coworker'); }catch{}
   // Also detect if the sender is a board section (e.g., Exercises/Sections flows)
-  let fromSection = false; try{ const secEl = ctx && ctx.sourceId ? document.querySelector(`.panel.board-section[data-section-id="${ctx.sourceId}"]`) : null; fromSection = !!secEl; }catch{}
+  // In full-screen Exercises there is no DOM section, so also check localStorage keys for this section id
+  let fromSection = false; try{
+    const sid = ctx && ctx.sourceId ? String(ctx.sourceId) : '';
+    if (sid){
+      const secEl = document.querySelector(`.panel.board-section[data-section-id="${sid}"]`);
+      const hasStore = !!(localStorage.getItem(`sectionExercises:${sid}`) || localStorage.getItem(`sectionParking:${sid}`));
+      fromSection = !!secEl || hasStore;
+    }
+  }catch{}
   let _pgStart = 1;
-  // Enable pgwise only when not coming from a coworker or a board section (keep streaming for section-sourced flows)
-  if (hasMaterials && !fromCoworker && !fromSection) body.pgwise = { enable: true, startPage: _pgStart };
+  // Enable pgwise based on user setting and origin
+  try{
+    const rawNS = localStorage.getItem(`nodeSettings:${ownerId}`);
+    const ns = rawNS ? (JSON.parse(rawNS)||{}) : {};
+    const wantPagewise = !!ns.pagewise;
+    // Default behavior: pagewise when attachments exist and origin is neither coworker nor section
+    // If user enabled pagewise, honor it for coworker too, but keep section-sourced grading/improving streaming by default
+    if (hasMaterials){
+      if (!fromCoworker && !fromSection){
+        body.pgwise = { enable: true, startPage: _pgStart };
+      } else if (fromCoworker && !fromSection && wantPagewise){
+        body.pgwise = { enable: true, startPage: _pgStart };
+      }
+    }
+  }catch{}
   if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
     if (apiKey) body.apiKey = apiKey;
@@ -889,23 +910,106 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
         }catch{}
   wireAutoscrollGuard(ui.list);
   const stayDown = shouldAutoscrollNow(ui.list);
+        // Build attachment/citation context for linkifying and footers
+        const attItems = (function(){ try{ return Array.isArray(requestAIReply._lastAttachments) ? requestAIReply._lastAttachments : []; }catch{ return []; } })();
+        const citItems = Array.isArray(finalCitations) ? finalCitations : [];
+        // Deduplicate for stable numbering
+        const seenAtt = new Set(); const flatAtt = []; try{ (attItems||[]).forEach(it=>{ const key=(it?.url||'')||`${it?.name||''}|${it?.chars||0}`; if(!seenAtt.has(key)){ seenAtt.add(key); flatAtt.push(it); } }); }catch{}
+        const seenCit = new Set(); const flatCit = []; try{ (citItems||[]).forEach(c=>{ const key=String(c?.url||'')||String(c?.title||''); if(!seenCit.has(key)){ seenCit.add(key); flatCit.push(c); } }); }catch{}
+        const totalNotes = flatAtt.length + flatCit.length;
+        const makeLinkedHtml = (src)=>{
+          try{
+            return String(src)
+              .replace(/\[(\d+)\s*,\s*(?:s(?:ida|idor|\.)?\s*)?(\d+)(?:\s*[-–]\s*(\d+))?\]/gi, (mm, a, p1, p2)=>{
+                const first = Math.max(1, Number(p1)||1);
+                const second = Math.max(1, Number(p2)||first);
+                const page = Math.min(first, second);
+                const attLen = (Array.isArray(flatAtt)? flatAtt.length : 0);
+                const normBil = (attLen === 1 ? 1 : Number(a)||1);
+                const disp = (attLen === 1 && normBil === 1 && (Number(a)||1) !== 1)
+                  ? mm.replace(/^\[\s*\d+/, (s)=> s.replace(/\d+/, '1'))
+                  : mm;
+                return `<a href="javascript:void(0)" data-bil="${normBil}" data-page="${page}" class="ref-bp">${disp}<\/a>`;
+              })
+              .replace(/\[(\d+)\]/g, (mm, g)=>`<a href="javascript:void(0)" data-ref="${g}" class="ref">[${g}]<\/a>`);
+          }catch{ return String(src||''); }
+        };
+        // Render content with linkification
         if (renderMode === 'md' && window.mdToHtml){
           try{
-            const html = window.mdToHtml(finalText);
-            if (typeof window.sanitizeHtml === 'function') ui.textEl.innerHTML = window.sanitizeHtml(html);
-            else ui.textEl.innerHTML = html;
+            const html0 = window.mdToHtml(finalText);
+            const html1 = totalNotes ? makeLinkedHtml(html0) : html0;
+            if (typeof window.sanitizeHtml === 'function') ui.textEl.innerHTML = window.sanitizeHtml(html1);
+            else ui.textEl.innerHTML = html1;
           }catch{ ui.textEl.textContent = finalText; }
-        } else { ui.textEl.textContent = finalText; }
-        // citations under bubble
+        } else {
+          try{ const safe = (window.escapeHtml? window.escapeHtml(finalText) : String(finalText||'')); const html = totalNotes ? makeLinkedHtml(safe) : safe; ui.textEl.innerHTML = html; }
+          catch{ ui.textEl.textContent = finalText; }
+        }
+        // Remove old footers and append Material and Källor footers if available
         try{
-          const cites = Array.isArray(finalCitations) ? finalCitations : [];
-          if (cites.length){
-            const box = document.createElement('div'); box.className='subtle'; box.style.marginTop='6px'; box.style.fontSize='12px';
-            const parts = cites.map((c,i)=>{ const title = (c?.title||c?.url||`Källa ${i+1}`); const safe = String(title).replace(/[\n\r]+/g,' '); const url = String(c?.url||'#'); return `<a href="${url}" target="_blank" rel="noopener noreferrer">[${i+1}] ${safe}<\/a>`; });
-            box.innerHTML = parts.join(' ');
-            // remove existing footers (if any) and append
-            const old = ui.bubble.querySelectorAll('.subtle'); old.forEach((el,idx)=>{ if(idx>0) el.remove(); });
-            ui.bubble.appendChild(box);
+          const old = ui.bubble.querySelectorAll('.footers-block'); old.forEach((el)=>{ el.remove(); });
+          if (flatAtt.length){
+            const foot=document.createElement('div'); foot.className='subtle footers-block'; foot.style.marginTop='6px'; foot.style.fontSize='12px';
+            const lab=document.createElement('div'); lab.textContent='Material:'; foot.appendChild(lab);
+            const ol=document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0';
+            const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+            flatAtt.forEach((it,i)=>{
+              const li=document.createElement('li'); const a=document.createElement('a');
+              try{
+                const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+                a.href = baseHref || '#'; a.target='_blank'; a.rel='noopener';
+              }catch{ a.href='#'; }
+              a.textContent = (it.name||`Bilaga ${i+1}`);
+              li.appendChild(a); ol.appendChild(li);
+            });
+            foot.appendChild(ol); ui.bubble.appendChild(foot);
+          }
+          if (flatCit.length){
+            const foot=document.createElement('div'); foot.className='subtle footers-block'; foot.style.marginTop='6px'; foot.style.fontSize='12px';
+            const lab=document.createElement('div'); lab.textContent='Källor:'; foot.appendChild(lab);
+            const ol=document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0';
+            flatCit.forEach((c,i)=>{ const li=document.createElement('li'); const a=document.createElement('a'); a.href=String(c.url||'#'); a.target='_blank'; a.rel='noopener'; a.textContent = (c.title ? `${c.title}` : (c.url||`Källa ${i+1}`)); li.appendChild(a); ol.appendChild(li); });
+            foot.appendChild(ol); ui.bubble.appendChild(foot);
+          }
+        }catch{}
+        // Delegate clicks for inline references in the streaming bubble
+        try{
+          if (!ui.bubble.__refsHooked){
+            ui.bubble.addEventListener('click', (ev)=>{
+              try{
+                const bp = ev.target && ev.target.closest && ev.target.closest('a.ref-bp');
+                if (bp){
+                  let bil = Math.max(1, Number(bp.getAttribute('data-bil'))||1);
+                  const page = Math.max(1, Number(bp.getAttribute('data-page'))||1);
+                  const attLen = flatAtt.length; const total = attLen + flatCit.length;
+                  if (attLen === 1 && bil > 1) bil = 1;
+                  if (bil <= attLen){
+                    const it = flatAtt[bil-1]; const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+                    const base = it.url || it.origUrl || it.blobUrl || '';
+                    let href = base;
+                    if (isPdf(it) && it.url){ const eff = Math.max(1, page); href = it.url + `#page=${encodeURIComponent(eff)}`; }
+                    if (href){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  } else if (bil <= total){
+                    const c = flatCit[bil - attLen - 1]; const href = String(c?.url||'#'); if(href && href !== '#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  }
+                  ev.preventDefault(); ev.stopPropagation(); return;
+                }
+              }catch{}
+              const a = ev.target && ev.target.closest && ev.target.closest('a.ref'); if (!a) return; const n=a.getAttribute('data-ref'); if(!n) return; const idx = Math.max(1, Number(n)||1);
+              try{
+                const total = flatAtt.length + flatCit.length;
+                if (idx <= total){
+                  if (idx <= flatAtt.length){
+                    const it = flatAtt[idx-1]; const base = it.url || it.origUrl || it.blobUrl || ''; if (base){ const tmp=document.createElement('a'); tmp.href=base; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  } else {
+                    const c = flatCit[idx - flatAtt.length - 1]; const href=String(c?.url||'#'); if(href && href!=='#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  }
+                }
+              }catch{}
+              ev.preventDefault(); ev.stopPropagation();
+            });
+            ui.bubble.__refsHooked = true;
           }
         }catch{}
   if (ui.metaEl) ui.metaEl.textContent = (window.formatTime? window.formatTime(ts) : '');
@@ -1045,25 +1149,107 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
           else { const raw = localStorage.getItem(`nodeSettings:${ownerId}`); if (raw){ const s=JSON.parse(raw)||{}; if (s.renderMode) renderMode = String(s.renderMode); } }
         }catch{}
         // render into the existing bubble
+        // Build attachment/citation context for linkifying and footers
+        const attItems = (function(){ try{ return Array.isArray(requestAIReply._lastAttachments) ? requestAIReply._lastAttachments : []; }catch{ return []; } })();
+        const citItems = Array.isArray(finalCitations) ? finalCitations : [];
+        // Deduplicate for stable numbering
+        const seenAtt = new Set(); const flatAtt = []; try{ (attItems||[]).forEach(it=>{ const key=(it?.url||'')||`${it?.name||''}|${it?.chars||0}`; if(!seenAtt.has(key)){ seenAtt.add(key); flatAtt.push(it); } }); }catch{}
+        const seenCit = new Set(); const flatCit = []; try{ (citItems||[]).forEach(c=>{ const key=String(c?.url||'')||String(c?.title||''); if(!seenCit.has(key)){ seenCit.add(key); flatCit.push(c); } }); }catch{}
+        const totalNotes = flatAtt.length + flatCit.length;
+        const makeLinkedHtml = (src)=>{
+          try{
+            return String(src)
+              .replace(/\[(\d+)\s*,\s*(?:s(?:ida|idor|\.)?\s*)?(\d+)(?:\s*[-–]\s*(\d+))?\]/gi, (mm, a, p1, p2)=>{
+                const first = Math.max(1, Number(p1)||1);
+                const second = Math.max(1, Number(p2)||first);
+                const page = Math.min(first, second);
+                const attLen = (Array.isArray(flatAtt)? flatAtt.length : 0);
+                const normBil = (attLen === 1 ? 1 : Number(a)||1);
+                const disp = (attLen === 1 && normBil === 1 && (Number(a)||1) !== 1)
+                  ? mm.replace(/^\[\s*\d+/, (s)=> s.replace(/\d+/, '1'))
+                  : mm;
+                return `<a href="javascript:void(0)" data-bil="${normBil}" data-page="${page}" class="ref-bp">${disp}<\/a>`;
+              })
+              .replace(/\[(\d+)\]/g, (mm, g)=>`<a href="javascript:void(0)" data-ref="${g}" class="ref">[${g}]<\/a>`);
+          }catch{ return String(src||''); }
+        };
+        // Render content with linkification
         if (renderMode === 'md' && window.mdToHtml){
           try{
-            const html = window.mdToHtml(reply);
-            if (typeof window.sanitizeHtml === 'function') ui.textEl.innerHTML = window.sanitizeHtml(html);
-            else ui.textEl.innerHTML = html;
-          }catch{ ui.textEl.textContent = reply; }
-        } else { ui.textEl.textContent = reply; }
-        // citations + time
+            const html0 = window.mdToHtml(finalText);
+            const html1 = totalNotes ? makeLinkedHtml(html0) : html0;
+            if (typeof window.sanitizeHtml === 'function') ui.textEl.innerHTML = window.sanitizeHtml(html1);
+            else ui.textEl.innerHTML = html1;
+          }catch{ ui.textEl.textContent = finalText; }
+        } else {
+          try{ const safe = (window.escapeHtml? window.escapeHtml(finalText) : String(finalText||'')); const html = totalNotes ? makeLinkedHtml(safe) : safe; ui.textEl.innerHTML = html; }
+          catch{ ui.textEl.textContent = finalText; }
+        }
+        // Remove old footers and append Material and Källor footers if available
         try{
-          const cites = Array.isArray(citations) ? citations : [];
-          if (cites.length){
-            const box = document.createElement('div'); box.className='subtle'; box.style.marginTop='6px'; box.style.fontSize='12px';
-            const parts = cites.map((c,i)=>{ const title = (c?.title||c?.url||`Källa ${i+1}`); const safe = String(title).replace(/[\n\r]+/g,' '); const url = String(c?.url||'#'); return `<a href="${url}" target="_blank" rel="noopener noreferrer">[${i+1}] ${safe}<\/a>`; });
-            box.innerHTML = parts.join(' ');
-            const old = ui.bubble.querySelectorAll('.subtle'); old.forEach((el,idx)=>{ if(idx>0) el.remove(); });
-            ui.bubble.appendChild(box);
+          const old = ui.bubble.querySelectorAll('.footers-block'); old.forEach((el)=>{ el.remove(); });
+          if (flatAtt.length){
+            const foot=document.createElement('div'); foot.className='subtle footers-block'; foot.style.marginTop='6px'; foot.style.fontSize='12px';
+            const lab=document.createElement('div'); lab.textContent='Material:'; foot.appendChild(lab);
+            const ol=document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0';
+            const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+            flatAtt.forEach((it,i)=>{
+              const li=document.createElement('li'); const a=document.createElement('a');
+              try{
+                const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+                a.href = baseHref || '#'; a.target='_blank'; a.rel='noopener';
+              }catch{ a.href='#'; }
+              a.textContent = (it.name||`Bilaga ${i+1}`);
+              li.appendChild(a); ol.appendChild(li);
+            });
+            foot.appendChild(ol); ui.bubble.appendChild(foot);
+          }
+          if (flatCit.length){
+            const foot=document.createElement('div'); foot.className='subtle footers-block'; foot.style.marginTop='6px'; foot.style.fontSize='12px';
+            const lab=document.createElement('div'); lab.textContent='Källor:'; foot.appendChild(lab);
+            const ol=document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0';
+            flatCit.forEach((c,i)=>{ const li=document.createElement('li'); const a=document.createElement('a'); a.href=String(c.url||'#'); a.target='_blank'; a.rel='noopener'; a.textContent = (c.title ? `${c.title}` : (c.url||`Källa ${i+1}`)); li.appendChild(a); ol.appendChild(li); });
+            foot.appendChild(ol); ui.bubble.appendChild(foot);
           }
         }catch{}
+        // Delegate clicks for inline references in the streaming bubble
         try{
+          if (!ui.bubble.__refsHooked){
+            ui.bubble.addEventListener('click', (ev)=>{
+              try{
+                const bp = ev.target && ev.target.closest && ev.target.closest('a.ref-bp');
+                if (bp){
+                  let bil = Math.max(1, Number(bp.getAttribute('data-bil'))||1);
+                  const page = Math.max(1, Number(bp.getAttribute('data-page'))||1);
+                  const attLen = flatAtt.length; const total = attLen + flatCit.length;
+                  if (attLen === 1 && bil > 1) bil = 1;
+                  if (bil <= attLen){
+                    const it = flatAtt[bil-1]; const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+                    const base = it.url || it.origUrl || it.blobUrl || '';
+                    let href = base;
+                    if (isPdf(it) && it.url){ const eff = Math.max(1, page); href = it.url + `#page=${encodeURIComponent(eff)}`; }
+                    if (href){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  } else if (bil <= total){
+                    const c = flatCit[bil - attLen - 1]; const href = String(c?.url||'#'); if(href && href !== '#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  }
+                  ev.preventDefault(); ev.stopPropagation(); return;
+                }
+              }catch{}
+              const a = ev.target && ev.target.closest && ev.target.closest('a.ref'); if (!a) return; const n=a.getAttribute('data-ref'); if(!n) return; const idx = Math.max(1, Number(n)||1);
+              try{
+                const total = flatAtt.length + flatCit.length;
+                if (idx <= total){
+                  if (idx <= flatAtt.length){
+                    const it = flatAtt[idx-1]; const base = it.url || it.origUrl || it.blobUrl || ''; if (base){ const tmp=document.createElement('a'); tmp.href=base; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  } else {
+                    const c = flatCit[idx - flatAtt.length - 1]; const href=String(c?.url||'#'); if(href && href!=='#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+                  }
+                }
+              }catch{}
+              ev.preventDefault(); ev.stopPropagation();
+            });
+            ui.bubble.__refsHooked = true;
+          }
           // Clear live tool buffer and finalize meta timestamp (keep details block if injected)
           if (window.__liveToolBuf && window.__liveToolBuf.delete) window.__liveToolBuf.delete(ownerId);
           if (ui.metaEl && !injectedToolCode) ui.metaEl.textContent = (window.formatTime? window.formatTime(ts) : '');

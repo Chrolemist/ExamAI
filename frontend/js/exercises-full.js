@@ -28,6 +28,117 @@
   const cursorKey = (s)=> `sectionExercisesCursor:${s}`;
   const layoutKey = (s)=> `sectionExercisesLayout:${s}`;
   const roundKey = (s)=> `sectionExercisesRound:${s}`;
+  const fbViewKey = (s)=> `sectionExercisesFbView:${s}`; // 'edit' | 'preview'
+
+  // Local open helper (mirrors panels.js behavior for http(s) targets)
+  function openIfExists(url){
+    try{
+      if (!url) return;
+      const u = String(url);
+      if (!/^https?:/i.test(u)){
+        try{ window.open(u, '_blank', 'noopener'); }catch{}
+        return;
+      }
+      const base = u.split('#')[0];
+      fetch(base, { method:'HEAD', cache:'no-store' })
+        .then(r => {
+          if (r && r.ok){
+            try{ window.open(u, '_blank', 'noopener'); }
+            catch{
+              const a=document.createElement('a'); a.href=u; a.target='_blank'; a.rel='noopener'; document.body.appendChild(a); a.click(); a.remove();
+            }
+          } else {
+            alert('Denna bilaga saknas – ladda upp igen.');
+          }
+        })
+        .catch(()=>{ alert('Denna bilaga saknas – ladda upp igen.'); });
+    }catch{
+      try{ window.open(url, '_blank', 'noopener'); }catch{}
+    }
+  }
+
+  // Local helpers: read grader's attachments for this section, linkify refs, and wire clicks
+  function getSectionGraderAttachmentsLocal(sectionId){
+    try{
+      const sid = String(sectionId||''); if (!sid) return { attItems: [] };
+      const rawP = localStorage.getItem(`sectionParking:${sid}`);
+      const p = rawP ? (JSON.parse(rawP)||{}) : {};
+      const graderId = p && p.grader ? String(p.grader) : '';
+      if (!graderId) return { attItems: [] };
+      const rawA = localStorage.getItem(`nodeAttachments:${graderId}`);
+      const items = rawA ? (JSON.parse(rawA)||[]) : [];
+      const seen = new Set(); const flat = [];
+      (items||[]).forEach(it=>{ try{ const key = (it.url||'') || `${it.name||''}|${it.chars||0}`; if (!seen.has(key)){ seen.add(key); flat.push(it); } }catch{ flat.push(it); } });
+      return { attItems: flat };
+    }catch{ return { attItems: [] }; }
+  }
+  function linkifySectionRefsLocal(html, attItems){
+    try{
+      const attLen = Array.isArray(attItems) ? attItems.length : 0;
+      return String(html)
+        .replace(/\[(\d+)\s*,\s*(?:s(?:ida|idor|\.)?\s*)?(\d+)(?:\s*[-–]\s*(\d+))?\]/gi, (mm,a,p1,p2)=>{
+          const first = Math.max(1, Number(p1)||1);
+          const second = Math.max(1, Number(p2)||first);
+          const page = Math.min(first, second);
+          const normBil = (attLen === 1 ? 1 : Math.max(1, Number(a)||1));
+          const disp = (attLen === 1 && normBil === 1 && (Number(a)||1) !== 1)
+            ? mm.replace(/^\[\s*\d+/, s=> s.replace(/\d+/, '1'))
+            : mm;
+          return `<a href="javascript:void(0)" data-bil="${normBil}" data-page="${page}" class="ref-bp">${disp}<\/a>`;
+        })
+        .replace(/\[(\d+)\]/g, (m,g)=>`<a href="javascript:void(0)" data-ref="${g}" class="ref">[${g}]<\/a>`);
+    }catch{ return String(html||''); }
+  }
+  function wireSectionRefClicksLocal(containerEl, attItems, hintText){
+    try{
+      if (!containerEl) return;
+      if (containerEl.__refsWired) return; containerEl.__refsWired = true;
+      const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+      containerEl.addEventListener('click', (ev)=>{
+        try{
+          const tgt = ev.target && ev.target.closest ? ev.target.closest('a') : null; if (!tgt) return;
+          if (tgt.classList.contains('ref-bp')){
+            let bil = Math.max(1, Number(tgt.getAttribute('data-bil'))||1);
+            const page = Math.max(1, Number(tgt.getAttribute('data-page'))||1);
+            const attLen = attItems?.length||0; if (attLen === 1 && bil > 1) bil = 1;
+            if (bil <= attLen){
+              const it = attItems[bil-1];
+              const httpUrl = it.url || '';
+              const blobUrl = it.origUrl || it.blobUrl || (function(){ const blob=new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+              let finalHref = httpUrl || blobUrl;
+              if (isPdf(it) && httpUrl){ finalHref = httpUrl + `#page=${encodeURIComponent(Math.max(1,page))}`; }
+              ev.preventDefault(); ev.stopPropagation();
+              try{ openIfExists(finalHref); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+              return;
+            }
+          }
+          if (tgt.classList.contains('ref')){
+            const idx = Math.max(1, Number(tgt.getAttribute('data-ref'))||1);
+            if (idx <= (attItems?.length||0)){
+              const it = attItems[idx-1];
+              const httpUrl = it.url || '';
+              const blobUrl = it.origUrl || it.blobUrl || (function(){ const blob=new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+              let finalHref = httpUrl || blobUrl;
+              if (isPdf(it) && httpUrl && hintText){
+                try{
+                  const pages = Array.isArray(it.pages)? it.pages : [];
+                  const q = String(hintText||'').trim().slice(0,120);
+                  const tokens = q.split(/\s+/).filter(Boolean).slice(0,8);
+                  const needle = tokens.slice(0,3).join(' ');
+                  let pick=null;
+                  for (const p of pages){ const t = String(p.text||''); if (!t) continue; if (needle && t.toLowerCase().includes(needle.toLowerCase())){ pick={ page:Number(p.page)||null }; break; } for (const tok of tokens){ if (tok.length>=4 && t.toLowerCase().includes(tok.toLowerCase())){ pick={ page:Number(p.page)||null }; break; } } if (pick) break; }
+                  if (pick && pick.page){ finalHref = httpUrl + `#page=${encodeURIComponent(pick.page)}`; }
+                }catch{}
+              }
+              ev.preventDefault(); ev.stopPropagation();
+              try{ openIfExists(finalHref); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+              return;
+            }
+          }
+        }catch{}
+      });
+    }catch{}
+  }
 
   const els = {
   t: document.getElementById('fxT'),
@@ -47,6 +158,9 @@
   t: document.getElementById('cardT'),
     },
   };
+
+  function getFbView(){ try{ const v = localStorage.getItem(fbViewKey(id))||'edit'; return v==='preview'?'preview':'edit'; }catch{ return 'edit'; } }
+  function setFbView(v){ try{ localStorage.setItem(fbViewKey(id), v==='preview'?'preview':'edit'); }catch{} }
 
   // Visual indicator for layout mode (fast vs fritt)
   let layoutBadge = null;
@@ -106,38 +220,59 @@
     const it = arr[idx] || {};
   els.q.innerHTML = (window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(it.q||'')) : (it.q||''));
     els.a.value = it.a || '';
-    // Render feedback grouped by rounds
+    // Render feedback grouped by rounds (edit vs preview)
     const rounds = Array.isArray(it.fbRounds) ? it.fbRounds : (it.fb ? [String(it.fb)] : []);
     if (!rounds.length){ els.f.innerHTML = '<div class="subtle">Ingen feedback ännu.</div>'; }
     else {
+      const view = getFbView();
       const parts = rounds.map((txt, i)=>{
-        const head = `<div class="subtle fb-head" style="margin:6px 0 4px; opacity:.85; display:flex; align-items:center; justify-content:space-between; gap:8px;"><span>Omgång ${i+1}</span><button type="button" class="fb-del" data-ri="${i}" title="Radera omgång">✕</button></div>`;
-  const body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
-        return head + `<div class="fb-round" data-ri="${i}">${body}</div>`;
+        const head = `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85; display:flex; align-items:center; justify-content:space-between; gap:8px;\"><span>Omgång ${i+1}</span><button type=\"button\" class=\"fb-del\" data-ri=\"${i}\" title=\"Radera omgång\">✕</button></div>`;
+        if (view === 'preview'){
+          // Preview: render sanitized, linkified HTML; not editable
+          let body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
+          try{
+            const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] };
+            if (info.attItems && info.attItems.length){ body = linkifySectionRefsLocal(body, info.attItems); }
+          }catch{}
+          return head + `<div class=\"fb-round fb-preview\" data-ri=\"${i}\" contenteditable=\"false\">${body}</div>`;
+        } else {
+          // Edit: render as before, contentEditable
+          const body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
+          return head + `<div class=\"fb-round\" data-ri=\"${i}\">${body}</div>`;
+        }
       });
-      els.f.innerHTML = parts.join('<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
-      // Make feedback rounds editable and persist to storage
-      try{
-        const blocks = els.f.querySelectorAll('.fb-round');
-        blocks.forEach(el=>{
-          el.contentEditable = 'true';
-          el.spellcheck = false;
-          const saveNow = ()=>{
-            try{
-              const ri = Math.max(0, Number(el.getAttribute('data-ri')||'0')||0);
-              const arr2 = getList(); const i2 = Math.min(getCursor(), Math.max(0, arr2.length-1));
-              const it2 = arr2[i2] || {};
-              if (!Array.isArray(it2.fbRounds)) it2.fbRounds = (it2.fb? [String(it2.fb)] : []);
-              while (it2.fbRounds.length <= ri) it2.fbRounds.push('');
-              it2.fbRounds[ri] = String(el.innerText||'').trim();
-              arr2[i2] = it2; setList(arr2);
-            }catch{}
-          };
-          let t=null; el.addEventListener('input', ()=>{ try{ if (t) clearTimeout(t); t=setTimeout(saveNow, 500); }catch{} });
-          el.addEventListener('blur', saveNow);
-        });
-      }catch{}
-      // Wire delete per round
+  els.f.innerHTML = parts.join('<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
+  // reuse view variable from above
+      if (view === 'edit'){
+        // Make feedback rounds editable and persist to storage
+        try{
+          const blocks = els.f.querySelectorAll('.fb-round');
+          blocks.forEach(el=>{
+            el.contentEditable = 'true';
+            el.spellcheck = false;
+            const saveNow = ()=>{
+              try{
+                const ri = Math.max(0, Number(el.getAttribute('data-ri')||'0')||0);
+                const arr2 = getList(); const i2 = Math.min(getCursor(), Math.max(0, arr2.length-1));
+                const it2 = arr2[i2] || {};
+                if (!Array.isArray(it2.fbRounds)) it2.fbRounds = (it2.fb? [String(it2.fb)] : []);
+                while (it2.fbRounds.length <= ri) it2.fbRounds.push('');
+                it2.fbRounds[ri] = String(el.innerText||'').trim();
+                arr2[i2] = it2; setList(arr2);
+              }catch{}
+            };
+            let t=null; el.addEventListener('input', ()=>{ try{ if (t) clearTimeout(t); t=setTimeout(saveNow, 500); }catch{} });
+            el.addEventListener('blur', saveNow);
+          });
+        }catch{}
+      } else {
+        // Preview mode: wire clickable references on the container
+        try{
+          const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] };
+          if (info.attItems && info.attItems.length){ wireSectionRefClicksLocal(els.f, info.attItems, String(rounds[rounds.length-1]||'')); }
+        }catch{}
+      }
+      // Wire delete per round (both modes)
       try{
         const dels = els.f.querySelectorAll('button.fb-del');
         dels.forEach(btn=>{
@@ -321,6 +456,29 @@
     }catch{}
   }); })();
   if (els.btnLayout){ els.btnLayout.addEventListener('click', toggleLayout); }
+  // Feedback edit/preview toggle
+  (function(){
+    let btn = document.getElementById('fxFToggle');
+    if (!btn){
+      try{
+        const meta = document.getElementById('fxMetaF');
+        if (meta){
+          const host = meta.querySelector('div') || meta;
+          btn = document.createElement('button');
+          btn.type = 'button';
+          btn.id = 'fxFToggle';
+          btn.className = 'btn btn-ghost';
+          btn.title = 'Visa förhandsgranskning';
+          btn.textContent = 'Förhandsgranska';
+          host.appendChild(btn);
+        }
+      }catch{}
+    }
+    if(!btn) return;
+    const apply=()=>{ const v=getFbView(); btn.textContent = (v==='preview')? 'Redigera' : 'Förhandsgranska'; btn.title = (v==='preview')? 'Switcha till redigering' : 'Visa förhandsgranskning'; };
+    apply();
+    btn.addEventListener('click', ()=>{ const cur=getFbView(); setFbView(cur==='preview'?'edit':'preview'); apply(); render(); });
+  })();
   // Initialize layout badge state once on load
   try{ updateLayoutUI(!!(loadLayout().free)); }catch{}
   // Question improver mini-chat
@@ -437,7 +595,7 @@
   window.addEventListener('storage', (e)=>{
     try{
       if (!e) return;
-  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === '__exercises_changed__' || /^sectionRaw:/.test(e.key) || /^sectionSettings:/.test(e.key) || e.key === `sectionTheorySrc:${id}`)){
+  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === fbViewKey(id) || e.key === `sectionParking:${id}` || /^nodeAttachments:/.test(e.key||'') || e.key === '__exercises_changed__' || /^sectionRaw:/.test(e.key) || /^sectionSettings:/.test(e.key) || e.key === `sectionTheorySrc:${id}`)){
         render();
       }
     }catch{}

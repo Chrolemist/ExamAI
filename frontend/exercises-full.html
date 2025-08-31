@@ -85,7 +85,12 @@
           <div class="fx-resize" title="Ändra storlek"></div>
         </div>
         <div class="fx-card" id="cardF">
-          <div class="fx-meta drag-handle" id="fxMetaF">Feedback</div>
+          <div class="fx-meta drag-handle" id="fxMetaF">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span>Feedback</span>
+              <button type="button" class="btn btn-ghost" id="fxFToggle" title="Visa förhandsgranskning">Förhandsgranska</button>
+            </div>
+          </div>
           <div class="fx-fb" id="fxF" spellcheck="false"></div>
           <div class="loader-overlay" id="fxFLoad"><div class="spinner-rgb"></div></div>
           <div class="fx-resize" title="Ändra storlek"></div>

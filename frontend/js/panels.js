@@ -70,6 +70,94 @@
     }catch{ return String(html||''); }
   }
   try{ window.sanitizeHtml = sanitizeHtml; }catch{}
+  // Helpers: linkify [bilaga,sida] and [n] refs in section feedback using grader's attachments
+  function __getSectionGraderAttachments(sectionId){
+    try{
+      const id = String(sectionId||''); if (!id) return { attItems: [] };
+      const rawP = localStorage.getItem(`sectionParking:${id}`);
+      const p = rawP ? (JSON.parse(rawP)||{}) : {};
+      const graderId = p && p.grader ? String(p.grader) : '';
+      if (!graderId) return { attItems: [] };
+      const rawA = localStorage.getItem(`nodeAttachments:${graderId}`);
+      const items = rawA ? (JSON.parse(rawA)||[]) : [];
+      const seen = new Set(); const flat = [];
+      (items||[]).forEach(it=>{ try{ const key = (it.url||'') || `${it.name||''}|${it.chars||0}`; if (!seen.has(key)){ seen.add(key); flat.push(it); } }catch{ flat.push(it); } });
+      return { attItems: flat };
+    }catch{ return { attItems: [] }; }
+  }
+  function __linkifySectionRefs(html, attItems){
+    try{
+      const attLen = Array.isArray(attItems) ? attItems.length : 0;
+      return String(html)
+        .replace(/\[(\d+)\s*,\s*(?:s(?:ida|idor|\.)?\s*)?(\d+)(?:\s*[-–]\s*(\d+))?\]/gi, (mm,a,p1,p2)=>{
+          const first = Math.max(1, Number(p1)||1);
+          const second = Math.max(1, Number(p2)||first);
+          const page = Math.min(first, second);
+          const normBil = (attLen === 1 ? 1 : Math.max(1, Number(a)||1));
+          const disp = (attLen === 1 && normBil === 1 && (Number(a)||1) !== 1)
+            ? mm.replace(/^\[\s*\d+/, s=> s.replace(/\d+/, '1'))
+            : mm;
+          return `<a href="javascript:void(0)" data-bil="${normBil}" data-page="${page}" class="ref-bp">${disp}<\/a>`;
+        })
+        .replace(/\[(\d+)\]/g, (m,g)=>`<a href="javascript:void(0)" data-ref="${g}" class="ref">[${g}]<\/a>`);
+    }catch{ return String(html||''); }
+  }
+  function __wireSectionRefClicks(containerEl, attItems, hintText){
+    try{
+      if (!containerEl) return;
+      if (containerEl.__refsWired) return; // idempotent
+      containerEl.__refsWired = true;
+  const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+      containerEl.addEventListener('click', (ev)=>{
+        try{
+          const tgt = ev.target && ev.target.closest ? ev.target.closest('a') : null;
+          if (!tgt) return;
+          if (tgt.classList.contains('ref-bp')){
+            let bil = Math.max(1, Number(tgt.getAttribute('data-bil'))||1);
+            const page = Math.max(1, Number(tgt.getAttribute('data-page'))||1);
+            const attLen = attItems?.length||0;
+            if (attLen === 1 && bil > 1) bil = 1;
+            if (bil <= attLen){
+              const it = attItems[bil-1];
+              const httpUrl = it.url || '';
+              const blobUrl = it.origUrl || it.blobUrl || (function(){ const blob=new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+              let finalHref = httpUrl || blobUrl;
+              if (isPdf(it) && httpUrl){
+                const eff = Math.max(1, page);
+                finalHref = httpUrl + `#page=${encodeURIComponent(eff)}`;
+              }
+              ev.preventDefault(); ev.stopPropagation();
+              try{ openIfExists(finalHref); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+              return;
+            }
+          }
+          if (tgt.classList.contains('ref')){
+            const idx = Math.max(1, Number(tgt.getAttribute('data-ref'))||1);
+            if (idx <= (attItems?.length||0)){
+              const it = attItems[idx-1];
+              const httpUrl = it.url || '';
+              const blobUrl = it.origUrl || it.blobUrl || (function(){ const blob=new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
+              let finalHref = httpUrl || blobUrl;
+              if (isPdf(it) && httpUrl && hintText){
+                try{
+                  const pages = Array.isArray(it.pages)? it.pages : [];
+                  const q = String(hintText||'').trim().slice(0,120);
+                  const tokens = q.split(/\s+/).filter(Boolean).slice(0,8);
+                  const needle = tokens.slice(0,3).join(' ');
+                  let pick=null;
+                  for (const p of pages){ const t = String(p.text||''); if (!t) continue; if (needle && t.toLowerCase().includes(needle.toLowerCase())){ pick={ page:Number(p.page)||null }; break; } for (const tok of tokens){ if (tok.length>=4 && t.toLowerCase().includes(tok.toLowerCase())){ pick={ page:Number(p.page)||null }; break; } } if (pick) break; }
+                  if (pick && pick.page){ finalHref = httpUrl + `#page=${encodeURIComponent(pick.page)}`; }
+                }catch{}
+              }
+              ev.preventDefault(); ev.stopPropagation();
+              try{ openIfExists(finalHref); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
+              return;
+            }
+          }
+        }catch{}
+      });
+    }catch{}
+  }
   /** Position a panel's I/O point at the panel edges. */
   function positionPanelConn(cp, panel){ const rect = panel.getBoundingClientRect(); const pos = { t:[rect.width/2, 0], b:[rect.width/2, rect.height], l:[0, rect.height/2], r:[rect.width, rect.height/2] }[cp.dataset.side]; cp.style.left = pos[0] + 'px'; cp.style.top = pos[1] + 'px'; }
   /** Position a flyout panel near its host node. */
@@ -483,6 +571,11 @@
           </div>
         </div>
       </fieldset>
+      <fieldset style="margin:8px 0; padding:8px; border:1px solid #28283a; border-radius:8px;">
+        <legend class="subtle" style="padding:0 6px;">Bilagor</legend>
+        <label class="inline"><input type="checkbox" data-role="pagewise" /> Läs bilagor i sidfönster (pagewise)</label>
+        <div class="subtle" style="margin-left:22px;">Ger ofta bredare täckning vid många sidor, men minskar live‑streaming (svaret kan visas i större block).</div>
+      </fieldset>
       <div style="margin-top:10px;display:flex;justify-content:flex-end">
         <button type="button" class="btn danger" data-action="resetAll" title="Nollställ">Nollställ</button>
       </div>
@@ -706,6 +799,11 @@
         <input type="password" placeholder="Valfri – annars används global" data-role="apiKey" />
       </label>
       <fieldset style="margin:8px 0; padding:8px; border:1px solid #28283a; border-radius:8px;">
+        <legend class="subtle" style="padding:0 6px;">Bilagor</legend>
+        <label class="inline"><input type="checkbox" data-role="pagewise" /> Läs bilagor i sidfönster (pagewise)</label>
+        <div class="subtle" style="margin-left:22px;">Ger ofta bredare täckning vid många sidor, men minskar live‑streaming (svaret kan visas i större block).</div>
+      </fieldset>
+      <fieldset style="margin:8px 0; padding:8px; border:1px solid #28283a; border-radius:8px;">
         <legend class="subtle" style="padding:0 6px;">Verktyg</legend>
         <label class="inline"><input type="checkbox" data-role="enableTools" /> Tillåt verktyg (function calling)</label>
         <div class="subtle" style="margin-left:22px;">Aktivera t.ex. Python‑verktyget så att modellen kan köra kod.</div>
@@ -816,6 +914,7 @@
   const chunkTokenVal = by('[data-role="chunkTokenValue"]');
   const chunkUseNumberingEl = by('[data-role="chunkUseNumbering"]');
   const chunkTrimNumPreEl = by('[data-role\="chunkTrimNumberedPreamble\"]');
+  const pagewiseEl = by('[data-role="pagewise"]');
       
       const renderEl = by('[data-role="renderMode"]');
   // Web search settings removed from CoWorker; handled by Internet node
@@ -900,6 +999,7 @@
       if (saved.renderMode && renderEl) renderEl.value = saved.renderMode;
   // no web settings for coworker anymore
   if (saved.apiKey && apiKeyEl) { apiKeyEl.value = saved.apiKey; }
+  if (pagewiseEl){ pagewiseEl.checked = !!saved.pagewise; }
       if (enableToolsEl){
         if (saved.enableTools === undefined){
           // Default OFF
@@ -945,6 +1045,7 @@
       renderEl?.addEventListener('change', ()=>persist({ renderMode: renderEl.value }));
   // removed web listeners
   apiKeyEl?.addEventListener('input', ()=>{ persist({ apiKey: apiKeyEl.value||'' }); updateKeyBadge(); });
+  pagewiseEl?.addEventListener('change', ()=>{ persist({ pagewise: !!pagewiseEl.checked }); });
   enableToolsEl?.addEventListener('change', ()=>{ persist({ enableTools: !!enableToolsEl.checked }); });
   forcePythonEl?.addEventListener('change', ()=>{ persist({ forcePython: !!forcePythonEl.checked }); });
     }catch{}
@@ -1019,7 +1120,6 @@
                 const lab = document.createElement('div'); lab.textContent='Material:'; foot.appendChild(lab);
                 const ol = document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0';
                 const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
-        const getPdfOffset = (it)=>{ try{ const key = String(it?.url||it?.origUrl||''); if(!key) return 0; const v = localStorage.getItem('pdfPageOffset:'+key); const n = Number(v); return Number.isFinite(n)? Math.trunc(n) : 0; }catch{ return 0; } };
                 items.forEach((it,i)=>{ const li=document.createElement('li'); const a=document.createElement('a');
                   try{
                     const baseHref = it.url || it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
@@ -1029,7 +1129,7 @@
                         const hint = panel._lastAssistantText || (m.text||'');
                         const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
                         // Only add #page when we have a backend URL; blob anchors often get blocked
-        if (pick && pick.page && it.url){ const off = getPdfOffset(it); const eff = Math.max(1, Number(pick.page)+off); finalHref = it.url + `#page=${encodeURIComponent(eff)}`; }
+  if (pick && pick.page && it.url){ const eff = Math.max(1, Number(pick.page)); finalHref = it.url + `#page=${encodeURIComponent(eff)}`; }
                       }catch{}
                     }
                     a.href = finalHref; a.target='_blank'; a.rel='noopener';
@@ -1037,7 +1137,7 @@
                   }catch{ a.href='#'; }
                   a.textContent = (it.name||`Bilaga ${i+1}`); li.appendChild(a);
       // Calibrate control for PDFs
-      if (isPdf(it) && it.url){ const cfg=document.createElement('button'); cfg.type='button'; cfg.className='icon-btn'; cfg.title='Kalibrera sidoffset'; cfg.textContent='⚙'; cfg.style.marginLeft='6px'; cfg.addEventListener('click',()=>{ const key=String(it.url); const cur=String(localStorage.getItem('pdfPageOffset:'+key)||'0'); const v=prompt('Sidoffset för denna PDF (t.ex. 2 om s.1 motsvarar visare #page=3):', cur); if (v==null) return; const n=Number(v); if (Number.isFinite(n)) localStorage.setItem('pdfPageOffset:'+key, String(Math.trunc(n))); else alert('Ogiltigt tal.'); }); li.appendChild(cfg); }
+      
                   if (it.chars){ const small = document.createElement('span'); small.className='subtle'; small.style.marginLeft='6px'; small.textContent = `(${it.chars})`; li.appendChild(small); }
                   ol.appendChild(li); });
                 foot.appendChild(ol); b.appendChild(foot);
@@ -1081,7 +1181,7 @@
                     const baseHttp = it.url || '';
                     const baseBlob = it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
                     let finalHref = baseHttp || baseBlob;
-                    if (isPdf(it) && baseHttp){ const off = (function(){ try{ const v=localStorage.getItem('pdfPageOffset:'+baseHttp); const n=Number(v); return Number.isFinite(n)? Math.trunc(n) : 0; }catch{ return 0; } })(); const eff = Math.max(1, page + off); finalHref = baseHttp + `#page=${encodeURIComponent(eff)}`; }
+                    if (isPdf(it) && baseHttp){ const eff = Math.max(1, page); finalHref = baseHttp + `#page=${encodeURIComponent(eff)}`; }
                       try{ openIfExists(finalHref); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
                   } else if (bil <= total){
                     // Fallback: open citation n (ignore page)
@@ -1245,7 +1345,7 @@
                 const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
                 const baseHttp = it.url || '';
                 const baseBlob = it.origUrl || it.blobUrl || (function(){ const blob = new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
-                const final = (isPdf(it) && baseHttp) ? (function(){ const off=(function(){ try{ const v=localStorage.getItem('pdfPageOffset:'+baseHttp); const n=Number(v); return Number.isFinite(n)? Math.trunc(n) : 0; }catch{ return 0; } })(); const eff=Math.max(1, page+off); return baseHttp + `#page=${encodeURIComponent(eff)}`; })() : (baseHttp || baseBlob);
+                const final = (isPdf(it) && baseHttp) ? (function(){ const eff=Math.max(1, page); return baseHttp + `#page=${encodeURIComponent(eff)}`; })() : (baseHttp || baseBlob);
                   try{ openIfExists(final); }catch{ const tmp = document.createElement('a'); tmp.href = final; tmp.target = '_blank'; tmp.rel = 'noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
               } else if (bil <= total){
                 const c = citItems[bil - attLen - 1]; const href = String(c?.url||'#'); if(href && href !== '#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
@@ -1339,7 +1439,7 @@
               try{
                 const hint = panel._lastAssistantText || content || '';
                 const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
-        if (pick && pick.page){ const off=(function(){ try{ const v=localStorage.getItem('pdfPageOffset:'+baseHref); const n=Number(v); return Number.isFinite(n)? Math.trunc(n) : 0; }catch{ return 0; } })(); const eff=Math.max(1, Number(pick.page)+off); finalHref = baseHref + `#page=${encodeURIComponent(eff)}`; }
+  if (pick && pick.page){ const eff=Math.max(1, Number(pick.page)); finalHref = baseHref + `#page=${encodeURIComponent(eff)}`; }
               }catch{}
             }
             a.href = finalHref; a.target = '_blank'; a.rel = 'noopener';
@@ -1349,28 +1449,7 @@
           a.textContent = (it.name||`Bilaga ${idx}`);
           li.appendChild(a);
               // Add gear to calibrate page offset for this PDF and update link immediately
-              try{
-                const isPdfNow = /\.pdf($|\?)/i.test(String(it?.name||'')) || /pdf/i.test(String(it?.mime||''));
-                const httpUrl = String(it?.url||'');
-                if (isPdfNow && httpUrl){
-                  const cfg = document.createElement('button');
-                  cfg.type = 'button'; cfg.className='icon-btn'; cfg.title='Kalibrera sidoffset'; cfg.textContent='⚙'; cfg.style.marginLeft='6px';
-                  cfg.addEventListener('click', ()=>{
-                    const key = httpUrl; const cur = String(localStorage.getItem('pdfPageOffset:'+key)||'0');
-                    const v = prompt('Sidoffset för denna PDF (t.ex. 2 om s.1 motsvarar visare #page=3):', cur);
-                    if (v==null) return; const n = Number(v);
-                    if (!Number.isFinite(n)) { alert('Ogiltigt tal.'); return; }
-                    localStorage.setItem('pdfPageOffset:'+key, String(Math.trunc(n)));
-                    // recompute href using current best page pick if present
-                    try{
-                      const hint = panel._lastAssistantText || content || '';
-                      const pick = (function(att, hintText){ try{ if (!Array.isArray(att.pages)||!att.pages.length) return null; const q = String(hintText||'').trim().slice(0,120); if(!q) return null; const tokens=q.split(/\s+/).filter(Boolean).slice(0,8); const needle=tokens.slice(0,3).join(' '); let best=null; for (const p of att.pages){ const txt=String(p.text||''); if(!txt) continue; if (needle && txt.toLowerCase().includes(needle.toLowerCase())) { best={ page:Number(p.page)||null }; break; } for (const t of tokens){ if (t.length>=4 && txt.toLowerCase().includes(t.toLowerCase())) { best={ page:Number(p.page)||null }; break; } } if (best) break; } return best; }catch{return null;} })(it, hint);
-                      if (pick && pick.page){ const off = Math.trunc(n); const eff = Math.max(1, Number(pick.page)+off); a.href = httpUrl + `#page=${encodeURIComponent(eff)}`; }
-                    }catch{}
-                  });
-                  li.appendChild(cfg);
-                }
-              }catch{}
+              
           if (it.chars){ const small = document.createElement('span'); small.className='subtle'; small.style.marginLeft='6px'; small.textContent = `(${it.chars})`; li.appendChild(small); }
           ol.appendChild(li);
         });
@@ -1434,7 +1513,23 @@
             localStorage.setItem(`sectionExercises:${id}`, JSON.stringify(arr));
             // clear flag and update UI if focus view is present
             delete sec.dataset.pendingFeedback;
-            const focus = sec.querySelector('.ex-fb'); if (focus && Number(localStorage.getItem(`sectionExercisesCursor:${id}`)||'0') === idx){ try{ const it = arr[idx]||{}; const rounds = Array.isArray(it.fbRounds)? it.fbRounds : []; const parts = rounds.map((txt,i)=>{ const head = `<div class=\"subtle\" style=\"margin:6px 0 4px; opacity:.85;\">Omgång ${i+1}</div>`; const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||''); return head + `<div class=\"fb-round\">${body}</div>`; }); focus.innerHTML = parts.join('<hr style=\"border:none; border-top:1px solid #252532; margin:8px 0;\">'); }catch{ focus.textContent=''; } }
+            const focus = sec.querySelector('.ex-fb');
+            if (focus && Number(localStorage.getItem(`sectionExercisesCursor:${id}`)||'0') === idx){
+              try{
+                const it = arr[idx]||{};
+                const rounds = Array.isArray(it.fbRounds)? it.fbRounds : [];
+                const { attItems } = __getSectionGraderAttachments(id);
+                const parts = rounds.map((txt,i)=>{
+                  const head = `<div class=\"subtle\" style=\"margin:6px 0 4px; opacity:.85;\">Omgång ${i+1}</div>`;
+                  let body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
+                  try{ body = sanitizeHtml(body); }catch{}
+                  if (attItems.length){ body = __linkifySectionRefs(body, attItems); }
+                  return head + `<div class=\"fb-round\">${body}</div>`;
+                });
+                focus.innerHTML = parts.join('<hr style=\"border:none; border-top:1px solid #252532; margin:8px 0;\">');
+                if (attItems.length){ __wireSectionRefClicks(focus, attItems, String(rounds[rounds.length-1]||'')); }
+              }catch{ try{ focus.textContent=''; }catch{} }
+            }
             return; // handled
           }
         }catch{}
