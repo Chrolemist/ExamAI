@@ -500,7 +500,8 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   try{
     const sRaw = localStorage.getItem(`nodeSettings:${ownerId}`);
     const sCfg = sRaw ? (JSON.parse(sRaw)||{}) : {};
-    toolsEnabled = (sCfg.enableTools !== false);
+    // Default OFF: require explicit enableTools === true to turn on tools
+    toolsEnabled = (sCfg.enableTools === true);
     if (toolsEnabled){
       // Use the dedicated Python model when tools are active; default to a stable Python-capable model
       body.model = sCfg.modelPy || 'gpt-4o-mini';
@@ -533,9 +534,11 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   try { hasMaterials = Array.isArray(requestAIReply._lastAttachments) && requestAIReply._lastAttachments.length > 0; } catch {}
   // Detect origin to decide if we still want streaming despite attachments
   let fromCoworker = false; try{ const srcEl = ctx && ctx.sourceId ? document.querySelector(`.fab[data-id="${ctx.sourceId}"]`) : null; fromCoworker = !!(srcEl && srcEl.dataset.type==='coworker'); }catch{}
+  // Also detect if the sender is a board section (e.g., Exercises/Sections flows)
+  let fromSection = false; try{ const secEl = ctx && ctx.sourceId ? document.querySelector(`.panel.board-section[data-section-id="${ctx.sourceId}"]`) : null; fromSection = !!secEl; }catch{}
   let _pgStart = 1;
-  // Enable pgwise only when not coming from a coworker (to keep streaming/backpressure pipelines smooth)
-  if (hasMaterials && !fromCoworker) body.pgwise = { enable: true, startPage: _pgStart };
+  // Enable pgwise only when not coming from a coworker or a board section (keep streaming for section-sourced flows)
+  if (hasMaterials && !fromCoworker && !fromSection) body.pgwise = { enable: true, startPage: _pgStart };
   if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
     if (apiKey) body.apiKey = apiKey;
@@ -1235,9 +1238,9 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   };
   // Announce start for UI (e.g., show cancel button)
   try{ window.dispatchEvent(new CustomEvent('ai-request-started', { detail:{ ownerId, sourceId: ctx && ctx.sourceId ? String(ctx.sourceId) : null } })); }catch{}
-  // Prefer streaming when no pagewise (materials) are involved; fallback to JSON path on error
-  // Prefer stream when not pagewise; if tools are enabled we still try stream first and fallback to JSON when server signals tool_calls_pending
-  const preferStream = ((!hasMaterials) || fromCoworker);
+  // Prefer streaming when no pagewise (materials) are involved, or when source is coworker/section; fallback to JSON on error
+  // Keep streaming for section-sourced grading/improving even with attachments
+  const preferStream = ((!hasMaterials) || fromCoworker || fromSection);
   const startPromise = (preferStream ? (async ()=>{
     const basePayload = Object.assign({}, body);
     try{ return await sendStreamOnce(basePayload); }

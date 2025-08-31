@@ -902,16 +902,18 @@
   if (saved.apiKey && apiKeyEl) { apiKeyEl.value = saved.apiKey; }
       if (enableToolsEl){
         if (saved.enableTools === undefined){
-          enableToolsEl.checked = true;
-          try{ persist({ enableTools: true }); }catch{}
+          // Default OFF
+          enableToolsEl.checked = false;
+          try{ persist({ enableTools: false }); }catch{}
         } else {
           enableToolsEl.checked = !!saved.enableTools;
         }
       }
       if (forcePythonEl){
         if (saved.forcePython === undefined){
-          forcePythonEl.checked = true;
-          try{ persist({ forcePython: true }); }catch{}
+          // Default OFF
+          forcePythonEl.checked = false;
+          try{ persist({ forcePython: false }); }catch{}
         } else {
           forcePythonEl.checked = !!saved.forcePython;
         }
