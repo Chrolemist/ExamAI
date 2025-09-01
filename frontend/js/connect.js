@@ -688,16 +688,23 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
         }catch{}
       });
     };
-  // Stream feedback deltas into fullscreen/regular section when grading
+  // Stream feedback deltas into fullscreen/regular section when grading (supports per-grader)
     const feedbackCtx = (function(){
       try{
         const sid = String((ctx && ctx.sourceId) || '') || '';
         if (!sid) return null;
-        // Only stream if this coworker is the selected grader for the section
         const rawP = localStorage.getItem(`sectionParking:${sid}`);
         const park = rawP ? (JSON.parse(rawP)||{}) : {};
-        if (!park || String(park.grader||'') !== String(ownerId)) return null;
-        // Prefer explicit fullscreen marker; else fall back to DOM dataset for the live section panel
+        // First, prefer per-grader marker for this owner (multi-grader flow)
+        let vPer = localStorage.getItem(`sectionPendingFeedback:${sid}:${ownerId}`);
+        if (vPer!=null){
+          const idx = Math.max(0, Number(vPer)||0);
+          return { sid, idx, markerType: 'per', graderId: String(ownerId) };
+        }
+        // Fallback: legacy single-grader flow if this owner is the configured grader
+        if (!park || String(park.grader||'') !== String(ownerId)){
+          return null;
+        }
         let markerType = 'ls';
         let v = localStorage.getItem(`sectionPendingFeedback:${sid}`);
         if (v==null){
@@ -707,22 +714,32 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
         }
         if (v==null) return null;
         const idx = Math.max(0, Number(v)||0);
-        return { sid, idx, markerType };
+        return { sid, idx, markerType, graderId: String(ownerId) };
       }catch{ return null; }
     })();
     const appendDeltaToFeedback = (delta)=>{
       try{
         if (!feedbackCtx) return;
-        const { sid, idx } = feedbackCtx;
+        const { sid, idx, markerType, graderId } = feedbackCtx;
         const key = `sectionExercises:${sid}`;
         const roundKey = `sectionExercisesRound:${sid}`;
         let arr = []; try{ arr = JSON.parse(localStorage.getItem(key)||'[]')||[]; }catch{ arr=[]; }
         if (!arr[idx]) return;
         let round = 1; try{ round = Math.max(1, Number(localStorage.getItem(roundKey)||'1')||1); }catch{}
-        if (!Array.isArray(arr[idx].fbRounds)) arr[idx].fbRounds = (arr[idx].fb? [String(arr[idx].fb)] : []);
-        const rIndex = round - 1; while (arr[idx].fbRounds.length <= rIndex) arr[idx].fbRounds.push('');
-        const prev = String(arr[idx].fbRounds[rIndex]||'');
-        arr[idx].fbRounds[rIndex] = prev + String(delta||'');
+        // If per-grader, stream into fbByGrader[ownerId]; else use legacy fbRounds
+        if (markerType === 'per'){
+          if (!arr[idx].fbByGrader || typeof arr[idx].fbByGrader!== 'object') arr[idx].fbByGrader = {};
+          const gKey = String(graderId||ownerId);
+          if (!Array.isArray(arr[idx].fbByGrader[gKey])) arr[idx].fbByGrader[gKey] = [];
+          const rIndex = round - 1; while (arr[idx].fbByGrader[gKey].length <= rIndex) arr[idx].fbByGrader[gKey].push('');
+          const prev = String(arr[idx].fbByGrader[gKey][rIndex]||'');
+          arr[idx].fbByGrader[gKey][rIndex] = prev + String(delta||'');
+        } else {
+          if (!Array.isArray(arr[idx].fbRounds)) arr[idx].fbRounds = (arr[idx].fb? [String(arr[idx].fb)] : []);
+          const rIndex = round - 1; while (arr[idx].fbRounds.length <= rIndex) arr[idx].fbRounds.push('');
+          const prev = String(arr[idx].fbRounds[rIndex]||'');
+          arr[idx].fbRounds[rIndex] = prev + String(delta||'');
+        }
         localStorage.setItem(key, JSON.stringify(arr));
         try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
         try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
@@ -1029,12 +1046,18 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   }catch{}
     // Completion event
     try{
-      // If grading, clear pending marker (both fullscreen key and live section dataset)
+      // If grading, clear pending marker(s) and notify
       if (feedbackCtx && feedbackCtx.sid){
-        try{ localStorage.removeItem(`sectionPendingFeedback:${feedbackCtx.sid}`); }catch{}
-        try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${feedbackCtx.sid}"]`); if (sec && sec.dataset) delete sec.dataset.pendingFeedback; }catch{}
+        const sid2 = feedbackCtx.sid;
+        // Remove per-grader key if used
+        if (feedbackCtx.markerType === 'per'){
+          try{ localStorage.removeItem(`sectionPendingFeedback:${sid2}:${ownerId}`); }catch{}
+        } else {
+          try{ localStorage.removeItem(`sectionPendingFeedback:${sid2}`); }catch{}
+          try{ const sec = document.querySelector(`.panel.board-section[data-section-id="${sid2}"]`); if (sec && sec.dataset) delete sec.dataset.pendingFeedback; }catch{}
+        }
         try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
-        try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: feedbackCtx.sid } })); }catch{}
+        try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid2 } })); }catch{}
       }
       // If improving, clear pending marker too (both fullscreen key and live section dataset)
       if (improveCtx && improveCtx.sid){
@@ -1314,24 +1337,36 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
           if (!sid) return;
           const raw = localStorage.getItem(`sectionParking:${sid}`) || '{}';
           const cfg = JSON.parse(raw||'{}')||{};
-          if (!cfg || String(cfg.grader||'') !== String(ownerId)) return;
+          // If this owner is not among configured graders, skip
+          const graders = Array.isArray(cfg.graders) ? cfg.graders.map(x=>String(x?.id||'')) : (cfg.grader ? [String(cfg.grader)] : []);
+          if (!graders.includes(String(ownerId))) return;
           // collect pending feedback idx: dataset flag or cross-tab key
           let idx = null;
           if (sec?.dataset?.pendingFeedback !== undefined){ idx = Math.max(0, Number(sec.dataset.pendingFeedback)||0); try{ delete sec.dataset.pendingFeedback; }catch{} }
-          if (idx==null){ try{ const v = localStorage.getItem(`sectionPendingFeedback:${sid}`); if (v!=null){ idx = Math.max(0, Number(v)||0); localStorage.removeItem(`sectionPendingFeedback:${sid}`); } }catch{} }
+          if (idx==null){
+            try{
+              const v = localStorage.getItem(`sectionPendingFeedback:${sid}:${ownerId}`);
+              if (v!=null){ idx = Math.max(0, Number(v)||0); localStorage.removeItem(`sectionPendingFeedback:${sid}:${ownerId}`); }
+              else {
+                const legacy = localStorage.getItem(`sectionPendingFeedback:${sid}`);
+                if (legacy!=null){ idx = Math.max(0, Number(legacy)||0); localStorage.removeItem(`sectionPendingFeedback:${sid}`); }
+              }
+            }catch{}
+          }
           if (idx==null) return;
           const key = `sectionExercises:${sid}`;
           const arr = JSON.parse(localStorage.getItem(key)||'[]')||[];
           if (arr[idx]){
             // compute current round counter (1-based), default 1
             let round = 1; try{ round = Math.max(1, Number(localStorage.getItem(`sectionExercisesRound:${sid}`)||'1')||1); }catch{}
-            // Ensure fbRounds is an array and migrate legacy fb
-            try{ if (!Array.isArray(arr[idx].fbRounds)) arr[idx].fbRounds = []; if (arr[idx].fb && !arr[idx].fbRounds.length){ arr[idx].fbRounds = [ String(arr[idx].fb||'') ]; delete arr[idx].fb; } }catch{}
-            const rIndex = round - 1; // zero-based
-            // Ensure array length
-            while (arr[idx].fbRounds.length <= rIndex) arr[idx].fbRounds.push('');
-            const prev = String(arr[idx].fbRounds[rIndex]||'');
-            arr[idx].fbRounds[rIndex] = prev ? (prev + '\n\n' + String(reply||'')) : String(reply||'');
+            // Create per-grader feedback map
+            if (!arr[idx].fbByGrader) arr[idx].fbByGrader = {};
+            const gKey = String(ownerId);
+            if (!arr[idx].fbByGrader[gKey]) arr[idx].fbByGrader[gKey] = [];
+            const rIndex = round - 1;
+            while (arr[idx].fbByGrader[gKey].length <= rIndex) arr[idx].fbByGrader[gKey].push('');
+            const prev = String(arr[idx].fbByGrader[gKey][rIndex]||'');
+            arr[idx].fbByGrader[gKey][rIndex] = prev ? (prev + '\n\n' + String(reply||'')) : String(reply||'');
             localStorage.setItem(key, JSON.stringify(arr));
             try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
             try{ window.dispatchEvent(new CustomEvent('exercises-data-changed-global', { detail:{ id: sid } })); }catch{}
@@ -1371,15 +1406,21 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
         }catch{}
       }
     }catch{}
-    // Cross-tab only: if no section DOM exists, still handle pending feedback markers across tabs
+  // Cross-tab only: if no section DOM exists, still handle pending feedback markers across tabs
     try{
-      const keys = Object.keys(localStorage || {}).filter(k => /^sectionPendingFeedback:/.test(k));
+    const keys = Object.keys(localStorage || {}).filter(k => /^sectionPendingFeedback:/.test(k));
       for (const k of keys){
         try{
-          const sid = k.replace(/^sectionPendingFeedback:/, '');
+            // Support both legacy and per-grader keys
+            const m = k.match(/^sectionPendingFeedback:([^:]+)(?::(.+))?$/);
+            const sid = m ? m[1] : '';
+            const gid = m && m[2] ? m[2] : null;
+      // If marker is per-grader and does not belong to this owner, skip it
+      if (gid && String(gid) !== String(ownerId)) continue;
           const raw = localStorage.getItem(`sectionParking:${sid}`) || '{}';
           const cfg = JSON.parse(raw||'{}')||{};
-          if (!cfg || String(cfg.grader||'') !== String(ownerId)) continue;
+            const graders = Array.isArray(cfg.graders) ? cfg.graders.map(x=>String(x?.id||'')) : (cfg.grader ? [String(cfg.grader)] : []);
+            if (!graders.includes(String(ownerId))) continue;
           const v = localStorage.getItem(k);
           if (v==null) continue;
           const idx = Math.max(0, Number(v)||0);
@@ -1388,10 +1429,12 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
           if (!arr[idx]) continue;
           // round-aware append
           let round = 1; try{ round = Math.max(1, Number(localStorage.getItem(`sectionExercisesRound:${sid}`)||'1')||1); }catch{}
-          try{ if (!Array.isArray(arr[idx].fbRounds)) arr[idx].fbRounds = []; if (arr[idx].fb && !arr[idx].fbRounds.length){ arr[idx].fbRounds = [ String(arr[idx].fb||'') ]; delete arr[idx].fb; } }catch{}
-          const rIndex = round - 1; while (arr[idx].fbRounds.length <= rIndex) arr[idx].fbRounds.push('');
-          const prev = String(arr[idx].fbRounds[rIndex]||'');
-          arr[idx].fbRounds[rIndex] = prev ? (prev + '\n\n' + String(reply||'')) : String(reply||'');
+            if (!arr[idx].fbByGrader) arr[idx].fbByGrader = {};
+            const gKey = String(ownerId);
+            if (!arr[idx].fbByGrader[gKey]) arr[idx].fbByGrader[gKey] = [];
+            const rIndex = round - 1; while (arr[idx].fbByGrader[gKey].length <= rIndex) arr[idx].fbByGrader[gKey].push('');
+            const prev = String(arr[idx].fbByGrader[gKey][rIndex]||'');
+            arr[idx].fbByGrader[gKey][rIndex] = prev ? (prev + '\n\n' + String(reply||'')) : String(reply||'');
           localStorage.setItem(keyEx, JSON.stringify(arr));
           localStorage.removeItem(k);
                    try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}

@@ -220,44 +220,79 @@
     const it = arr[idx] || {};
   els.q.innerHTML = (window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(it.q||'')) : (it.q||''));
     els.a.value = it.a || '';
-    // Render feedback grouped by rounds (edit vs preview)
+  // Render feedback grouped by rounds (supports multi-graders; edit vs preview)
     const rounds = Array.isArray(it.fbRounds) ? it.fbRounds : (it.fb ? [String(it.fb)] : []);
-    if (!rounds.length){ els.f.innerHTML = '<div class="subtle">Ingen feedback ännu.</div>'; }
-    else {
-      const view = getFbView();
-      const parts = rounds.map((txt, i)=>{
-        const head = `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85; display:flex; align-items:center; justify-content:space-between; gap:8px;\"><span>Omgång ${i+1}</span><button type=\"button\" class=\"fb-del\" data-ri=\"${i}\" title=\"Radera omgång\">✕</button></div>`;
-        if (view === 'preview'){
-          // Preview: render sanitized, linkified HTML; not editable
-          let body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
-          try{
-            const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] };
-            if (info.attItems && info.attItems.length){ body = linkifySectionRefsLocal(body, info.attItems); }
-          }catch{}
-          return head + `<div class=\"fb-round fb-preview\" data-ri=\"${i}\" contenteditable=\"false\">${body}</div>`;
-        } else {
-          // Edit: render as before, contentEditable
-          const body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
-          return head + `<div class=\"fb-round\" data-ri=\"${i}\">${body}</div>`;
-        }
+    // Check for per-grader map
+    const rawPark = localStorage.getItem(`sectionParking:${id}`);
+    const park = rawPark ? (JSON.parse(rawPark)||{}) : {};
+    const graders = Array.isArray(park.graders)? park.graders.map(g=>({ id:String(g.id||''), role:String(g.role||'') })) : (park.grader? [{ id:String(park.grader), role:'' }] : []);
+    const fbByGrader = it.fbByGrader && typeof it.fbByGrader==='object' ? it.fbByGrader : null;
+    // Visible graders filter (persisted per section)
+    const visKey = (sid)=> `sectionGradersVisible:${sid}`;
+    const getVisibleGraders = ()=>{ try{ const raw=localStorage.getItem(visKey(id)); if(!raw) return null; const arr=JSON.parse(raw)||[]; if(Array.isArray(arr)&&arr.length) return arr.map(String); return null; }catch{ return null; } };
+    const setVisibleGraders = (list)=>{ try{ localStorage.setItem(visKey(id), JSON.stringify(list||[])); }catch{} };
+    const graderName = (gid)=>{ try{ const raw = localStorage.getItem(`nodeSettings:${gid}`); if (raw){ const s = JSON.parse(raw)||{}; const nm = String(s.name||'').trim(); if (nm) return nm; } }catch{} return String(gid); };
+  const main = els.main;
+  // Clean up any previously rendered grader cards/vis bars
+  try{ main.querySelectorAll('.grader-card, .grader-visbar').forEach(el=>el.remove()); }catch{}
+  const isFree = !!(loadLayout().free);
+  // If there are graders: render multi-panels; single-panel path only when no graders exist
+  if (graders.length){
+    const view = getFbView();
+    if (!isFree){
+      // Grid layout: show original feedback card and render per-grader blocks inside it (like free layout)
+      try{ const cf = document.getElementById('cardF'); if (cf){ cf.hidden = false; cf.style.display = ''; } }catch{}
+      const ids = graders.map(g=>String(g.id));
+      // Normalize visibility
+      let vis = getVisibleGraders();
+      if (!Array.isArray(vis)){ try{ setVisibleGraders(ids); }catch{} vis = ids; }
+      const curVis = getVisibleGraders();
+      const bar = [
+        '<div class="grader-visbar subtle" style="margin:6px 0; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">',
+        '<span>Visa:</span>'
+      ];
+      graders.forEach(g=>{
+        const active = !curVis || curVis.includes(String(g.id));
+        const nm = graderName(g.id);
+        bar.push(`<button type="button" class="btn btn-ghost" data-action="toggle-vis" data-gid="${g.id}" style="padding:2px 8px;">${nm}${active?' (på)':' (av)'}<\/button>`);
       });
-  els.f.innerHTML = parts.join('<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
-  // reuse view variable from above
-      if (view === 'edit'){
-        // Make feedback rounds editable and persist to storage
+      bar.push('</div>');
+      try{ els.f.innerHTML = bar.join(''); }catch{ els.f.innerHTML = ''; }
+      graders.forEach(g=>{
+        if (curVis && !curVis.includes(String(g.id))) return;
+        const nm = graderName(g.id);
+        const rows = fbByGrader && Array.isArray(fbByGrader[g.id]) ? fbByGrader[g.id] : [];
+        const header = `<div class=\"subtle\" style=\"margin:8px 0 6px; display:flex; align-items:center; justify-content:space-between; gap:8px;\"><span>${nm}</span><span><button type=\"button\" class=\"btn btn-ghost\" data-action=\"toggle-fb-view\">${(view==='preview')?'Redigera':'Förhandsgranska'}<\/button> <button type=\"button\" class=\"btn btn-ghost\" data-action=\"grade-one\" data-gid=\"${g.id}\">Rätta endast denna<\/button></span><\/div>`;
+        els.f.insertAdjacentHTML('beforeend', header);
+        if (!rows.length){ els.f.insertAdjacentHTML('beforeend', '<div class="subtle">Ingen feedback ännu.</div>'); els.f.insertAdjacentHTML('beforeend', '<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">'); return; }
+        rows.forEach((txt, i)=>{
+          if (view==='preview'){
+            let body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
+            try{ const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] }; if (info.attItems && info.attItems.length){ body = linkifySectionRefsLocal(body, info.attItems); } }catch{}
+            els.f.insertAdjacentHTML('beforeend', `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span></div><div class=\"fb-round fb-preview\" data-ri=\"${i}\" data-grader=\"${g.id}\" contenteditable=\"false\">${body}</div>`);
+          } else {
+            const body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
+            els.f.insertAdjacentHTML('beforeend', `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span></div><div class=\"fb-round\" data-ri=\"${i}\" data-grader=\"${g.id}\">${body}</div>`);
+          }
+        });
+        els.f.insertAdjacentHTML('beforeend', '<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
+      });
+      // Wire editable rounds or clickable refs
+      if (view!=='preview'){
         try{
-          const blocks = els.f.querySelectorAll('.fb-round');
-          blocks.forEach(el=>{
-            el.contentEditable = 'true';
-            el.spellcheck = false;
+          els.f.querySelectorAll('.fb-round').forEach(el=>{
+            el.contentEditable='true'; el.spellcheck=false;
             const saveNow = ()=>{
               try{
                 const ri = Math.max(0, Number(el.getAttribute('data-ri')||'0')||0);
+                const gid = String(el.getAttribute('data-grader')||''); if (!gid) return;
                 const arr2 = getList(); const i2 = Math.min(getCursor(), Math.max(0, arr2.length-1));
                 const it2 = arr2[i2] || {};
-                if (!Array.isArray(it2.fbRounds)) it2.fbRounds = (it2.fb? [String(it2.fb)] : []);
-                while (it2.fbRounds.length <= ri) it2.fbRounds.push('');
-                it2.fbRounds[ri] = String(el.innerText||'').trim();
+                if (!it2.fbByGrader || typeof it2.fbByGrader!=='object') it2.fbByGrader = {};
+                const rows = Array.isArray(it2.fbByGrader[gid]) ? it2.fbByGrader[gid] : [];
+                while (rows.length <= ri) rows.push('');
+                rows[ri] = String(el.innerText||'').trim();
+                it2.fbByGrader[gid] = rows;
                 arr2[i2] = it2; setList(arr2);
               }catch{}
             };
@@ -266,32 +301,163 @@
           });
         }catch{}
       } else {
-        // Preview mode: wire clickable references on the container
-        try{
-          const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] };
-          if (info.attItems && info.attItems.length){ wireSectionRefClicksLocal(els.f, info.attItems, String(rounds[rounds.length-1]||'')); }
-        }catch{}
+        try{ const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] }; if (info.attItems && info.attItems.length){ wireSectionRefClicksLocal(els.f, info.attItems, ''); } }catch{}
       }
-      // Wire delete per round (both modes)
+      // Delegated actions for grid inside F card
       try{
-        const dels = els.f.querySelectorAll('button.fb-del');
-        dels.forEach(btn=>{
-          btn.addEventListener('click', ()=>{
-            try{
-              const ri = Math.max(0, Number(btn.getAttribute('data-ri')||'0')||0);
-              const arr2 = getList(); const i2 = Math.min(getCursor(), Math.max(0, arr2.length-1));
-              const it2 = arr2[i2] || {};
-              if (Array.isArray(it2.fbRounds)){
-                it2.fbRounds.splice(ri, 1);
-                arr2[i2] = it2; setList(arr2);
-                dispatchChanged();
+        if (!els.f.__graderHandlers){
+          els.f.__graderHandlers = true;
+          els.f.addEventListener('click', (ev)=>{
+            const toggleBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="toggle-vis"][data-gid]');
+            const gradeBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="grade-one"][data-gid]');
+            const toggleViewBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="toggle-fb-view"]');
+            if (!toggleBtn && !gradeBtn && !toggleViewBtn) return; ev.preventDefault(); ev.stopPropagation();
+            if (toggleBtn){
+              try{
+                const gid = String(toggleBtn.getAttribute('data-gid')||'');
+                const cur = getVisibleGraders();
+                let next = Array.isArray(cur) ? cur.slice() : graders.map(x=>String(x.id));
+                if (next.includes(gid)) next = next.filter(x=>x!==gid); else next.push(gid);
+                setVisibleGraders(next);
                 render();
-              }
-            }catch{}
-          });
-        });
+              }catch{}
+              return;
+            }
+            if (toggleViewBtn){
+              try{ const curV = getFbView(); setFbView(curV==='preview'?'edit':'preview'); render(); }catch{}
+              return;
+            }
+            if (gradeBtn){
+              try{
+                const gid = String(gradeBtn.getAttribute('data-gid')||''); if (!gid) return;
+                const arr = getList(); const i = getCursor(); const it = arr[i]; if (!it){ alert('Ingen fråga vald.'); return; }
+                const n = i+1;
+                const payloadText = `Fråga ${n}: ${it.q||''}\nSvar ${n}: ${it.a||''}`;
+                try{ localStorage.setItem(`sectionPendingFeedback:${id}:${gid}`, String(i)); }catch{}
+                try{ document.getElementById('fxFLoad')?.classList.add('show'); }catch{}
+                let sent = false;
+                if (window.requestAIReply){ try{ window.requestAIReply(gid, { text: payloadText, sourceId: id }); sent = true; }catch{} }
+                if (!sent && window.routeMessageFrom){ try{ window.routeMessageFrom(id, payloadText, { author: 'Fråga', who:'user', ts: Date.now() }); sent = true; }catch{} }
+                try{
+                  let cont = document.getElementById('toastContainer');
+                  if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
+                  const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Skickat till rättare (endast denna)'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1100);
+                }catch{}
+              }catch{}
+            }
+          }, { once:false });
+        }
       }catch{}
+      return;
+    } else {
+  // Free layout: show the original feedback card and render per-grader blocks inside it
+  try{ const cf = document.getElementById('cardF'); if (cf){ cf.hidden = false; cf.style.display = ''; } }catch{}
+      const ids = graders.map(g=>String(g.id));
+      // Normalize visibility
+      let vis = getVisibleGraders();
+      if (!Array.isArray(vis)){ try{ setVisibleGraders(ids); }catch{} vis = ids; }
+      const curVis = getVisibleGraders();
+      const bar = [
+        '<div class="grader-visbar subtle" style="margin:6px 0; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">',
+        '<span>Visa:</span>'
+      ];
+      graders.forEach(g=>{
+        const active = !curVis || curVis.includes(String(g.id));
+        const nm = graderName(g.id);
+        bar.push(`<button type="button" class="btn btn-ghost" data-action="toggle-vis" data-gid="${g.id}" style="padding:2px 8px;">${nm}${active?' (på)':' (av)'}</button>`);
+      });
+      bar.push('</div>');
+      try{ els.f.innerHTML = bar.join(''); }catch{ els.f.innerHTML = ''; }
+      graders.forEach(g=>{
+        if (curVis && !curVis.includes(String(g.id))) return;
+        const nm = graderName(g.id);
+        const rows = fbByGrader && Array.isArray(fbByGrader[g.id]) ? fbByGrader[g.id] : [];
+        const header = `<div class=\"subtle\" style=\"margin:8px 0 6px; display:flex; align-items:center; justify-content:space-between; gap:8px;\"><span>${nm}</span><button type=\"button\" class=\"btn btn-ghost\" data-action=\"grade-one\" data-gid=\"${g.id}\">Rätta endast denna<\/button><\/div>`;
+        els.f.insertAdjacentHTML('beforeend', header);
+        if (!rows.length){ els.f.insertAdjacentHTML('beforeend', '<div class="subtle">Ingen feedback ännu.</div>'); return; }
+        rows.forEach((txt, i)=>{
+          if (view==='preview'){
+            let body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
+            try{ const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] }; if (info.attItems && info.attItems.length){ body = linkifySectionRefsLocal(body, info.attItems); } }catch{}
+            els.f.insertAdjacentHTML('beforeend', `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span></div><div class=\"fb-round fb-preview\" data-ri=\"${i}\" data-grader=\"${g.id}\" contenteditable=\"false\">${body}</div>`);
+          } else {
+            const body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
+            els.f.insertAdjacentHTML('beforeend', `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span></div><div class=\"fb-round\" data-ri=\"${i}\" data-grader=\"${g.id}\">${body}</div>`);
+          }
+        });
+        els.f.insertAdjacentHTML('beforeend', '<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
+      });
+      // Wire editable rounds or clickable refs in free layout
+      if (view!=='preview'){
+        try{
+          els.f.querySelectorAll('.fb-round').forEach(el=>{
+            el.contentEditable='true'; el.spellcheck=false;
+            const saveNow = ()=>{
+              try{
+                const ri = Math.max(0, Number(el.getAttribute('data-ri')||'0')||0);
+                const gid = String(el.getAttribute('data-grader')||''); if (!gid) return;
+                const arr2 = getList(); const i2 = Math.min(getCursor(), Math.max(0, arr2.length-1));
+                const it2 = arr2[i2] || {};
+                if (!it2.fbByGrader || typeof it2.fbByGrader!=='object') it2.fbByGrader = {};
+                const rows = Array.isArray(it2.fbByGrader[gid]) ? it2.fbByGrader[gid] : [];
+                while (rows.length <= ri) rows.push('');
+                rows[ri] = String(el.innerText||'').trim();
+                it2.fbByGrader[gid] = rows;
+                arr2[i2] = it2; setList(arr2);
+              }catch{}
+            };
+            let t=null; el.addEventListener('input', ()=>{ try{ if (t) clearTimeout(t); t=setTimeout(saveNow, 500); }catch{} });
+            el.addEventListener('blur', saveNow);
+          });
+        }catch{}
+      } else {
+        try{ const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] }; if (info.attItems && info.attItems.length){ wireSectionRefClicksLocal(els.f, info.attItems, ''); } }catch{}
+      }
+      // Delegated actions in free layout
+      try{
+        if (!els.f.__graderHandlers){
+          els.f.__graderHandlers = true;
+          els.f.addEventListener('click', (ev)=>{
+            const toggleBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="toggle-vis"][data-gid]');
+            const gradeBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="grade-one"][data-gid]');
+            if (!toggleBtn && !gradeBtn) return; ev.preventDefault(); ev.stopPropagation();
+            if (toggleBtn){
+              try{
+                const gid = String(toggleBtn.getAttribute('data-gid')||'');
+                const cur = getVisibleGraders();
+                let next = Array.isArray(cur) ? cur.slice() : graders.map(x=>String(x.id));
+                if (next.includes(gid)) next = next.filter(x=>x!==gid); else next.push(gid);
+                setVisibleGraders(next);
+                render();
+              }catch{}
+              return;
+            }
+            if (gradeBtn){
+              try{
+                const gid = String(gradeBtn.getAttribute('data-gid')||''); if (!gid) return;
+                const arr = getList(); const i = getCursor(); const it = arr[i]; if (!it){ alert('Ingen fråga vald.'); return; }
+                const n = i+1;
+                const payloadText = `Fråga ${n}: ${it.q||''}\nSvar ${n}: ${it.a||''}`;
+                try{ localStorage.setItem(`sectionPendingFeedback:${id}:${gid}`, String(i)); }catch{}
+                try{ document.getElementById('fxFLoad')?.classList.add('show'); }catch{}
+                let sent = false;
+                if (window.requestAIReply){ try{ window.requestAIReply(gid, { text: payloadText, sourceId: id }); sent = true; }catch{} }
+                if (!sent && window.routeMessageFrom){ try{ window.routeMessageFrom(id, payloadText, { author: 'Fråga', who:'user', ts: Date.now() }); sent = true; }catch{} }
+                try{
+                  let cont = document.getElementById('toastContainer');
+                  if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
+                  const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Skickat till rättare (endast denna)'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1100);
+                }catch{}
+              }catch{}
+            }
+          }, { once:false });
+        }
+      }catch{}
+      return;
     }
+  }
+  // No graders configured: show an informational message instead of legacy single-panel
+  try{ els.f.innerHTML = '<div class="subtle">Ingen rättare vald. Lägg till en eller flera rättare i sektionen för att visa feedback här.</div>'; }catch{ els.f.textContent = 'Ingen rättare vald.'; }
   const counter = `${idx+1} / ${arr.length}`;
   if (els.infoTop) els.infoTop.textContent = counter;
   // Update round label
@@ -538,16 +704,22 @@
         const n = i+1;
         const payloadText = `Fråga ${n}: ${it.q||''}\nSvar ${n}: ${it.a||''}`;
         // Mark pending feedback so the coworker reply is stored here (cross-tab)
-        try{ localStorage.setItem(`sectionPendingFeedback:${id}`, String(i)); }catch{}
+        try{
+          const rawP = localStorage.getItem(`sectionParking:${id}`);
+          const p = rawP ? (JSON.parse(rawP)||{}) : {};
+          const graders = Array.isArray(p.graders)? p.graders : (p.grader? [{ id:String(p.grader), role:'' }] : []);
+          if (graders && graders.length){ graders.forEach(g=>{ const gid=String(g?.id||''); if (!gid) return; localStorage.setItem(`sectionPendingFeedback:${id}:${gid}`, String(i)); }); }
+          else { localStorage.setItem(`sectionPendingFeedback:${id}`, String(i)); }
+        }catch{}
         // Prefer parked Grader
         const parkRaw = localStorage.getItem(`sectionParking:${id}`);
         const park = parkRaw ? (JSON.parse(parkRaw)||{}) : {};
-        const graderId = park && park.grader ? String(park.grader) : '';
-        if (!graderId){ alert('Ingen "Rättare"-nod vald i sektionen. Välj en CoWorker i listan.'); return; }
+        const gradersSend = Array.isArray(park.graders)? park.graders : (park.grader? [{ id:String(park.grader), role:'' }] : []);
+        if (!gradersSend || !gradersSend.length){ alert('Ingen "Rättare"-nod vald i sektionen. Välj en eller flera CoWorker-noder.'); return; }
     // show loader on feedback card
     try{ fLoad?.classList.add('show'); }catch{}
         let sent = false;
-        if (graderId && window.requestAIReply){ try{ window.requestAIReply(graderId, { text: payloadText, sourceId: id }); sent = true; }catch{} }
+        if (window.requestAIReply){ try{ gradersSend.forEach(g=>{ const gid=String(g?.id||''); if (!gid) return; window.requestAIReply(gid, { text: payloadText, sourceId: id }); }); sent = true; }catch{} }
         if (!sent && window.routeMessageFrom){ try{ window.routeMessageFrom(id, payloadText, { author: 'Fråga', who:'user', ts: Date.now() }); sent = true; }catch{} }
         // tiny sent toast
         try{
@@ -595,7 +767,7 @@
   window.addEventListener('storage', (e)=>{
     try{
       if (!e) return;
-  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === fbViewKey(id) || e.key === `sectionParking:${id}` || /^nodeAttachments:/.test(e.key||'') || e.key === '__exercises_changed__' || /^sectionRaw:/.test(e.key) || /^sectionSettings:/.test(e.key) || e.key === `sectionTheorySrc:${id}`)){
+  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === fbViewKey(id) || e.key === `sectionParking:${id}` || e.key === `sectionGradersVisible:${id}` || /^nodeAttachments:/.test(e.key||'') || e.key === '__exercises_changed__' || /^sectionRaw:/.test(e.key) || /^sectionSettings:/.test(e.key) || e.key === `sectionTheorySrc:${id}`)){
         render();
       }
     }catch{}

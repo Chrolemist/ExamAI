@@ -1644,7 +1644,12 @@
     const parkWrap = document.createElement('div');
     parkWrap.style.display='flex'; parkWrap.style.gap='8px'; parkWrap.style.alignItems='center'; parkWrap.style.marginLeft='12px';
     const mkSel = (labelText)=>{ const wrap=document.createElement('label'); wrap.className='subtle'; wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='6px'; const span=document.createElement('span'); span.textContent=labelText; const sel=document.createElement('select'); sel.className='btn'; wrap.appendChild(span); wrap.appendChild(sel); return { wrap, sel, span }; };
-  const selGrader = mkSel('Rättare:');
+  // Graders: chips + Hantera-popover (ordnad multi-val med roll)
+  const gradersWrap = document.createElement('label'); gradersWrap.className='subtle'; Object.assign(gradersWrap.style,{ display:'flex', alignItems:'center', gap:'6px', maxWidth:'60%' });
+  const gradersLabel = document.createElement('span'); gradersLabel.textContent = 'Rättare:';
+  const gradersChips = document.createElement('div'); Object.assign(gradersChips.style,{ display:'flex', alignItems:'center', gap:'6px', overflow:'hidden' });
+  const gradersManage = document.createElement('button'); gradersManage.type='button'; gradersManage.className='btn btn-ghost'; gradersManage.textContent='Hantera'; gradersManage.title='Välj, ordna och ange roller för rättare'; gradersManage.style.padding='2px 8px';
+  gradersWrap.appendChild(gradersLabel); gradersWrap.appendChild(gradersChips); gradersWrap.appendChild(gradersManage);
   const selImprover = mkSel('Förbättra fråga:');
   // Inputs: chips + Hantera-popover (ordnad multi-val)
   const inputsWrap = document.createElement('label'); inputsWrap.className='subtle'; Object.assign(inputsWrap.style,{ display:'flex', alignItems:'center', gap:'6px', maxWidth:'60%' });
@@ -1652,7 +1657,7 @@
   const chipsWrap = document.createElement('div'); Object.assign(chipsWrap.style,{ display:'flex', alignItems:'center', gap:'6px', overflow:'hidden' });
   const manageBtn = document.createElement('button'); manageBtn.type='button'; manageBtn.className='btn btn-ghost'; manageBtn.textContent='Hantera'; manageBtn.title='Välj och ordna inmatningar'; manageBtn.style.padding='2px 8px';
   inputsWrap.appendChild(inputsLabel); inputsWrap.appendChild(chipsWrap); inputsWrap.appendChild(manageBtn);
-  parkWrap.appendChild(selGrader.wrap); parkWrap.appendChild(selImprover.wrap); parkWrap.appendChild(inputsWrap);
+  parkWrap.appendChild(gradersWrap); parkWrap.appendChild(selImprover.wrap); parkWrap.appendChild(inputsWrap);
     exBar.appendChild(parkWrap);
     // Export dropdown: map this section's content as Theory into a chosen section's full-screen view
     try{
@@ -1732,12 +1737,13 @@
                 if (value){ opts.push({ value, label }); idToLabel.set(value, label); }
               });
               const fill = (sel)=>{ sel.innerHTML=''; opts.forEach(o=>{ const op=document.createElement('option'); op.value=o.value; op.textContent=o.label; sel.appendChild(op); }); };
-              // Render grader/improver as before
+              // Helpers for graders (multi)
+              const getGraders = ()=>{ try{ const p=getParking(); if (Array.isArray(p.graders)) return (p.graders||[]).map(x=>({ id:String(x.id||''), role:String(x.role||'') })); const g=p.grader?String(p.grader):''; return g?[{ id:g, role:'' }]:[]; }catch{ return []; } };
+              const setGraders = (arr)=>{ try{ const p=getParking(); const clean=[]; const seen=new Set(); (arr||[]).forEach(x=>{ const id=String(x?.id||''); const role=String(x?.role||''); if(!id) return; if(seen.has(id)) return; seen.add(id); clean.push({ id, role }); }); p.graders = clean; p.grader = clean[0]?.id || null; setParking(p); }catch{} };
               const cur = getParking();
-              const prevGrader = cur && cur.grader ? String(cur.grader) : '';
+              // Deprecated single grader retained in storage for backward-compat; chips UI reflects p.graders
               const prevImprover = cur && cur.improver ? String(cur.improver) : '';
-              fill(selGrader.sel); fill(selImprover.sel);
-              if (prevGrader) selGrader.sel.value = prevGrader;
+              fill(selImprover.sel);
               if (prevImprover) selImprover.sel.value = prevImprover;
               // Render chips for selected inputs (ordered)
               const renderChips = ()=>{
@@ -1759,6 +1765,25 @@
                 }
               };
               renderChips();
+              // Render chips for graders (ordered with roles)
+        const getNodeRole = (gid)=>{ try{ const raw=localStorage.getItem(`nodeSettings:${gid}`); if(!raw) return ''; const s=JSON.parse(raw)||{}; const r=String(s.role||'').trim(); return r; }catch{ return ''; } };
+        const renderGraders = ()=>{
+                gradersChips.innerHTML='';
+                const list = getGraders();
+                const max = 6; const shown = list.slice(0, max);
+                shown.forEach((g, idx)=>{
+                  const name = idToLabel.get(String(g.id)) || String(g.id);
+          const roleTxt = getNodeRole(String(g.id));
+                  const chip = document.createElement('span');
+                  Object.assign(chip.style,{ display:'inline-flex', alignItems:'center', gap:'6px', padding:'2px 6px', border:'1px solid #3a3a4a', borderRadius:'999px', color:'#cfd3e3', background:'rgba(255,255,255,0.03)', fontSize:'12px', maxWidth:'220px' });
+                  const badge = document.createElement('span'); badge.textContent = String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'16px', height:'16px', alignItems:'center', justifyContent:'center', fontSize:'10px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'999px' });
+          const label = document.createElement('span'); label.textContent = roleTxt ? `${name} — ${roleTxt}` : name; label.style.overflow='hidden'; label.style.textOverflow='ellipsis'; label.style.whiteSpace='nowrap';
+                  chip.appendChild(badge); chip.appendChild(label);
+                  gradersChips.appendChild(chip);
+                });
+                if (list.length > max){ const more=document.createElement('span'); more.textContent = `+${list.length-max}`; Object.assign(more.style,{ padding:'2px 6px', border:'1px dashed #3a3a4a', borderRadius:'999px', color:'#aaa', fontSize:'12px' }); gradersChips.appendChild(more); }
+              };
+              renderGraders();
               // Popover for managing inputs
               const openManager = ()=>{
                 // Working copy
@@ -1820,6 +1845,53 @@
                 setTimeout(()=> document.addEventListener('click', onDocClick, true), 0);
               };
               manageBtn.onclick = openManager;
+              // Popover for managing graders
+      const openGraders = ()=>{
+                let sel = getGraders().map(x=>({ id:x.id, role:x.role||'' }));
+                const all = opts.filter(o=>o.value);
+                const anchor = gradersManage; const r = anchor.getBoundingClientRect();
+                const pop = document.createElement('div'); Object.assign(pop.style,{ position:'fixed', left:Math.max(8, Math.min(window.innerWidth-420, r.left))+'px', top:(r.bottom+6)+'px', zIndex:'10080', width:'400px', maxHeight:'60vh', overflow:'auto', padding:'10px', background:'linear-gradient(180deg,#121219,#0e0e14)', border:'1px solid #23232b', borderRadius:'8px', boxShadow:'0 12px 28px rgba(0,0,0,0.55)' }); pop.setAttribute('role','dialog');
+                const title=document.createElement('div'); title.textContent='Hantera rättare'; Object.assign(title.style,{ fontWeight:'600', marginBottom:'8px' }); pop.appendChild(title);
+                const search=document.createElement('input'); search.type='search'; search.placeholder='Sök nod…'; Object.assign(search.style,{ width:'100%', marginBottom:'8px', padding:'6px 8px', background:'#0f0f14', border:'1px solid #2a2a35', color:'#e6e6ec', borderRadius:'6px' }); pop.appendChild(search);
+                const selWrap=document.createElement('div'); Object.assign(selWrap.style,{ display:'grid', gridTemplateColumns:'1fr', gap:'6px', marginBottom:'10px' }); pop.appendChild(selWrap);
+                const availWrap=document.createElement('div'); Object.assign(availWrap.style,{ display:'grid', gridTemplateColumns:'1fr', gap:'4px', marginBottom:'10px' }); pop.appendChild(availWrap);
+                const btns=document.createElement('div'); Object.assign(btns.style,{ display:'flex', justifyContent:'flex-end', gap:'8px' });
+                const cancel=document.createElement('button'); cancel.type='button'; cancel.className='btn btn-ghost'; cancel.textContent='Avbryt';
+                const save=document.createElement('button'); save.type='button'; save.className='btn'; save.textContent='Spara';
+                btns.appendChild(cancel); btns.appendChild(save); pop.appendChild(btns);
+                const labelOf = (id)=> idToLabel.get(String(id)) || String(id);
+                const renderLists=()=>{
+                  selWrap.innerHTML=''; availWrap.innerHTML=''; const filter=(search.value||'').toLowerCase();
+                  sel.forEach((g, idx)=>{
+        const name = labelOf(g.id); const roleTxt = getNodeRole(g.id); if (filter && !name.toLowerCase().includes(filter) && !roleTxt.toLowerCase().includes(filter)) return;
+        const row=document.createElement('div'); Object.assign(row.style,{ display:'grid', gridTemplateColumns:'24px 1fr 24px 24px 24px', alignItems:'center', gap:'6px' });
+                    const badge=document.createElement('span'); badge.textContent=String(idx+1); Object.assign(badge.style,{ display:'inline-flex', width:'18px', height:'18px', alignItems:'center', justifyContent:'center', fontSize:'10px', color:'#ccc', border:'1px solid #3a3a4a', borderRadius:'999px' });
+        const label=document.createElement('div'); label.textContent = roleTxt ? `${name} — ${roleTxt}` : name; label.className='subtle'; label.style.overflow='hidden'; label.style.textOverflow='ellipsis';
+                    const up=document.createElement('button'); up.type='button'; up.title='Flytta upp'; up.textContent='↑'; up.className='btn btn-ghost'; up.style.padding='0 6px';
+                    const down=document.createElement('button'); down.type='button'; down.title='Flytta ner'; down.textContent='↓'; down.className='btn btn-ghost'; down.style.padding='0 6px';
+                    const rem=document.createElement('button'); rem.type='button'; rem.title='Ta bort'; rem.textContent='✕'; rem.className='btn btn-ghost'; rem.style.padding='0 6px';
+                    up.onclick = ()=>{ if (idx>0){ const tmp=sel[idx-1]; sel[idx-1]=sel[idx]; sel[idx]=tmp; renderLists(); } };
+                    down.onclick = ()=>{ if (idx<sel.length-1){ const tmp=sel[idx+1]; sel[idx+1]=sel[idx]; sel[idx]=tmp; renderLists(); } };
+                    rem.onclick = ()=>{ sel = sel.filter(x=>x.id!==g.id); renderLists(); };
+        row.appendChild(badge); row.appendChild(label); row.appendChild(up); row.appendChild(down); row.appendChild(rem);
+                    selWrap.appendChild(row);
+                  });
+                  all.forEach(o=>{
+                    if (sel.some(x=>x.id===o.value)) return; if ((search.value||'') && !o.label.toLowerCase().includes((search.value||'').toLowerCase())) return;
+                    const row=document.createElement('div'); Object.assign(row.style,{ display:'grid', gridTemplateColumns:'1fr 60px', alignItems:'center', gap:'6px' });
+                    const label=document.createElement('div'); label.textContent=o.label; label.className='subtle';
+        const add=document.createElement('button'); add.type='button'; add.textContent='Lägg till'; add.className='btn btn-ghost'; add.style.padding='2px 6px'; add.onclick=()=>{ sel.push({ id:o.value }); renderLists(); };
+                    row.appendChild(label); row.appendChild(add); availWrap.appendChild(row);
+                  });
+                };
+                renderLists(); search.addEventListener('input', renderLists);
+                cancel.onclick=()=>{ document.body.removeChild(pop); document.removeEventListener('click', onDocClick, true); };
+                save.onclick=()=>{ setGraders(sel); renderGraders(); document.body.removeChild(pop); document.removeEventListener('click', onDocClick, true); };
+                document.body.appendChild(pop);
+                const onDocClick=(e)=>{ if (!pop.contains(e.target) && e.target !== anchor){ cancel.onclick(); } };
+                setTimeout(()=> document.addEventListener('click', onDocClick, true), 0);
+              };
+              gradersManage.onclick = openGraders;
             };
             // Initial fill
             fillFromCoworkers();
@@ -1903,55 +1975,90 @@
               // Overlays for loading state
               const leftOverlay = document.createElement('div'); leftOverlay.className='loader-overlay'; leftOverlay.innerHTML='<div class="spinner-rgb"></div>';
               const rightOverlay = document.createElement('div'); rightOverlay.className='loader-overlay'; rightOverlay.innerHTML='<div class="spinner-rgb"></div>';
+              const visKey = (sid)=> `sectionGradersVisible:${sid}`;
+              const getVisibleGraders = ()=>{ try{ const raw=localStorage.getItem(visKey(id)); if(!raw) return null; const arr=JSON.parse(raw)||[]; if(Array.isArray(arr)&&arr.length) return arr.map(String); return null; }catch{ return null; } };
+              const setVisibleGraders = (list)=>{ try{ localStorage.setItem(visKey(id), JSON.stringify(list||[])); }catch{} };
+      const renderVisControls = (graders)=>{
+                try{
+                  const vis = getVisibleGraders();
+                  const bar = document.createElement('div'); bar.className='subtle'; bar.style.margin='6px 0'; bar.style.display='flex'; bar.style.flexWrap='wrap'; bar.style.gap='6px';
+                  const lab = document.createElement('span'); lab.textContent='Visa:'; bar.appendChild(lab);
+                  graders.forEach(g=>{
+        const name = (document.querySelector(`.fab[data-id="${g.id}"]`)?.dataset?.displayName || g.id);
+        let roleTxt = '';
+        try{ const raw=localStorage.getItem(`nodeSettings:${g.id}`); if(raw){ const s=JSON.parse(raw)||{}; roleTxt = String(s.role||'').trim(); } }catch{}
+                    const btn = document.createElement('button'); btn.type='button'; btn.className='btn btn-ghost'; btn.style.padding='2px 8px'; btn.dataset.gid=g.id;
+                    const active = !vis || vis.includes(String(g.id));
+        btn.textContent = (roleTxt? `${roleTxt} — `: '') + name + (active? ' (på)' : ' (av)');
+                    btn.onclick = ()=>{
+                      const cur = getVisibleGraders();
+                      let next = Array.isArray(cur) ? cur.slice() : graders.map(x=>String(x.id));
+                      if (next.includes(String(g.id))) next = next.filter(x=>x!==String(g.id)); else next.push(String(g.id));
+                      setVisibleGraders(next);
+                      renderFb();
+                    };
+                    bar.appendChild(btn);
+                  });
+                  return bar;
+                }catch{ return null; }
+              };
               const renderFb = ()=>{
                 try{
-                  const cur = getExercises(); const it = cur[idx]||{}; const rounds = Array.isArray(it.fbRounds)? it.fbRounds : (it.fb? [String(it.fb)] : []);
-                  if (!rounds.length){ fb.innerHTML = '<div class="subtle">Ingen feedback ännu.</div>'; return; }
-                  const parts = rounds.map((txt, i)=>{
-                    const head = `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span><button type=\"button\" class=\"fb-del\" data-ri=\"${i}\" title=\"Radera omgång\">✕</button></div>`;
-                    const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
-                    return head + `<div class=\"fb-round\" data-ri=\"${i}\">${body}</div>`;
-                  });
-                  fb.innerHTML = parts.join('<hr style=\"border:none; border-top:1px solid #252532; margin:8px 0;\">');
-                  // Make each round editable and persist on change
-                  try{
-                    const blocks = fb.querySelectorAll('.fb-round');
-                    blocks.forEach(el=>{
-                      el.contentEditable = 'true';
-                      el.spellcheck = false;
-                      const saveNow = ()=>{
-                        try{
-                          const ri = Math.max(0, Number(el.getAttribute('data-ri')||'0')||0);
-                          const cur2 = getExercises(); const it2 = cur2[idx]||{};
-                          if (!Array.isArray(it2.fbRounds)) it2.fbRounds = (it2.fb? [String(it2.fb)] : []);
-                          while (it2.fbRounds.length <= ri) it2.fbRounds.push('');
-                          it2.fbRounds[ri] = String(el.innerText||'').trim();
-                          cur2[idx] = it2; setExercises(cur2);
-                        }catch{}
-                      };
-                      // Debounce input saves to avoid excessive writes
-                      let t=null; el.addEventListener('input', ()=>{ try{ if (t) clearTimeout(t); t=setTimeout(saveNow, 500); }catch{} });
-                      el.addEventListener('blur', saveNow);
-                    });
-                  }catch{}
-                  // Wire delete buttons per round
-                  try{
-                    const dels = fb.querySelectorAll('button.fb-del');
-                    dels.forEach(btn=>{
-                      btn.addEventListener('click', ()=>{
-                        try{
-                          const ri = Math.max(0, Number(btn.getAttribute('data-ri')||'0')||0);
-                          const cur2 = getExercises(); const it2 = cur2[idx]||{};
-                          if (Array.isArray(it2.fbRounds)){
-                            it2.fbRounds.splice(ri, 1);
-                            cur2[idx] = it2; setExercises(cur2);
-                            try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
-                            renderFb();
-                          }
-                        }catch{}
+                  const cur = getExercises(); const it = cur[idx]||{};
+                  // Prefer per-grader map if present; else fallback to legacy fbRounds
+                  const p = getParking();
+                  const graders = Array.isArray(p.graders)? p.graders.map(g=>({ id:String(g.id||''), role:String(g.role||'') })) : (p.grader? [{ id:String(p.grader), role:'' }] : []);
+                  const blocks = [];
+                  if (graders.length && it.fbByGrader){
+                    const visBar = renderVisControls(graders);
+                    const vis = getVisibleGraders();
+        graders.forEach(g=>{
+                      if (vis && !vis.includes(String(g.id))) return;
+            const rows = Array.isArray(it.fbByGrader[g.id]) ? it.fbByGrader[g.id] : [];
+            const name = (document.querySelector(`.fab[data-id="${g.id}"]`)?.dataset?.displayName || g.id);
+            const title = document.createElement('div'); title.className='subtle'; title.style.margin='8px 0 6px';
+      let roleTxt = '';
+      try{ const raw=localStorage.getItem(`nodeSettings:${g.id}`); if(raw){ const s=JSON.parse(raw)||{}; roleTxt = String(s.role||'').trim(); } }catch{}
+      title.innerHTML = `Rättare: ${((roleTxt? roleTxt+' — ' : '') + name)} <button type="button" class="btn btn-ghost" data-action="grade-with" data-gid="${g.id}" style="margin-left:8px; padding:0 6px;">Rätta endast denna</button>`;
+                      blocks.push(title.outerHTML);
+                      if (!rows.length){ blocks.push('<div class="subtle">Ingen feedback ännu.</div>'); return; }
+                      rows.forEach((txt, i)=>{
+                        const head = `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85; display:flex; align-items:center; justify-content:space-between; gap:8px;\"><span>Omgång ${i+1}</span></div>`;
+                        const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
+                        blocks.push(head + `<div class=\"fb-round\" data-ri=\"${i}\" data-grader=\"${g.id}\">${body}</div>`);
                       });
+                      blocks.push('<hr style=\"border:none; border-top:1px solid #252532; margin:8px 0;\">');
                     });
-                  }catch{}
+                    fb.innerHTML = blocks.join('');
+                    // Prepend live visibility bar so button handlers remain active
+                    try{ if (visBar) fb.insertBefore(visBar, fb.firstChild||null); }catch{}
+                  } else {
+                    const rounds = Array.isArray(it.fbRounds)? it.fbRounds : (it.fb? [String(it.fb)] : []);
+                    if (!rounds.length){ fb.innerHTML = '<div class="subtle">Ingen feedback ännu.</div>'; return; }
+                    const parts = rounds.map((txt, i)=>{
+                      const head = `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span></div>`;
+                      const body = window.mdToHtml? window.mdToHtml(String(txt||'')) : String(txt||'');
+                      return head + `<div class=\"fb-round\" data-ri=\"${i}\">${body}</div>`;
+                    });
+                    fb.innerHTML = parts.join('<hr style=\"border:none; border-top:1px solid #252532; margin:8px 0;\">');
+                  }
+                  // Delegated click: per-grader "Rätta endast denna"
+                  fb.addEventListener('click', (ev)=>{
+                    const btn = ev.target && ev.target.closest && ev.target.closest('button[data-action="grade-with"][data-gid]');
+                    if (!btn) return;
+                    ev.preventDefault(); ev.stopPropagation();
+                    try{
+                      const gid = String(btn.getAttribute('data-gid')||''); if (!gid) return;
+                      const cur = getExercises(); const it = cur[idx]; if (!it) return;
+                      const n = idx+1; const payload = `Fråga ${n}: ${it.q||''}\nSvar ${n}: ${it.a||''}`;
+                      try{ localStorage.setItem(`sectionPendingFeedback:${id}:${gid}`, String(idx)); }catch{}
+                      const title = sec.querySelector('.head h2')?.textContent?.trim() || 'Sektion';
+                      if (window.requestAIReply){ window.requestAIReply(gid, { text: payload, sourceId: id }); }
+                      else if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() });
+                      // show overlay
+                      rightOverlay.classList.add('show');
+                    }catch{}
+                  }, { once:false });
                 }catch{ fb.textContent=''; }
               };
               renderFb();
@@ -1992,10 +2099,9 @@
                 const title = sec.querySelector('.head h2')?.textContent?.trim() || 'Sektion';
                 // Prefer parked Grader (direct send), else fall back to cable routing
                 try{
-                  const park = getParking(); const graderId = park && park.grader ? String(park.grader) : '';
-                  // If neither grader nor any outgoing connections from this section -> abort with hint
+                  const park = getParking(); const graders = Array.isArray(park.graders)? park.graders : (park.grader? [{ id:String(park.grader), role:'' }] : []);
                   const hasRoute = (function(){ try{ return (window.state?.connections||[]).some(c=> c.fromId===id); }catch{ return false; } })();
-                  if (!graderId && !hasRoute){ alert('Ingen "Rättare"-nod vald och inga kopplingar från denna sektion. Välj en Rättare i listan eller dra en kabel.'); return; }
+                  if ((!graders || !graders.length) && !hasRoute){ alert('Ingen "Rättare" vald och inga kopplingar från denna sektion. Välj minst en Rättare eller dra en kabel.'); return; }
                   // show loading in feedback panel while model works
                   rightOverlay.classList.add('show');
                   const clearOverlay = ()=>{ setTimeout(()=>{ rightOverlay.classList.remove('show'); }, 200); };
@@ -2019,10 +2125,18 @@
                   window.addEventListener('exercises-data-changed-global', clearSafety, { once:true });
                   sec.addEventListener('exercises-data-changed', clearSafety, { once:true });
                   window.addEventListener('ai-request-finished', clearSafety, { once:true });
-                  if (graderId && window.requestAIReply){ window.requestAIReply(graderId, { text: payload, sourceId: id }); }
-                  else if (window.routeMessageFrom) window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() });
+                  // Send to all configured graders; set cross-tab pending marker per grader
+                  if (graders && graders.length && window.requestAIReply){
+                    graders.forEach(g=>{
+                      const gid = String(g?.id||''); if (!gid) return;
+                      try{ localStorage.setItem(`sectionPendingFeedback:${id}:${gid}`, String(idx)); }catch{}
+                      window.requestAIReply(gid, { text: payload, sourceId: id });
+                    });
+                  } else if (window.routeMessageFrom){
+                    window.routeMessageFrom(id, payload, { author: title, who:'user', ts: Date.now() });
+                  }
                 }catch{}
-                // mark this index to receive incoming feedback
+                // also set legacy pending index for same-tab UI compatibility
                 setPendingFeedback(idx);
               });
               // When we send an improvement from full-screen, that page handles overlay. If we add an improve button here later, use leftOverlay similarly.
