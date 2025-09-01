@@ -29,6 +29,7 @@
   const layoutKey = (s)=> `sectionExercisesLayout:${s}`;
   const roundKey = (s)=> `sectionExercisesRound:${s}`;
   const fbViewKey = (s)=> `sectionExercisesFbView:${s}`; // 'edit' | 'preview'
+  const qViewKey = (s)=> `sectionExercisesQView:${s}`; // 'edit' | 'preview'
 
   // Local open helper (mirrors panels.js behavior for http(s) targets)
   function openIfExists(url){
@@ -161,6 +162,9 @@
 
   function getFbView(){ try{ const v = localStorage.getItem(fbViewKey(id))||'edit'; return v==='preview'?'preview':'edit'; }catch{ return 'edit'; } }
   function setFbView(v){ try{ localStorage.setItem(fbViewKey(id), v==='preview'?'preview':'edit'); }catch{} }
+  function getQView(){ try{ const v = localStorage.getItem(qViewKey(id))||'edit'; return v==='preview'?'preview':'edit'; }catch{ return 'edit'; } }
+  function setQView(v){ try{ localStorage.setItem(qViewKey(id), v==='preview'?'preview':'edit'); }catch{} }
+  // Teori has no edit mode in full-screen to avoid accidental raw overwrites
 
   // Visual indicator for layout mode (fast vs fritt)
   let layoutBadge = null;
@@ -198,16 +202,28 @@
       const tCard = els.cards.t; const tEl = els.t; if (tCard && tEl){
         const srcKey = `sectionTheorySrc:${id}`; const from = localStorage.getItem(srcKey)||'';
         if (from){
-          // Show card and render source section's raw text in its chosen renderMode
+          // Show card and render source section's raw text according to view mode
           tCard.hidden = false;
           const raw = localStorage.getItem(`sectionRaw:${from}`)||'';
-          // Always render Theory as Markdown when possible, regardless of source mode
-          if (window.mdToHtml){
-            try{ tEl.innerHTML = sanitizeHtmlLocal(window.mdToHtml(raw)); }
-            catch{ tEl.textContent = raw; }
-          } else {
-            tEl.textContent = raw;
-          }
+          {
+            if (window.mdToHtml){
+              try{
+                const html0 = sanitizeHtmlLocal(window.mdToHtml(raw));
+                // Linkify refs using this section's Inputs' attachments
+                const rawP2 = localStorage.getItem(`sectionParking:${id}`);
+                const p2 = rawP2 ? (JSON.parse(rawP2)||{}) : {};
+                const inputs2 = Array.isArray(p2?.inputs) ? p2.inputs.map(String) : (p2?.input ? [String(p2.input)] : []);
+                if (inputs2 && inputs2.length){
+                  const seen = new Set(); const att = [];
+                  inputs2.forEach(nodeId=>{ try{ const rawA = localStorage.getItem(`nodeAttachments:${nodeId}`); const items = rawA ? (JSON.parse(rawA)||[]) : []; (items||[]).forEach(it=>{ const key=(it.url||'')||`${it.name||''}|${it.chars||0}`; if(!seen.has(key)){ seen.add(key); att.push(it); } }); }catch{} });
+                  const html = att.length ? linkifySectionRefsLocal(html0, att) : html0;
+                  tEl.innerHTML = html;
+                  if (att.length) wireSectionRefClicksLocal(tEl, att, String(raw||''));
+                } else { tEl.innerHTML = html0; }
+        try{ tEl.contentEditable='false'; }catch{}
+              }catch{ tEl.textContent = raw; }
+            } else { tEl.textContent = raw; }
+      }
         } else {
           tCard.hidden = true; tEl.innerHTML = '';
         }
@@ -218,7 +234,31 @@
   els.empty.hidden = !!arr.length;
   if (!arr.length){ els.q.innerHTML=''; els.a.value=''; els.f.innerHTML=''; if(els.infoTop) els.infoTop.textContent=''; return; }
     const it = arr[idx] || {};
-  els.q.innerHTML = (window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(it.q||'')) : (it.q||''));
+    // Render question; if there are Inputs with attachments, linkify [n] and [n,sida]
+    try{
+      const qView = getQView();
+  if (qView === 'preview'){
+        const html0 = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(it.q||'')) : String(it.q||'');
+        const rawP = localStorage.getItem(`sectionParking:${id}`);
+        const p = rawP ? (JSON.parse(rawP)||{}) : {};
+        const inputs = Array.isArray(p?.inputs) ? p.inputs.map(String) : (p?.input ? [String(p.input)] : []);
+        if (inputs && inputs.length){
+          const seen = new Set(); const att = [];
+          inputs.forEach(nodeId=>{ try{ const rawA = localStorage.getItem(`nodeAttachments:${nodeId}`); const items = rawA ? (JSON.parse(rawA)||[]) : []; (items||[]).forEach(it=>{ const key=(it.url||'')||`${it.name||''}|${it.chars||0}`; if(!seen.has(key)){ seen.add(key); att.push(it); } }); }catch{} });
+          const html = att.length ? linkifySectionRefsLocal(html0, att) : html0;
+          els.q.innerHTML = html;
+          if (att.length) wireSectionRefClicksLocal(els.q, att, String(it.q||''));
+        } else {
+          els.q.innerHTML = html0;
+        }
+  try{ els.q.contentEditable = 'false'; }catch{}
+  try{ els.q.classList.remove('editing'); }catch{}
+      } else {
+        const htmlEdit = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(it.q||'')) : String(it.q||'');
+        els.q.innerHTML = htmlEdit;
+  try{ els.q.contentEditable = 'true'; els.q.spellcheck=false; els.q.classList.add('editing'); }catch{}
+      }
+    }catch{ els.q.innerHTML = (window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(it.q||'')) : (it.q||'')); }
     els.a.value = it.a || '';
   // Render feedback grouped by rounds (supports multi-graders; edit vs preview)
     const rounds = Array.isArray(it.fbRounds) ? it.fbRounds : (it.fb ? [String(it.fb)] : []);
@@ -636,6 +676,30 @@
     }catch{}
   }); })();
   if (els.btnLayout){ els.btnLayout.addEventListener('click', toggleLayout); }
+  // Teori: no edit toggle
+  // Question edit/preview toggle
+  (function(){
+    let btn = document.getElementById('fxQToggle');
+    if (!btn){
+      try{
+        const meta = document.getElementById('fxMetaQ');
+        if (meta){
+          const host = meta.querySelector('div') || meta;
+          btn = document.createElement('button');
+          btn.type = 'button';
+          btn.id = 'fxQToggle';
+          btn.className = 'btn btn-ghost';
+          btn.title = 'Visa förhandsgranskning';
+          btn.textContent = 'Förhandsgranska';
+          host.appendChild(btn);
+        }
+      }catch{}
+    }
+    if(!btn) return;
+    const apply=()=>{ const v=getQView(); btn.textContent = (v==='preview')? 'Redigera' : 'Förhandsgranska'; btn.title = (v==='preview')? 'Switcha till redigering' : 'Visa förhandsgranskning'; };
+    apply();
+    btn.addEventListener('click', ()=>{ const cur=getQView(); setQView(cur==='preview'?'edit':'preview'); apply(); render(); });
+  })();
   // Feedback edit/preview toggle
   (function(){
     let btn = document.getElementById('fxFToggle');
@@ -748,20 +812,28 @@
   // Edits -> persist
   els.a.addEventListener('input', ()=>{ const arr=getList(); const i=getCursor(); if(arr[i]){ arr[i].a = els.a.value; setList(arr); }});
   // Remove Theory mapping button removed; theory link can be managed elsewhere
-  // Make question content editable and persist
+  // Make question persist edits when in edit mode
   try{
-    els.q.contentEditable = 'true';
-    els.q.spellcheck = false;
-    const saveQ = ()=>{ try{ const arr=getList(); const i=getCursor(); if(arr[i]){ arr[i].q = String(els.q.innerText||'').trim(); setList(arr); } }catch{} };
-    let tq=null; els.q.addEventListener('input', ()=>{ try{ if (tq) clearTimeout(tq); tq=setTimeout(saveQ, 500); }catch{} });
+    const saveQ = ()=>{ try{ if (getQView()!=='edit') return; const arr=getList(); const i=getCursor(); if(arr[i]){ arr[i].q = String(els.q.innerText||'').trim(); setList(arr); } }catch{} };
+    let tq=null; els.q.addEventListener('input', ()=>{ try{ if (getQView()!=='edit') return; if (tq) clearTimeout(tq); tq=setTimeout(saveQ, 500); }catch{} });
     els.q.addEventListener('blur', saveQ);
+    // Prevent link navigation in edit mode, allow in preview mode
+    els.q.addEventListener('click', (ev)=>{
+      try{
+        if (getQView()!=='edit') return;
+        const a = ev.target && ev.target.closest ? ev.target.closest('a') : null;
+        if (a){ ev.preventDefault(); ev.stopPropagation(); }
+      }catch{}
+    }, { capture:true });
   }catch{}
+
+  // Teori: no editing wired in full-screen
 
   // Cross-tab sync via storage events
   window.addEventListener('storage', (e)=>{
     try{
       if (!e) return;
-  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === fbViewKey(id) || e.key === `sectionParking:${id}` || e.key === `sectionGradersVisible:${id}` || /^nodeAttachments:/.test(e.key||'') || e.key === '__exercises_changed__' || /^sectionRaw:/.test(e.key) || /^sectionSettings:/.test(e.key) || e.key === `sectionTheorySrc:${id}`)){
+  if (e.key && (e.key === key(id) || e.key === cursorKey(id) || e.key === roundKey(id) || e.key === fbViewKey(id) || e.key === qViewKey(id) || e.key === `sectionParking:${id}` || e.key === `sectionGradersVisible:${id}` || /^nodeAttachments:/.test(e.key||'') || e.key === '__exercises_changed__' || /^sectionRaw:/.test(e.key) || /^sectionSettings:/.test(e.key) || e.key === `sectionTheorySrc:${id}`)){
         render();
       }
     }catch{}

@@ -85,6 +85,25 @@
       return { attItems: flat };
     }catch{ return { attItems: [] }; }
   }
+  // Helpers: linkify refs in section note using selected Inputs' attachments (ordered, deduped)
+  function __getSectionInputAttachments(sectionId){
+    try{
+      const id = String(sectionId||''); if (!id) return { attItems: [] };
+      const rawP = localStorage.getItem(`sectionParking:${id}`);
+      const p = rawP ? (JSON.parse(rawP)||{}) : {};
+      const inputs = Array.isArray(p?.inputs) ? p.inputs.map(String) : (p?.input ? [String(p.input)] : []);
+      if (!inputs.length) return { attItems: [] };
+      const seen = new Set(); const flat = [];
+      inputs.forEach(nodeId=>{
+        try{
+          const rawA = localStorage.getItem(`nodeAttachments:${nodeId}`);
+          const items = rawA ? (JSON.parse(rawA)||[]) : [];
+          (items||[]).forEach(it=>{ const key = (it.url||'') || `${it.name||''}|${it.chars||0}`; if (!seen.has(key)){ seen.add(key); flat.push(it); } });
+        }catch{}
+      });
+      return { attItems: flat };
+    }catch{ return { attItems: [] }; }
+  }
   function __linkifySectionRefs(html, attItems){
     try{
       const attLen = Array.isArray(attItems) ? attItems.length : 0;
@@ -1581,14 +1600,24 @@
         const prev = getSecRaw(id);
         const next = (prev ? (prev + '\n\n') : '') + content;
         setSecRaw(id, next);
-        note.innerHTML = sanitizeHtml(window.mdToHtml(next));
-        note.dataset.rendered = '1';
+        try{
+          const html0 = sanitizeHtml(window.mdToHtml(next));
+          const { attItems } = (__getSectionInputAttachments(id) || {});
+          const html = (attItems && attItems.length) ? __linkifySectionRefs(html0, attItems) : html0;
+          note.innerHTML = html; note.dataset.rendered = '1';
+          if (attItems && attItems.length) __wireSectionRefClicks(note, attItems, String(content||''));
+        }catch{ note.innerHTML = sanitizeHtml(window.mdToHtml(next)); note.dataset.rendered = '1'; }
       } else if (mode === 'html'){
         const prev = getSecRaw(id);
         const next = (prev ? (prev + '\n\n') : '') + content;
         setSecRaw(id, next);
-        note.innerHTML = sanitizeHtml(next);
-        note.dataset.rendered = '1';
+        try{
+          const html0 = sanitizeHtml(next);
+          const { attItems } = (__getSectionInputAttachments(id) || {});
+          const html = (attItems && attItems.length) ? __linkifySectionRefs(html0, attItems) : html0;
+          note.innerHTML = html; note.dataset.rendered = '1';
+          if (attItems && attItems.length) __wireSectionRefClicks(note, attItems, String(content||''));
+        }catch{ note.innerHTML = sanitizeHtml(next); note.dataset.rendered = '1'; }
       } else {
         const p = document.createElement('p');
         p.className = 'note-block raw';
@@ -2466,16 +2495,26 @@
   try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
                   const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
                   localStorage.setItem(`sectionRaw:${id}`, src);
-                  note.innerHTML = sanitizeHtml(window.mdToHtml(src));
-                  note.dataset.rendered = '1';
+                  try{
+                    const html0 = sanitizeHtml(window.mdToHtml(src));
+                    const { attItems } = (__getSectionInputAttachments(id) || {});
+                    const html = (attItems && attItems.length) ? __linkifySectionRefs(html0, attItems) : html0;
+                    note.innerHTML = html; note.dataset.rendered = '1';
+                    if (attItems && attItems.length) __wireSectionRefClicks(note, attItems, String(src||''));
+                  }catch{ note.innerHTML = sanitizeHtml(window.mdToHtml(src)); note.dataset.rendered = '1'; }
                 } else if (mode === 'html'){
       sec.removeAttribute('data-mode');
       try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
   try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
                   const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
                   localStorage.setItem(`sectionRaw:${id}`, src);
-                  note.innerHTML = sanitizeHtml(src);
-                  note.dataset.rendered = '1';
+                  try{
+                    const html0 = sanitizeHtml(src);
+                    const { attItems } = (__getSectionInputAttachments(id) || {});
+                    const html = (attItems && attItems.length) ? __linkifySectionRefs(html0, attItems) : html0;
+                    note.innerHTML = html; note.dataset.rendered = '1';
+                    if (attItems && attItems.length) __wireSectionRefClicks(note, attItems, String(src||''));
+                  }catch{ note.innerHTML = sanitizeHtml(src); note.dataset.rendered = '1'; }
                 } else {
       sec.removeAttribute('data-mode');
       try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
@@ -2488,8 +2527,6 @@
                 }
                 // Update toolbars for new mode
                 try{ updateToolbarVisibility(mode); }catch{}
-        // Toggle Markdown edit button visibility
-        try{ const editBtnNow = head.querySelector('.edit-md-btn'); if (editBtnNow) editBtnNow.style.display = (mode === 'md') ? '' : 'none'; }catch{}
               }
             }catch{}
           });
@@ -2511,62 +2548,11 @@
             }
           }catch{}
         }
-        // Note focus/blur: auto MD render on blur when mode=md
+        // Note rendering and persistence handlers
         const note = sec.querySelector('.note');
         if (note){
-          // Add 'Redigera' button for Markdown mode
-          let editBtn = head.querySelector('.edit-md-btn');
-          if (!editBtn) {
-            editBtn = document.createElement('button');
-            editBtn.type = 'button';
-            editBtn.textContent = 'Redigera';
-            editBtn.className = 'edit-md-btn btn btn-ghost';
-            editBtn.style.marginLeft = '8px';
-            head.appendChild(editBtn);
-          }
-          let editing = false;
-          let textarea = null;
-          const renderMarkdown = ()=>{
-            const src = localStorage.getItem(`sectionRaw:${id}`) || '';
-            note.innerHTML = window.mdToHtml ? sanitizeHtml(window.mdToHtml(src)) : sanitizeHtml(src);
-            note.dataset.rendered = '1';
-          };
-          const startEdit = ()=>{
-            if (editing) return;
-            editing = true;
-            const src = localStorage.getItem(`sectionRaw:${id}`) || '';
-            textarea = document.createElement('textarea');
-            textarea.className = 'md-edit-area';
-            textarea.value = src;
-            textarea.style.width = '100%';
-            textarea.style.minHeight = '180px';
-            textarea.style.fontFamily = 'monospace';
-            textarea.style.fontSize = '1em';
-            textarea.style.marginTop = '8px';
-            note.innerHTML = '';
-            note.appendChild(textarea);
-            textarea.focus();
-            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-            textarea.addEventListener('keydown', (e)=>{
-              if ((e.key === 'Enter' && (e.ctrlKey || e.metaKey)) || (e.key === 'Escape')){
-                e.preventDefault(); finishEdit();
-              }
-            });
-            textarea.addEventListener('blur', finishEdit);
-          };
-          const finishEdit = ()=>{
-            if (!editing) return;
-            editing = false;
-            const val = textarea.value;
-            localStorage.setItem(`sectionRaw:${id}`, val);
-            renderMarkdown();
-            textarea = null;
-          };
-          editBtn.onclick = ()=>{ if (!editing) startEdit(); };
-          // Only show edit button in Markdown mode
           const s = localStorage.getItem(`sectionSettings:${id}`);
           const mode = s ? (JSON.parse(s).renderMode || 'raw') : 'raw';
-          editBtn.style.display = (mode === 'md') ? '' : 'none';
           // Initial render: run once per section to avoid flipping modes on re-init
           if (!sec.dataset.renderInitDone){
             if (mode === 'exercises'){
@@ -2578,7 +2564,15 @@
             sec.removeAttribute('data-mode');
             try{ sec.querySelector('.ex-focus')?.remove(); }catch{}
             try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
-            renderMarkdown();
+            const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerText || '');
+            localStorage.setItem(`sectionRaw:${id}`, src);
+            try{
+              const html0 = sanitizeHtml(window.mdToHtml(src));
+              const { attItems } = (__getSectionInputAttachments(id) || {});
+              const html = (attItems && attItems.length) ? __linkifySectionRefs(html0, attItems) : html0;
+              note.innerHTML = html; note.dataset.rendered = '1';
+              if (attItems && attItems.length) __wireSectionRefClicks(note, attItems, String(src||''));
+            }catch{ note.innerHTML = sanitizeHtml(window.mdToHtml(src)); note.dataset.rendered = '1'; }
             } else if (mode === 'html'){
             // clear exercises flag/UI and render stored HTML
             sec.removeAttribute('data-mode');
@@ -2586,8 +2580,13 @@
             try{ const body = sec.querySelector('.body'); if (body){ body.style.display=''; body.style.gridTemplateColumns=''; body.style.gap=''; } }catch{}
             const src = localStorage.getItem(`sectionRaw:${id}`) || (note.innerHTML || '');
             localStorage.setItem(`sectionRaw:${id}`, src);
-            note.innerHTML = sanitizeHtml(src);
-            note.dataset.rendered = '1';
+            try{
+              const html0 = sanitizeHtml(src);
+              const { attItems } = (__getSectionInputAttachments(id) || {});
+              const html = (attItems && attItems.length) ? __linkifySectionRefs(html0, attItems) : html0;
+              note.innerHTML = html; note.dataset.rendered = '1';
+              if (attItems && attItems.length) __wireSectionRefClicks(note, attItems, String(src||''));
+            }catch{ note.innerHTML = sanitizeHtml(src); note.dataset.rendered = '1'; }
             } else {
             // raw text mode on initial render: clear exercises, reset layout, and show plain text
             sec.removeAttribute('data-mode');
@@ -2608,8 +2607,7 @@
           let saveTimer=null;
           const saveNow = ()=>{
             try{
-              const m = getMode(); if (m==='exercises') return; // exercises managed separately
-              if (editing && m==='md') return; // markdown textarea handles its own save
+              const m = getMode(); if (m==='exercises' || m==='md') return; // don't overwrite MD source in preview-only mode
               if (m==='html'){
                 const src = String(note.innerHTML||'');
                 localStorage.setItem(`sectionRaw:${id}`, src);
@@ -2621,7 +2619,6 @@
           };
           note.addEventListener('input', (e)=>{
             try{
-              if (e && e.target && e.target.classList && e.target.classList.contains('md-edit-area')) return;
               if (saveTimer) clearTimeout(saveTimer);
               saveTimer = setTimeout(saveNow, 300);
             }catch{}
@@ -2656,9 +2653,21 @@
         let mode = 'md';
         try{ const raw = localStorage.getItem(`sectionSettings:${id}`); if (raw){ const s = JSON.parse(raw)||{}; if (s.renderMode) mode = String(s.renderMode); } }catch{}
         if (mode === 'md' && window.mdToHtml){
-          try{ note.innerHTML = sanitizeHtml(window.mdToHtml(combined)); note.dataset.rendered = '1'; }catch{ note.textContent = combined; delete note.dataset.rendered; }
+          try{
+            const html0 = sanitizeHtml(window.mdToHtml(combined));
+            const { attItems } = (__getSectionInputAttachments(id) || {});
+            const html = (attItems && attItems.length) ? __linkifySectionRefs(html0, attItems) : html0;
+            note.innerHTML = html; note.dataset.rendered = '1';
+            if (attItems && attItems.length) __wireSectionRefClicks(note, attItems, String(st.buf||''));
+          }catch{ note.textContent = combined; delete note.dataset.rendered; }
         } else if (mode === 'html'){
-          try{ note.innerHTML = sanitizeHtml(combined); note.dataset.rendered = '1'; }catch{ note.textContent = combined; delete note.dataset.rendered; }
+          try{
+            const html0 = sanitizeHtml(combined);
+            const { attItems } = (__getSectionInputAttachments(id) || {});
+            const html = (attItems && attItems.length) ? __linkifySectionRefs(html0, attItems) : html0;
+            note.innerHTML = html; note.dataset.rendered = '1';
+            if (attItems && attItems.length) __wireSectionRefClicks(note, attItems, String(st.buf||''));
+          }catch{ note.textContent = combined; delete note.dataset.rendered; }
         } else {
           note.textContent = combined; delete note.dataset.rendered;
         }

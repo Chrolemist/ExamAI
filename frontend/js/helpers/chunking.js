@@ -1,6 +1,7 @@
 (function(){
   function approxTokens(s){ try{ const w=(String(s||'').match(/\S+/g)||[]).length; return Math.ceil(w*1.3); }catch{ return Math.ceil(String(s||'').length/4); } }
-  // Split text into blocks based on lines that start with a numbering like "1.", "2)", "3:", "4 -" etc.
+  // Split text into blocks based on numbering like "1.", "2)", "3:", "4 -" etc.
+  // Primary mode: line-based (numbered headings at start of line). Fallback: inline numbering within a single line.
   function splitByNumbering(inputText){
     try{
       const str = String(inputText||'');
@@ -19,8 +20,34 @@
         }
       }
       if (buf.length) chunks.push(buf.join('\n').replace(/\n+$/,'').replace(/^\n+/,''));
-      // Only treat as numbered if 2 or more numbered heads found
+      // If 2+ numbered heads found on separate lines, use those
       if (foundHeads >= 2) return chunks.filter(Boolean);
+      // Fallback: inline numbered list, e.g., "1. ... 2) ... 3: ..." on a single line
+      // Find all number markers not inside brackets like [1,4] (won't match because pattern requires punctuation after the number)
+      const numRe = /\d{1,3}[\.)\:\-–—]\s+/g;
+      const indices = [];
+      let m;
+      while ((m = numRe.exec(str))){
+        const idx = m.index;
+        // Accept only if at start or preceded by whitespace/newline
+        const prev = idx > 0 ? str[idx-1] : '';
+        if (idx === 0 || /\s/.test(prev)) indices.push(idx);
+      }
+      if (indices.length >= 2){
+        const out=[]; indices.push(str.length);
+        for (let i=0;i<indices.length-1;i++){
+          const start = indices[i];
+          const end = indices[i+1];
+          out.push(str.slice(start, end).trim());
+        }
+        // If there is preamble before first marker, include it as first chunk
+        const firstIdx = indices[0];
+        if (firstIdx > 0){
+          const pre = str.slice(0, firstIdx).trim();
+          if (pre) out.unshift(pre);
+        }
+        return out.filter(Boolean);
+      }
       return [str];
     }catch{ return [String(inputText||'')]; }
   }

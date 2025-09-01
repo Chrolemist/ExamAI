@@ -69,7 +69,12 @@
       </header>
       <section class="fx-main" id="fxMain">
         <div class="fx-card" id="cardQ">
-          <div class="fx-meta drag-handle" id="fxMetaQ">Fråga</div>
+          <div class="fx-meta drag-handle" id="fxMetaQ">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span>Fråga</span>
+              <button type="button" class="btn btn-ghost" id="fxQToggle" title="Visa förhandsgranskning">Förhandsgranska</button>
+            </div>
+          </div>
           <div class="fx-q" id="fxQ" spellcheck="false"></div>
           <div class="fx-qchat" style="display:flex; gap:6px; margin-top:8px;">
             <input id="fxQChat" class="input" placeholder="Fråga förbättraren… t.ex. förtydliga eller skapa ny fråga" style="flex:1; min-width:0;">

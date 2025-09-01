@@ -109,6 +109,37 @@ body{margin:0;background:radial-gradient(1200px 800px at 80% -20%,rgba(124,92,25
 .fx-q ol{ margin:0.4em 0 0.4em 1.2em }
 .fx-q li{ margin:0.25em 0 }
 
+/* Full-screen Question: dark edit state like feedback panels */
+.fx-q[contenteditable="true"]{
+  background:#0f0f14;
+  border:1px solid #24242c;
+  border-radius:10px;
+  padding:8px;
+  color:var(--text);
+}
+.fx-q[contenteditable="true"]:focus{
+  outline:2px solid rgba(124,92,255,0.35);
+  outline-offset:0;
+  border-color:#3a3a45;
+}
+/* Don’t navigate links while editing; keep text selectable */
+.fx-q[contenteditable="true"] a{ pointer-events:none; }
+
+/* Full-screen Teori: dark edit state and link suppression in edit mode */
+.fx-t[contenteditable="true"]{
+  background:#0f0f14;
+  border:1px solid #24242c;
+  border-radius:10px;
+  padding:8px;
+  color:var(--text);
+}
+.fx-t[contenteditable="true"]:focus{
+  outline:2px solid rgba(124,92,255,0.35);
+  outline-offset:0;
+  border-color:#3a3a45;
+}
+.fx-t[contenteditable="true"] a{ pointer-events:none; }
+
 /* Full-screen question mini-chat: dark theme input */
 .fx-qchat .input,
 .fx-qchat input[type="text"],
