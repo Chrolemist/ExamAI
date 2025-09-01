@@ -247,7 +247,7 @@
       let vis = getVisibleGraders();
       if (!Array.isArray(vis)){ try{ setVisibleGraders(ids); }catch{} vis = ids; }
       const curVis = getVisibleGraders();
-      const bar = [
+  const bar = [
         '<div class="grader-visbar subtle" style="margin:6px 0; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">',
         '<span>Visa:</span>'
       ];
@@ -262,17 +262,17 @@
         if (curVis && !curVis.includes(String(g.id))) return;
         const nm = graderName(g.id);
         const rows = fbByGrader && Array.isArray(fbByGrader[g.id]) ? fbByGrader[g.id] : [];
-        const header = `<div class=\"subtle\" style=\"margin:8px 0 6px; display:flex; align-items:center; justify-content:space-between; gap:8px;\"><span>${nm}</span><span><button type=\"button\" class=\"btn btn-ghost\" data-action=\"toggle-fb-view\">${(view==='preview')?'Redigera':'Förhandsgranska'}<\/button> <button type=\"button\" class=\"btn btn-ghost\" data-action=\"grade-one\" data-gid=\"${g.id}\">Rätta endast denna<\/button></span><\/div>`;
+  const header = `<div class=\"subtle\" style=\"margin:8px 0 6px; display:flex; align-items:center; justify-content:space-between; gap:8px;\"><span>${nm}</span><span><button type=\"button\" class=\"btn btn-ghost\" data-action=\"toggle-fb-view\">${(view==='preview')?'Redigera':'Förhandsgranska'}<\/button> <button type=\"button\" class=\"btn btn-ghost\" data-action=\"del-latest\" data-gid=\"${g.id}\">Ta bort<\/button> <button type=\"button\" class=\"btn btn-ghost\" data-action=\"grade-one\" data-gid=\"${g.id}\">Rätta endast denna<\/button><\/span><\/div>`;
         els.f.insertAdjacentHTML('beforeend', header);
         if (!rows.length){ els.f.insertAdjacentHTML('beforeend', '<div class="subtle">Ingen feedback ännu.</div>'); els.f.insertAdjacentHTML('beforeend', '<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">'); return; }
         rows.forEach((txt, i)=>{
           if (view==='preview'){
             let body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
             try{ const info = getSectionGraderAttachmentsLocal(id) || { attItems: [] }; if (info.attItems && info.attItems.length){ body = linkifySectionRefsLocal(body, info.attItems); } }catch{}
-            els.f.insertAdjacentHTML('beforeend', `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span></div><div class=\"fb-round fb-preview\" data-ri=\"${i}\" data-grader=\"${g.id}\" contenteditable=\"false\">${body}</div>`);
+            els.f.insertAdjacentHTML('beforeend', `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span><\/div><div class=\"fb-round fb-preview\" data-ri=\"${i}\" data-grader=\"${g.id}\" contenteditable=\"false\">${body}<\/div>`);
           } else {
             const body = window.mdToHtml? sanitizeHtmlLocal(window.mdToHtml(String(txt||''))) : String(txt||'');
-            els.f.insertAdjacentHTML('beforeend', `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span></div><div class=\"fb-round\" data-ri=\"${i}\" data-grader=\"${g.id}\">${body}</div>`);
+            els.f.insertAdjacentHTML('beforeend', `<div class=\"subtle fb-head\" style=\"margin:6px 0 4px; opacity:.85;\"><span>Omgång ${i+1}</span><\/div><div class=\"fb-round\" data-ri=\"${i}\" data-grader=\"${g.id}\">${body}<\/div>`);
           }
         });
         els.f.insertAdjacentHTML('beforeend', '<hr style="border:none; border-top:1px solid #252532; margin:8px 0;">');
@@ -305,13 +305,14 @@
       }
       // Delegated actions for grid inside F card
       try{
-        if (!els.f.__graderHandlers){
+    if (!els.f.__graderHandlers){
           els.f.__graderHandlers = true;
           els.f.addEventListener('click', (ev)=>{
             const toggleBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="toggle-vis"][data-gid]');
             const gradeBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="grade-one"][data-gid]');
             const toggleViewBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="toggle-fb-view"]');
-            if (!toggleBtn && !gradeBtn && !toggleViewBtn) return; ev.preventDefault(); ev.stopPropagation();
+    const delLatestBtn = ev.target && ev.target.closest && ev.target.closest('button[data-action="del-latest"][data-gid]');
+  if (!toggleBtn && !gradeBtn && !toggleViewBtn && !delLatestBtn) return; ev.preventDefault(); ev.stopPropagation();
             if (toggleBtn){
               try{
                 const gid = String(toggleBtn.getAttribute('data-gid')||'');
@@ -327,6 +328,19 @@
               try{ const curV = getFbView(); setFbView(curV==='preview'?'edit':'preview'); render(); }catch{}
               return;
             }
+            if (delLatestBtn){
+              try{
+                const gid = String(delLatestBtn.getAttribute('data-gid')||''); if (!gid) return;
+                const arr2 = getList(); const i2 = Math.min(getCursor(), Math.max(0, arr2.length-1));
+                const it2 = arr2[i2] || {};
+                if (!it2.fbByGrader || !Array.isArray(it2.fbByGrader[gid]) || it2.fbByGrader[gid].length===0) return;
+                it2.fbByGrader[gid].splice(it2.fbByGrader[gid].length-1, 1);
+                arr2[i2] = it2; setList(arr2); dispatchChanged(); render();
+              }catch{}
+              return;
+            }
+            
+            
             if (gradeBtn){
               try{
                 const gid = String(gradeBtn.getAttribute('data-gid')||''); if (!gid) return;
@@ -733,27 +747,7 @@
 
   // Edits -> persist
   els.a.addEventListener('input', ()=>{ const arr=getList(); const i=getCursor(); if(arr[i]){ arr[i].a = els.a.value; setList(arr); }});
-  // Remove Theory mapping
-  (function(){
-    const btn = document.getElementById('fxTRemove'); if (!btn) return;
-  // Avoid triggering drag when pressing the button in layout mode
-  btn.addEventListener('mousedown', (e)=>{ e.stopPropagation(); });
-    btn.addEventListener('click', ()=>{
-      try{
-        const k = `sectionTheorySrc:${id}`;
-        localStorage.removeItem(k);
-        // notify others
-        try{ localStorage.setItem('__exercises_changed__', String(Date.now())); }catch{}
-        // tiny toast
-        try{
-          let cont = document.getElementById('toastContainer');
-          if (!cont){ cont = document.createElement('div'); cont.id='toastContainer'; Object.assign(cont.style,{ position:'fixed', right:'16px', bottom:'16px', zIndex:'10050', display:'grid', gap:'8px' }); document.body.appendChild(cont); }
-          const t = document.createElement('div'); t.className='toast'; Object.assign(t.style,{ background:'rgba(30,30,40,0.95)', border:'1px solid #3a3a4a', color:'#fff', padding:'8px 10px', borderRadius:'8px', boxShadow:'0 8px 18px rgba(0,0,0,0.4)', fontSize:'13px' }); t.textContent='Teorikoppling borttagen'; cont.appendChild(t); setTimeout(()=>{ try{ t.style.opacity='0'; t.style.transition='opacity 250ms'; setTimeout(()=>{ t.remove(); if (!cont.children.length) cont.remove(); }, 260); }catch{} }, 1100);
-        }catch{}
-        render();
-      }catch{}
-    });
-  })();
+  // Remove Theory mapping button removed; theory link can be managed elsewhere
   // Make question content editable and persist
   try{
     els.q.contentEditable = 'true';

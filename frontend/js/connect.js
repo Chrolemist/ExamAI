@@ -1548,7 +1548,10 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
     }
   }catch{}
 
-  // delete UI
+  // delete UI (disabled in full-screen exercises view)
+  function connDelDisabled(){
+    try{ return !!document.getElementById('fxMain'); }catch{ return false; }
+  }
   let _connDelBtn = null, _connDelHoveringBtn = false, _hoverConnCount = 0;
   /** Lazy-create the floating delete button reused across all paths. */
   function getConnDeleteBtn(){
@@ -1569,16 +1572,23 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   btn.addEventListener('mouseenter', () => { _connDelHoveringBtn = true; });
   btn.addEventListener('mouseleave', () => { _connDelHoveringBtn = false; if(_hoverConnCount===0) btn.style.display='none'; });
     document.body.appendChild(btn);
+    // In full-screen exercises, always keep hidden/inactive
+    if (connDelDisabled()){
+      btn.style.display = 'none';
+      btn.style.visibility = 'hidden';
+      btn.style.pointerEvents = 'none';
+    }
     _connDelBtn = btn; return btn;
   }
-  function positionConnDeleteBtn(x, y){ const btn = getConnDeleteBtn(); const r = 14; btn.style.left = Math.round(x - r)+'px'; btn.style.top = Math.round(y - r)+'px'; }
+  function positionConnDeleteBtn(x, y){ if (connDelDisabled()) return; const btn = getConnDeleteBtn(); const r = 14; btn.style.left = Math.round(x - r)+'px'; btn.style.top = Math.round(y - r)+'px'; }
   /** Remove connection path and its record from UI state and Graph. */
   function removeConnection(conn){ try{ conn.pathEl?.remove(); }catch{} try{ conn.hitEl?.remove(); }catch{} const idx = window.state.connections.indexOf(conn); if (idx>=0) window.state.connections.splice(idx,1); try{ if(window.graph) window.graph.disconnect(conn.fromId, conn.toId); }catch{} }
   function wireConnectionDeleteUI(conn){
+    if (connDelDisabled()) return; // do not enable in full-screen exercises
     const btn = getConnDeleteBtn();
     const bindHover = (el)=>{
       if(!el) return; let over=false;
-      const showBtn = (x,y) => { if (isNearAnyIO(x,y, 20)) { btn.style.display='none'; return; } positionConnDeleteBtn(x,y); btn.style.display='block'; btn.onclick = (e)=>{ e.stopPropagation(); removeConnection(conn); btn.style.display='none'; }; };
+      const showBtn = (x,y) => { if (connDelDisabled()) { btn.style.display='none'; return; } if (isNearAnyIO(x,y, 20)) { btn.style.display='none'; return; } positionConnDeleteBtn(x,y); btn.style.display='block'; btn.onclick = (e)=>{ e.stopPropagation(); removeConnection(conn); btn.style.display='none'; }; };
       const maybeHide = () => { if (_hoverConnCount===0 && !_connDelHoveringBtn) btn.style.display='none'; };
       el.addEventListener('mouseenter', (e)=>{ if(!over){ over=true; _hoverConnCount++; } showBtn(e.clientX, e.clientY); });
       el.addEventListener('mousemove', (e)=>{ if (!over) return; if (isNearAnyIO(e.clientX, e.clientY, 20)) { btn.style.display='none'; return; } positionConnDeleteBtn(e.clientX, e.clientY); btn.style.display='block'; });
