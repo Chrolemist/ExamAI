@@ -586,6 +586,13 @@
         <legend class="subtle" style="padding:0 6px;">Bilagor</legend>
         <label class="inline"><input type="checkbox" data-role="pagewise" /> Läs bilagor i sidfönster (pagewise)</label>
         <div class="subtle" style="margin-left:22px;">Ger ofta bredare täckning vid många sidor, men minskar live‑streaming (svaret kan visas i större block).</div>
+        <div data-role="pagewiseScope" style="margin-left:22px; margin-top:6px;">
+          <label style="display:block;">
+            Sidfönster
+            <input type="range" min="1" max="10" step="1" value="4" data-role="pageWindow" />
+            <div class="subtle"><span data-role="pageWindowValue">4</span> sidor/omgång</div>
+          </label>
+        </div>
       </fieldset>
       <div style="margin-top:10px;display:flex;justify-content:flex-end">
         <button type="button" class="btn danger" data-action="resetAll" title="Nollställ">Nollställ</button>
@@ -926,6 +933,9 @@
   const chunkUseNumberingEl = by('[data-role="chunkUseNumbering"]');
   const chunkTrimNumPreEl = by('[data-role\="chunkTrimNumberedPreamble\"]');
   const pagewiseEl = by('[data-role="pagewise"]');
+  const pagewiseScope = by('[data-role="pagewiseScope"]');
+  const pageWindowEl = by('[data-role="pageWindow"]');
+  const pageWindowVal = by('[data-role="pageWindowValue"]');
       
       const renderEl = by('[data-role="renderMode"]');
   // Web search settings removed from CoWorker; handled by Internet node
@@ -1011,6 +1021,13 @@
   // no web settings for coworker anymore
   if (saved.apiKey && apiKeyEl) { apiKeyEl.value = saved.apiKey; }
   if (pagewiseEl){ pagewiseEl.checked = !!saved.pagewise; }
+      // Initialize page-window control
+      try{
+        const w = Math.max(1, Math.min(10, Number(saved.pageWindow||4)));
+        if (pageWindowEl) pageWindowEl.value = String(w);
+        if (pageWindowVal) pageWindowVal.textContent = String(w);
+        if (pagewiseScope){ const on = !!(pagewiseEl && pagewiseEl.checked); pagewiseScope.style.opacity = on ? '1' : '0.6'; pagewiseScope.style.pointerEvents = on ? '' : 'none'; }
+      }catch{}
       if (enableToolsEl){
         if (saved.enableTools === undefined){
           // Default OFF
@@ -1056,7 +1073,8 @@
       renderEl?.addEventListener('change', ()=>persist({ renderMode: renderEl.value }));
   // removed web listeners
   apiKeyEl?.addEventListener('input', ()=>{ persist({ apiKey: apiKeyEl.value||'' }); updateKeyBadge(); });
-  pagewiseEl?.addEventListener('change', ()=>{ persist({ pagewise: !!pagewiseEl.checked }); });
+  pagewiseEl?.addEventListener('change', ()=>{ persist({ pagewise: !!pagewiseEl.checked }); try{ if (pagewiseScope){ const on = !!pagewiseEl.checked; pagewiseScope.style.opacity = on ? '1' : '0.6'; pagewiseScope.style.pointerEvents = on ? '' : 'none'; } }catch{} });
+  pageWindowEl?.addEventListener('input', ()=>{ const n=Math.max(1, Math.min(10, Number(pageWindowEl.value)||4)); if (pageWindowVal) pageWindowVal.textContent = String(n); persist({ pageWindow: n }); });
   enableToolsEl?.addEventListener('change', ()=>{ persist({ enableTools: !!enableToolsEl.checked }); });
   forcePythonEl?.addEventListener('change', ()=>{ persist({ forcePython: !!forcePythonEl.checked }); });
     }catch{}

@@ -339,10 +339,10 @@ def chat_stream():
     # Budget and timeout
     max_tokens = data.get("max_tokens") or data.get("max_completion_tokens") or 1000
     try:
-        req_timeout = float(data.get("timeout", 60))
+        req_timeout = float(data.get("timeout", 120))
     except Exception:
-        req_timeout = 60
-    req_timeout = max(5, min(120, req_timeout))
+        req_timeout = 120
+    req_timeout = max(5, min(180, req_timeout))
 
     tools = data.get("tools") if isinstance(data.get("tools"), list) else None
     tool_choice = data.get("tool_choice") if isinstance(data.get("tool_choice"), (dict, str)) else None
@@ -507,7 +507,10 @@ def chat_stream():
         stream_with_context(_event_iter(model)),
         mimetype="application/x-ndjson; charset=utf-8",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+            "Content-Encoding": "identity",
         },
         direct_passthrough=True,
     )

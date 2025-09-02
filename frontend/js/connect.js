@@ -348,26 +348,8 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
               : 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n'
             ) + lines.join('\n');
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
-            // Stash for meta to allow footnotes rendering
+            // Stash for meta to allow footnotes rendering (avoid injecting full materials here)
             requestAIReply._lastAttachments = combined;
-            // Also include attachment contents as a dedicated user message marked with 'Bilaga:' so backend guidance is enabled
-            try{
-              const joinSep = '\n\n---\n\n';
-              const blocks = combined.map((it, i)=>{
-                const head = `[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`;
-                const body = String(it.text||'');
-                return head + (body ? `\n${body}` : '');
-              }).filter(Boolean);
-              const materials = 'Bilaga:\n' + blocks.join(joinSep);
-              // Insert before the most recent user question if present, else append
-              if (Array.isArray(messages) && messages.length){
-                const lastIdx = messages.length - 1;
-                if (messages[lastIdx] && messages[lastIdx].role === 'user') messages.splice(lastIdx, 0, { role:'user', content: materials });
-                else messages.push({ role:'user', content: materials });
-              } else {
-                messages = [{ role:'user', content: materials }];
-              }
-            }catch{}
           } else {
             requestAIReply._lastAttachments = [];
           }
@@ -408,24 +390,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
               : 'Material för denna fråga (använd [n] eller [n,sida] i svaret, t.ex. [1,7], där n matchar listan; lägg fullständiga källor längst ned):\n'
             ) + lines.join('\n');
             systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + guide;
-            requestAIReply._lastAttachments = combined;
-            // Include attachment contents as a 'Bilaga:' message so backend sees materials
-            try{
-              const joinSep = '\n\n---\n\n';
-              const blocks = combined.map((it, i)=>{
-                const head = `[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`;
-                const body = String(it.text||'');
-                return head + (body ? `\n${body}` : '');
-              }).filter(Boolean);
-              const materials = 'Bilaga:\n' + blocks.join(joinSep);
-              if (Array.isArray(messages) && messages.length){
-                const lastIdx = messages.length - 1;
-                if (messages[lastIdx] && messages[lastIdx].role === 'user') messages.splice(lastIdx, 0, { role:'user', content: materials });
-                else messages.push({ role:'user', content: materials });
-              } else {
-                messages = [{ role:'user', content: materials }];
-              }
-            }catch{}
+            requestAIReply._lastAttachments = combined; // avoid injecting full materials here
           } else {
             requestAIReply._lastAttachments = [];
           }
@@ -450,29 +415,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
       // Ensure last turn includes the just received user/assistant? The incoming to coworker was an assistant or user? In our model, payload.who was 'assistant' for received.
       // No extra append needed because transmitOnConnection already added it to Graph before this call.
     }catch{}
-    // After building history, inject materials block if attachments exist and not already present
-    try{
-      const combined = Array.isArray(requestAIReply._lastAttachments) ? requestAIReply._lastAttachments : [];
-      if (combined.length){
-        const hasMaterials = (Array.isArray(messages)?messages:[]).some(m => m && m.role==='user' && /Bilaga:/i.test(String(m.content||'')));
-        if (!hasMaterials){
-          const joinSep = '\n\n---\n\n';
-          const blocks = combined.map((it, i)=>{
-            const head = `[${i+1}] ${String(it.name||'Bilaga').trim()} (${Number(it.chars||0)} tecken)`;
-            const body = String(it.text||'');
-            return head + (body ? `\n${body}` : '');
-          }).filter(Boolean);
-          const materials = 'Bilaga:\n' + blocks.join(joinSep);
-          if (Array.isArray(messages) && messages.length){
-            const lastIdx = messages.length - 1;
-            if (messages[lastIdx] && messages[lastIdx].role === 'user') messages.splice(lastIdx, 0, { role:'user', content: materials });
-            else messages.push({ role:'user', content: materials });
-          } else {
-            messages = [{ role:'user', content: materials }];
-          }
-        }
-      }
-    }catch{}
+  // Don't inject full materials into history; we will add small page windows per request when needed.
     // If user explicitly asks to show/quote a template/structure, guide the model to include short quotes with [n,sida]
     let quoteMode = false;
     try{
@@ -484,6 +427,13 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
       const extraGuide = 'ANVISNING: När användaren ber att visa/återge hur en mall/struktur ser ut enligt bilagan, gör så här: 1) Ge en kort punktlista över sektioner (sammanfattade i egna ord), 2) Lägg in korta ordagranna citat ≤ 200 tecken med [n,sida] där relevant, 3) Om du behöver fler sidor, skriv exakt MER_SIDOR.';
       systemPrompt = (systemPrompt ? (systemPrompt + '\n\n') : '') + extraGuide;
     }
+    // If materials exist, instruct the model to request MER_SIDOR when more pages are needed
+    try{
+      if (Array.isArray(requestAIReply._lastAttachments) && requestAIReply._lastAttachments.length){
+        const hint = 'ANVISNING: Materialet skickas i små sidfönster. Om du behöver fler sidor för att svara, skriv exakt MER_SIDOR.';
+        systemPrompt = systemPrompt ? (systemPrompt + '\n\n' + hint) : hint;
+      }
+    }catch{}
     // Coerce unsupported/legacy model aliases to a safe default, but preserve gpt-5* defaults
     try{
       const ml = (model||'').toLowerCase();
@@ -495,6 +445,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
     }catch{}
   // No client-side clipping
   const body = { model, max_tokens: maxTokens, noClip: true };
+  const __baseMessages = Array.isArray(messages) ? messages.slice() : [];
   let toolsEnabled = false;
   // Optional: expose run_python tool to the model when enabled in node settings
   try{
@@ -545,6 +496,8 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
     }
   }catch{}
   let _pgStart = 1;
+  let __pageWindow = 4;
+  let __maxPage = null;
   // Enable pgwise based on user setting and origin
   try{
     const rawNS = localStorage.getItem(`nodeSettings:${ownerId}`);
@@ -554,12 +507,17 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
     // If user enabled pagewise, honor it for coworker too, but keep section-sourced grading/improving streaming by default
     if (hasMaterials && window.Pdf){
       const cfg = Pdf.computePgwiseConfig({ attachments: requestAIReply._lastAttachments||[], fromCoworker, fromSection, nodeSettings: ns, startPage: _pgStart });
-      if (cfg && cfg.enable){ body.pgwise = { enable: true, startPage: Math.max(1, Number(cfg.startPage)||1) }; }
+      if (cfg && cfg.enable){
+        try{ const w = Number(ns.pageWindow||4); if (!Number.isNaN(w) && w>0) __pageWindow = Math.max(1, Math.min(10, w)); }catch{}
+        body.pgwise = { enable: true, startPage: Math.max(1, Number(cfg.startPage)||1), window: __pageWindow };
+      }
     } else if (hasMaterials){
       // Fallback to legacy behavior if Pdf helper is unavailable
-      if (!fromCoworker && !fromSection){ body.pgwise = { enable: true, startPage: _pgStart }; }
-      else if (fromCoworker && !fromSection && wantPagewise){ body.pgwise = { enable: true, startPage: _pgStart }; }
+      if (!fromCoworker && !fromSection){ body.pgwise = { enable: true, startPage: _pgStart, window: __pageWindow }; }
+      else if (fromCoworker && !fromSection && wantPagewise){ body.pgwise = { enable: true, startPage: _pgStart, window: __pageWindow }; }
     }
+    // Compute max page across attachments once
+    try{ const atts = Array.isArray(requestAIReply._lastAttachments)?requestAIReply._lastAttachments:[]; let mp=0; atts.forEach(a=>{ try{ (Array.isArray(a.pages)?a.pages:[]).forEach(p=>{ const n=Number(p?.page||0); if(n>mp) mp=n; }); }catch{} }); __maxPage = mp||null; }catch{}
   }catch{}
   if (systemPrompt) body.system = systemPrompt;
     if (messages && messages.length) body.messages = messages;
@@ -1448,18 +1406,56 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   // Announce completion to UI listeners (use body.sourceId if present)
   try{ const src = (body && body.sourceId) ? String(body.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: true } })); }catch{}
   };
+  // Helper to build a small materials window for the current step
+  function __buildMaterialsWindow(startPage){
+    try{
+      const atts = Array.isArray(requestAIReply._lastAttachments)?requestAIReply._lastAttachments:[];
+      const win = Number((body.pgwise && body.pgwise.window) || __pageWindow || 4);
+      const first = Math.max(1, Number(startPage)||1);
+      const last = first + win - 1;
+      const joinSep = '\n\n---\n\n';
+      const blocks = [];
+      for (let i=0;i<atts.length;i++){
+        const it = atts[i]||{};
+        const head = `[${i+1}] ${String(it.name||'Bilaga').trim()}`;
+        let body = '';
+        if (Array.isArray(it.pages) && it.pages.length){
+          const inWin = it.pages.filter(p=>{ const n = Number(p?.page||0); return n>=first && n<=last; });
+          body = inWin.map(p=>`[Sida ${p.page}]\n${String(p.text||'')}`).join('\n\n');
+        } else {
+          const t = String(it.text||'');
+          body = t.length>2000 ? (t.slice(0,2000)+'…') : t;
+        }
+        blocks.push(head + (body ? `\n${body}` : ''));
+      }
+      return 'Bilaga:\n' + blocks.join(joinSep);
+    }catch{ return ''; }
+  }
+
   const doStep = async (pgStart, step)=>{
     console.log('[DEBUG] doStep called with pgStart:', pgStart, 'step:', step);
     const payload = Object.assign({}, body);
     if (payload.pgwise && typeof pgStart === 'number') payload.pgwise.startPage = pgStart;
+    // Inject small materials window when pgwise is active
+    try{
+      if (payload.pgwise && payload.pgwise.enable){
+        const materials = __buildMaterialsWindow(pgStart);
+        let msgs = __baseMessages.slice(); if (!Array.isArray(msgs)) msgs = [];
+        let insertAt = msgs.length; for (let i=msgs.length-1;i>=0;i--){ const m=msgs[i]; if (m && m.role==='user'){ insertAt = i; break; } }
+        msgs.splice(insertAt, 0, { role:'user', content: materials });
+        payload.messages = msgs;
+      }
+    }catch{}
     console.log('[DEBUG] Making JSON request with payload:', payload);
     const data = await tryRequest(payload);
     console.log('[DEBUG] Got JSON response:', data);
-    const pw = data && data.pagewise;
-    const wantsMore = !!(pw && pw.enabled && pw.modelRequestedMore && pw.hasMore);
-    if (wantsMore && step < 5){
-      // Don't show this intermediate reply (likely contains MER_SIDOR); immediately fetch next window.
-      const nextStart = Number(pw.nextStartPage)|| (pgStart+1);
+    // Continue when model asks for more pages via MER_SIDOR
+    let replyStr = ''; try{ replyStr = String(data?.reply||''); }catch{}
+    const asksMore = /\bMER_SIDOR\b/.test(replyStr||'');
+    const win = Number((payload.pgwise && payload.pgwise.window) || __pageWindow || 4);
+    const moreAvail = (!!__maxPage) && ((Number(pgStart)||1) + win <= Number(__maxPage));
+    if (asksMore && moreAvail && step < 5){
+      const nextStart = (Number(pgStart)||1) + win;
       return doStep(nextStart, step+1);
     }
     // Final step: render normally (await to ensure UI update before returning)
@@ -1468,9 +1464,9 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   };
   // Announce start for UI (e.g., show cancel button)
   try{ window.dispatchEvent(new CustomEvent('ai-request-started', { detail:{ ownerId, sourceId: ctx && ctx.sourceId ? String(ctx.sourceId) : null } })); }catch{}
-  // Prefer streaming when no pagewise (materials) are involved, or when source is coworker/section; fallback to JSON on error
+  // Prefer streaming when no pagewise; if pagewise is enabled, prefer JSON to control page windows
   // Keep streaming for section-sourced grading/improving even with attachments
-  const preferStream = ((!hasMaterials) || fromCoworker || fromSection);
+  const preferStream = ((!hasMaterials) || fromCoworker || fromSection) && !(body.pgwise && body.pgwise.enable);
   const startPromise = (preferStream ? (async ()=>{
     const basePayload = Object.assign({}, body);
     try{ return await sendStreamOnce(basePayload); }

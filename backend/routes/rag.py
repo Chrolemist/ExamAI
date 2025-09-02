@@ -2,11 +2,17 @@ from __future__ import annotations
 import os
 from typing import List, Tuple, Dict, Any
 import re
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response
+from flask import stream_with_context
+import json
+import threading
+import queue
+import time
 
 from services.openai_service import get_client
 from services.tokenizer import chunk_text
 from services.embeddings import embed_texts
+import logging
 from services.vector_store import VectorDoc
 from services.vector_registry import get_store
 
@@ -45,6 +51,10 @@ def rag_ingest():
     chunk_tokens = int(data.get("chunkTokens", 800))
     overlap = int(data.get("overlapTokens", 100))
     emb_model = (data.get("embeddingModel") or "text-embedding-3-large").strip()
+    try:
+        max_tokens_per_batch = int(data.get("maxTokensPerBatch")) if data.get("maxTokensPerBatch") is not None else None
+    except Exception:
+        max_tokens_per_batch = None
 
     # Split into PDF pages using markers, then chunk per page
     pages = split_pages(text)
@@ -58,7 +68,21 @@ def rag_ingest():
 
     if not chunk_texts:
         return jsonify({"chunks": 0, "collection": collection})
-    vecs = embed_texts(chunk_texts, model=emb_model)
+    # Optional lightweight progress logging
+    logger = logging.getLogger(__name__)
+    def _progress(ev):
+        try:
+            if isinstance(ev, dict) and ev.get("stage") in {"scheduled", "batch_done", "done"}:
+                logger.debug("rag.ingest progress: %s", ev)
+        except Exception:
+            pass
+
+    vecs = embed_texts(
+        chunk_texts,
+        model=emb_model,
+        on_progress=_progress,
+        max_tokens_per_batch=max_tokens_per_batch,
+    )
     if not vecs:
         return jsonify({"error": "embedding failed"}), 500
     dim = len(vecs[0])
@@ -69,6 +93,123 @@ def rag_ingest():
         docs.append(VectorDoc(id=doc_id, text=c, embedding=v, meta=meta))
     store.upsert(docs)
     return jsonify({"chunks": len(docs), "collection": collection})
+
+
+@rag_bp.post("/rag/ingest_stream")
+def rag_ingest_stream():
+    """Streamad ingest som skickar NDJSON-progress medan embeddings körs.
+    Events: {type:"started"|"scheduled"|"progress"|"indexed"|"done"|"error", ...}
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    collection = (data.get("collection") or "default").strip()
+    text = (data.get("text") or "").strip()
+    bilaga = (data.get("bilaga") or data.get("name") or "Bilaga").strip()
+    if not text:
+        return jsonify({"error": "text required"}), 400
+    chunk_tokens = int(data.get("chunkTokens", 800))
+    overlap = int(data.get("overlapTokens", 100))
+    emb_model = (data.get("embeddingModel") or "text-embedding-3-large").strip()
+    try:
+        max_tokens_per_batch = int(data.get("maxTokensPerBatch")) if data.get("maxTokensPerBatch") is not None else None
+    except Exception:
+        max_tokens_per_batch = None
+
+    # Build chunks upfront (non-streaming)
+    pages = split_pages(text)
+    chunk_texts: List[str] = []
+    metas: List[Dict[str, Any]] = []
+    for page_no, body in pages:
+        chunks = chunk_text(body, max_tokens=chunk_tokens, overlap=overlap, model="cl100k_base")
+        for ch in chunks:
+            chunk_texts.append(ch)
+            metas.append({"bilaga": bilaga, "sida": page_no})
+
+    def gen():
+        def send(ev):
+            try:
+                return json.dumps(ev, ensure_ascii=False) + "\n"
+            except Exception:
+                return json.dumps({"type": "error", "error": "encoding"}) + "\n"
+
+        # Early events
+        yield send({"type": "started", "collection": collection, "chunksPlanned": len(chunk_texts)})
+
+        if not chunk_texts:
+            yield send({"type": "done", "collection": collection, "chunks": 0})
+            return
+
+        q: "queue.Queue[dict]" = queue.Queue()
+        result_holder: dict = {}
+        err_holder: dict = {}
+
+        def _progress(ev):
+            try:
+                ev = dict(ev) if isinstance(ev, dict) else {"raw": str(ev)}
+                ev["type"] = "progress"
+                q.put(ev)
+            except Exception:
+                pass
+
+        def _worker():
+            try:
+                from services.embeddings import embed_texts as _embed_texts
+                vecs = _embed_texts(
+                    chunk_texts,
+                    model=emb_model,
+                    on_progress=_progress,
+                    max_tokens_per_batch=max_tokens_per_batch,
+                )
+                result_holder["vecs"] = vecs
+            except Exception as e:  # pragma: no cover
+                err_holder["error"] = str(e)
+            finally:
+                # Signal end
+                q.put({"type": "progress", "stage": "embedding_finished"})
+
+        # Announce schedule
+        yield send({
+            "type": "scheduled",
+            "collection": collection,
+            "chunks": len(chunk_texts),
+        })
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+        # Drain queue while embedding runs
+        last_emit = time.time()
+        while t.is_alive() or not q.empty():
+            try:
+                ev = q.get(timeout=0.5)
+                yield send(ev)
+                last_emit = time.time()
+            except queue.Empty:
+                # keep connection alive on idle
+                if time.time() - last_emit > 5:
+                    yield send({"type": "progress", "stage": "heartbeat"})
+                    last_emit = time.time()
+
+        if err_holder.get("error"):
+            yield send({"type": "error", "error": err_holder["error"]})
+            return
+
+        vecs = result_holder.get("vecs") or []
+        if not vecs:
+            yield send({"type": "error", "error": "embedding failed or empty"})
+            return
+
+        # Upsert into vector store
+        dim = len(vecs[0])
+        store = get_store(collection, dim)
+        docs: List[VectorDoc] = []
+        for i, (c, v, meta) in enumerate(zip(chunk_texts, vecs, metas)):
+            doc_id = f"{collection}:{meta.get('bilaga')}:{meta.get('sida')}:{i}"
+            docs.append(VectorDoc(id=doc_id, text=c, embedding=v, meta=meta))
+        store.upsert(docs)
+        yield send({"type": "indexed", "collection": collection, "chunks": len(docs)})
+        yield send({"type": "done", "collection": collection, "chunks": len(docs)})
+
+    return Response(stream_with_context(gen()), mimetype="application/x-ndjson")
 
 
 @rag_bp.post("/rag/query")

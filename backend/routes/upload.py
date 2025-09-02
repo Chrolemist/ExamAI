@@ -9,12 +9,29 @@ try:
 except Exception:
     PdfReader = None  # type: ignore
 
+# Prefer our cleaner PyMuPDF-based extractor if available
+try:
+    from services import pdf_extractor as _pdfx  # type: ignore
+except Exception:
+    _pdfx = None  # type: ignore
+
 upload_bp = Blueprint("upload", __name__)
 
 
 def _extract_text(filename: str, stream: bytes) -> str:
     name = (filename or "").lower()
     if name.endswith(".pdf"):
+        # Try our PyMuPDF-based extractor first for higher-quality text
+        if _pdfx is not None:
+            try:
+                pages = _pdfx.extract_pages(stream)
+                pages = _pdfx.strip_headers_footers(pages)
+                pages = _pdfx.dedupe_repeated_lines(pages)
+                if pages:
+                    return "\n\n".join((p.text or "") for p in pages).strip()
+            except Exception:
+                pass
+        # Fallback to pdfplumber
         try:
             import pdfplumber
             with pdfplumber.open(io.BytesIO(stream)) as pdf:
@@ -27,6 +44,7 @@ def _extract_text(filename: str, stream: bytes) -> str:
                     return "\n\n".join(parts).strip()
         except Exception:
             pass
+        # Fallback to PyPDF
         try:
             if PdfReader is None:
                 return "[PDF-stöd saknas: installera pypdf]"
@@ -91,35 +109,40 @@ def upload_files():
             text = ""
             truncated = False
             if lower.endswith(".pdf"):
-                try:
-                    import pdfplumber
-                    pages = []
-                    cur_total = 0
-                    with pdfplumber.open(io.BytesIO(raw)) as pdf:
-                        for idx, page in enumerate(pdf.pages, start=1):
-                            t = page.extract_text() or ""
+                # Prefer PyMuPDF-based extractor with cleaning; fallback to pdfplumber/pypdf
+                pages = []
+                cur_total = 0
+                used_clean_extractor = False
+                if _pdfx is not None:
+                    try:
+                        pg_objs = _pdfx.extract_pages(raw)
+                        pg_objs = _pdfx.strip_headers_footers(pg_objs)
+                        pg_objs = _pdfx.dedupe_repeated_lines(pg_objs)
+                        for obj in pg_objs:
+                            t = obj.text or ""
                             if not t:
                                 continue
                             if cur_total + len(t) <= max_chars:
-                                pages.append({"page": idx, "text": t})
+                                pages.append({"page": obj.page, "text": t})
                                 cur_total += len(t)
                             else:
                                 remain = max_chars - cur_total
                                 if remain > 0:
-                                    pages.append({"page": idx, "text": t[:remain]})
+                                    pages.append({"page": obj.page, "text": t[:remain]})
                                     cur_total += remain
                                 truncated = True
                                 break
-                    text = _join_pages_with_markers(pages) if pages else ""
-                except Exception:
-                    pages = None
-                    if PdfReader is not None:
-                        try:
-                            reader = PdfReader(io.BytesIO(raw))
-                            pages = []
-                            cur_total = 0
-                            for idx, p in enumerate(reader.pages, start=1):
-                                t = p.extract_text() or ""
+                        used_clean_extractor = True
+                    except Exception:
+                        pages = []
+                        cur_total = 0
+                        used_clean_extractor = False
+                if not used_clean_extractor:
+                    try:
+                        import pdfplumber
+                        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                            for idx, page in enumerate(pdf.pages, start=1):
+                                t = page.extract_text() or ""
                                 if not t:
                                     continue
                                 if cur_total + len(t) <= max_chars:
@@ -132,11 +155,31 @@ def upload_files():
                                         cur_total += remain
                                     truncated = True
                                     break
-                            text = _join_pages_with_markers(pages) if pages else ""
-                        except Exception:
-                            text = "[Kunde inte extrahera text från PDF]"
-                    else:
-                        text = "[PDF-stöd saknas: installera pypdf]"
+                    except Exception:
+                        if PdfReader is not None:
+                            try:
+                                reader = PdfReader(io.BytesIO(raw))
+                                for idx, p in enumerate(reader.pages, start=1):
+                                    t = p.extract_text() or ""
+                                    if not t:
+                                        continue
+                                    if cur_total + len(t) <= max_chars:
+                                        pages.append({"page": idx, "text": t})
+                                        cur_total += len(t)
+                                    else:
+                                        remain = max_chars - cur_total
+                                        if remain > 0:
+                                            pages.append({"page": idx, "text": t[:remain]})
+                                            cur_total += remain
+                                        truncated = True
+                                        break
+                            except Exception:
+                                text = "[Kunde inte extrahera text från PDF]"
+                        else:
+                            text = "[PDF-stöd saknas: installera pypdf]"
+                # Build text
+                if pages and not text:
+                    text = _join_pages_with_markers(pages)
             else:
                 try:
                     text = raw.decode("utf-8", errors="ignore")

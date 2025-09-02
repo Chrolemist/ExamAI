@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG Ingest – Progress</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .col { flex: 1 1 300px; }
+    label { display: block; font-weight: 600; margin-top: .75rem; }
+    input[type="text"], input[type="number"], textarea { width: 100%; box-sizing: border-box; padding: .5rem; }
+    textarea { min-height: 140px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    button { margin-top: 1rem; padding: .6rem 1rem; }
+    .log { background: #0a0a0a; color: #cfe8ff; padding: .75rem; border-radius: .5rem; min-height: 160px; white-space: pre-wrap; }
+    .badge { display: inline-block; padding: .15rem .45rem; border-radius: .4rem; background: #eef; color: #123; font-size: .8rem; margin-right: .35rem; }
+    .progress { height: 8px; background: #e6e6e6; border-radius: 4px; overflow: hidden; }
+    .bar { height: 100%; background: linear-gradient(90deg, #4f46e5, #22c55e); width: 0%; transition: width .2s ease; }
+    .grid { display: grid; grid-template-columns: 140px 1fr; gap: .35rem .75rem; }
+    .muted { opacity: .75; }
+  </style>
+</head>
+<body>
+  <h1>RAG Ingest – Progress</h1>
+  <p class="muted">Ladda upp PDF:er eller klistra in text med [Sida N]-markörer och följ inläsningen i realtid.</p>
+
+  <div class="row">
+    <div class="col">
+      <label>Filer (PDF, valfritt – kan vara flera)</label>
+      <input id="files" type="file" accept="application/pdf" multiple />
+
+      <label>Text (valfritt – används om inga filer valts)</label>
+      <textarea id="text" placeholder="[Sida 1]\n...\n\n[Sida 2]\n...\n"></textarea>
+
+      <div class="row">
+        <div class="col">
+          <label>Samling (collection)</label>
+          <input id="collection" type="text" value="default" />
+        </div>
+        <div class="col">
+          <label>Bilaga (namn, används när text fältet används)</label>
+          <input id="bilaga" type="text" value="Bilaga" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <label>chunkTokens</label>
+          <input id="chunkTokens" type="number" value="800" min="100" max="4000" />
+        </div>
+        <div class="col">
+          <label>overlapTokens</label>
+          <input id="overlapTokens" type="number" value="100" min="0" max="1000" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col">
+          <label>embeddingModel</label>
+          <input id="embeddingModel" type="text" value="text-embedding-3-large" />
+        </div>
+        <div class="col">
+          <label>maxTokensPerBatch (valfritt)</label>
+          <input id="maxTokensPerBatch" type="number" placeholder="t.ex. 20000" />
+        </div>
+      </div>
+
+      <button id="start">Starta ingest</button>
+      <button id="cancel" disabled>Avbryt</button>
+    </div>
+    <div class="col">
+      <div class="grid">
+        <div>Planerade chunks</div><div id="planned" class="badge">-</div>
+        <div>Schemalagda</div><div id="scheduled" class="badge">-</div>
+        <div>Färdiga</div><div id="done" class="badge">-</div>
+        <div>Cacheträffar</div><div id="cache" class="badge">-</div>
+        <div>Retries</div><div id="retries" class="badge">-</div>
+      </div>
+      <div class="progress" style="margin-top: .5rem"><div id="bar" class="bar"></div></div>
+      <h3>Logg</h3>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+
+  <script src="js/ingest-progress.js"></script>
+</body>
+</html>

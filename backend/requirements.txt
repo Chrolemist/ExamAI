@@ -3,6 +3,7 @@ flask-cors>=4.0.0
 python-dotenv>=1.0.1
 openai>=1.35.7
 tiktoken>=0.7.0
+pymupdf>=1.24.9
 pypdf>=4.2.0
 pdfplumber>=0.9.0
 requests>=2.31.0
