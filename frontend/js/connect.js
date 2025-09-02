@@ -265,7 +265,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   }
 
   // Backend integration: request an AI reply for a coworker node
-  function requestAIReply(ownerId, ctx){
+  async function requestAIReply(ownerId, ctx){
     console.log('[DEBUG] requestAIReply called for ownerId:', ownerId, 'ctx:', ctx);
     if (!ownerId || !ctx || !ctx.text) return;
     // Turn on thinking glow on the coworker while request is in-flight
@@ -500,6 +500,16 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   let __maxPage = null;
   // Enable pgwise based on user setting and origin
   try{
+    // Heuristic: start near the most relevant page based on current question text
+    try{
+      const atts0 = Array.isArray(requestAIReply._lastAttachments)?requestAIReply._lastAttachments:[];
+      const lastUserMsg = [...(Array.isArray(messages)?messages:[])].reverse().find(m=>m && m.role==='user' && !/^\s*Bilaga:/i.test(String(m.content||'')));
+      const hintQ = String(lastUserMsg?.content || (ctx && ctx.text) || '');
+      if (window.Pdf && atts0.length && hintQ){
+        const pick = window.Pdf.pickPageByHint(atts0[0], hintQ);
+        if (pick && pick.page){ _pgStart = Math.max(1, Number(pick.page)||1); }
+      }
+    }catch{}
     const rawNS = localStorage.getItem(`nodeSettings:${ownerId}`);
     const ns = rawNS ? (JSON.parse(rawNS)||{}) : {};
     const wantPagewise = !!ns.pagewise;
@@ -556,6 +566,50 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
       console.log('[DEBUG] sendJSONOnce JSON response:', jsonData);
       return jsonData;
     });
+  };
+  // RAG helpers: index attachments once and query
+  const sendRagQuery = async ({ ownerId, ctx, queryText })=>{
+    const apiBase = (function(){ try{ if (window.API_BASE && typeof window.API_BASE==='string') return window.API_BASE; }catch{} try{ if (location.protocol==='file:') return 'http://localhost:8000'; if (location.port && location.port!=='8000') return 'http://localhost:8000'; }catch{} return ''; })();
+    // Use a stable per-node collection name (and sourceId combo to avoid crosstalk)
+    const col = `node:${ownerId}`;
+    const atts = Array.isArray(requestAIReply._lastAttachments)? requestAIReply._lastAttachments : [];
+    // If no attachments, skip RAG
+    if (!atts.length) return null;
+    // Track simple in-memory flag to avoid re-ingesting on every turn; clear if attachments changed (not tracked yet)
+    window.__ragIndexed = window.__ragIndexed || new Map();
+    const key = col; const needIngest = !window.__ragIndexed.get(key);
+    if (needIngest){
+      // Concatenate all attachments with explicit [Sida N] markers if pages known; else as one page
+      for (let i=0;i<atts.length;i++){
+        const a = atts[i];
+        const name = String(a.name||`Bilaga ${i+1}`);
+        const bilaga = (atts.length===1) ? '1' : String(i+1);
+        // Prefer pre-extracted per-page text when available; else fall back to full text
+        let text = '';
+        if (Array.isArray(a.pages) && a.pages.length){
+          text = a.pages.map(p=>`[Sida ${Number(p.page)||1}]\n${String(p.text||'')}`).join('\n\n');
+        } else {
+          text = String(a.text||'');
+          if (text){ text = `[Sida 1]\n${text}`; }
+        }
+        if (!text) continue;
+        const payload = { collection: col, text, bilaga: bilaga };
+        const res = await fetch(apiBase + '/rag/ingest', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload), signal }).catch(()=>null);
+        if (!res || !res.ok) return null;
+        // ignore body
+      }
+      window.__ragIndexed.set(key, true);
+    }
+    // Query
+    const model = body && body.model ? body.model : 'gpt-4o-mini';
+    const qPayload = { collection: col, query: String(queryText||''), topK: 6, model, returnJSON: false, appendSources: true, enforceInlineCitations: false };
+    const r = await fetch(apiBase + '/rag/query', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(qPayload), signal }).catch(()=>null);
+    if (!r || !r.ok) return null;
+    const ct = r.headers && r.headers.get ? r.headers.get('content-type') : '';
+    if (!/application\/json/i.test(String(ct||''))) return null;
+    const data = await r.json().catch(()=>null);
+    if (!data) return null;
+    return data;
   };
   // NDJSON streaming helper (expects application/x-ndjson)
   const sendStreamOnce = async (payload)=>{
@@ -1046,6 +1100,57 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
     }
     throw err;
   });
+  // If RAG is enabled in settings, try RAG first and render synchronously; fallback to normal chat
+  try{
+    const nsRaw = localStorage.getItem(`nodeSettings:${ownerId}`);
+    const nsCfg = nsRaw ? (JSON.parse(nsRaw)||{}) : {};
+    const ragOn = !!nsCfg.ragSmart;
+    if (ragOn){
+      const userQ = (function(){ try{ const last = [...(Array.isArray(body.messages)?body.messages:[])].reverse().find(m=>m && m.role==='user'); return String(last?.content||ctx?.text||''); }catch{ return String(ctx?.text||''); } })();
+      const ragData = await sendRagQuery({ ownerId, ctx, queryText: userQ });
+      if (ragData && typeof ragData.reply==='string'){
+        // Map sources to footnotes and inline [n,sida] where possible
+        const atts = Array.isArray(requestAIReply._lastAttachments)? requestAIReply._lastAttachments : [];
+        const sources = Array.isArray(ragData.sources)? ragData.sources : [];
+        // Normalize inline citations from "[Bilaga X, Sida Y]" to "[X, sida Y]" so our linkifier picks them up
+        const normalizeRagInline = (txt)=>{
+          try{
+            let out = String(txt||'');
+            // [Bilaga 3, Sida 7] -> [3, sida 7]
+            out = out.replace(/\[\s*Bilaga\s+(\d+)\s*,\s*Sida\s+(\d+)\s*\]/gi, (m,a,b)=>`[${Number(a)||1}, sida ${Number(b)||1}]`);
+            // [Bilaga 3, 7] -> [3, 7]
+            out = out.replace(/\[\s*Bilaga\s+(\d+)\s*,\s*(\d+)\s*\]/gi, (m,a,b)=>`[${Number(a)||1}, ${Number(b)||1}]`);
+            return out;
+          }catch{ return String(txt||''); }
+        };
+        const normalizedText = normalizeRagInline(String(ragData.reply||''));
+        // Build footnotes attachments order as our UI expects (attachments first)
+        const attOut = atts.slice();
+        const citations = sources.map(s=>{
+          const bil = Math.max(1, Number(s.bilaga||1));
+          const sida = Math.max(1, Number(s.sida||1));
+          let url = '';
+          try{
+            const it = attOut[bil-1];
+            if (it){
+              const base = it.url || it.origUrl || it.blobUrl || '';
+              if (window.Pdf && Pdf.isPdf && Pdf.isPdf(it) && it.url){ url = Pdf.pageAnchorUrl(it, sida); }
+              else { url = base; }
+            }
+          }catch{}
+          return { title: `Bilaga ${bil}, Sida ${sida}`, url };
+        });
+        let ts = Date.now();
+        const meta = { ts, attachments: attOut, citations };
+        // Append to graph and UI directly
+        try{ if(window.graph){ const entry = window.graph.addMessage(ownerId, author, String(normalizedText||''), 'assistant', meta); ts = entry?.ts || ts; meta.ts = ts; } }catch{}
+        try{ if(window.receiveMessage) window.receiveMessage(ownerId, String(normalizedText||''), 'assistant', meta); }catch{}
+        try{ const src = (body && body.sourceId) ? String(body.sourceId) : null; window.dispatchEvent(new CustomEvent('ai-request-finished', { detail:{ ownerId, sourceId: src, ok: true } })); }catch{}
+        setThinking(ownerId, false);
+        return { reply: String(normalizedText||''), citations };
+      }
+    }
+  }catch{}
   // Pagewise auto-continue: if model asks for MER_SIDOR and backend indicates more pages, request next window.
   let triedNoTools = false;
   const handleFinal = async (data)=>{
@@ -1449,12 +1554,14 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
     console.log('[DEBUG] Making JSON request with payload:', payload);
     const data = await tryRequest(payload);
     console.log('[DEBUG] Got JSON response:', data);
-    // Continue when model asks for more pages via MER_SIDOR
+  // Continue when model asks for more pages via MER_SIDOR
     let replyStr = ''; try{ replyStr = String(data?.reply||''); }catch{}
     const asksMore = /\bMER_SIDOR\b/.test(replyStr||'');
     const win = Number((payload.pgwise && payload.pgwise.window) || __pageWindow || 4);
     const moreAvail = (!!__maxPage) && ((Number(pgStart)||1) + win <= Number(__maxPage));
-    if (asksMore && moreAvail && step < 5){
+  // Respect user-configured max steps
+  let maxSteps = 5; try{ const sRaw = localStorage.getItem(`nodeSettings:${ownerId}`); const sCfg = sRaw ? (JSON.parse(sRaw)||{}) : {}; const ms = Number(sCfg.pageMaxSteps||5); if (!Number.isNaN(ms) && ms>0) maxSteps = Math.max(1, Math.min(10, ms)); }catch{}
+  if (asksMore && moreAvail && step < maxSteps){
       const nextStart = (Number(pgStart)||1) + win;
       return doStep(nextStart, step+1);
     }

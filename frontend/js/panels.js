@@ -592,6 +592,11 @@
             <input type="range" min="1" max="10" step="1" value="4" data-role="pageWindow" />
             <div class="subtle"><span data-role="pageWindowValue">4</span> sidor/omgång</div>
           </label>
+          <label style="display:block; margin-top:6px;">
+            Max omgångar
+            <input type="range" min="1" max="10" step="1" value="5" data-role="pageMaxSteps" />
+            <div class="subtle"><span data-role="pageMaxStepsValue">5</span> omgångar/svar</div>
+          </label>
         </div>
       </fieldset>
       <div style="margin-top:10px;display:flex;justify-content:flex-end">
@@ -818,6 +823,8 @@
       </label>
       <fieldset style="margin:8px 0; padding:8px; border:1px solid #28283a; border-radius:8px;">
         <legend class="subtle" style="padding:0 6px;">Bilagor</legend>
+  <label class="inline"><input type="checkbox" data-role="ragSmart" /> Smart hitta (RAG)</label>
+  <div class="subtle" style="margin-left:22px;">Söker fram relevanta delar ur bilagor automatiskt med snabba embeddings. Index byggs vid första sändning.</div>
         <label class="inline"><input type="checkbox" data-role="pagewise" /> Läs bilagor i sidfönster (pagewise)</label>
         <div class="subtle" style="margin-left:22px;">Ger ofta bredare täckning vid många sidor, men minskar live‑streaming (svaret kan visas i större block).</div>
       </fieldset>
@@ -933,9 +940,12 @@
   const chunkUseNumberingEl = by('[data-role="chunkUseNumbering"]');
   const chunkTrimNumPreEl = by('[data-role\="chunkTrimNumberedPreamble\"]');
   const pagewiseEl = by('[data-role="pagewise"]');
+  const ragSmartEl = by('[data-role="ragSmart"]');
   const pagewiseScope = by('[data-role="pagewiseScope"]');
   const pageWindowEl = by('[data-role="pageWindow"]');
   const pageWindowVal = by('[data-role="pageWindowValue"]');
+  const pageMaxStepsEl = by('[data-role="pageMaxSteps"]');
+  const pageMaxStepsVal = by('[data-role="pageMaxStepsValue"]');
       
       const renderEl = by('[data-role="renderMode"]');
   // Web search settings removed from CoWorker; handled by Internet node
@@ -1021,11 +1031,18 @@
   // no web settings for coworker anymore
   if (saved.apiKey && apiKeyEl) { apiKeyEl.value = saved.apiKey; }
   if (pagewiseEl){ pagewiseEl.checked = !!saved.pagewise; }
+      if (ragSmartEl){
+        if (saved.ragSmart === undefined){ ragSmartEl.checked = false; try{ persist({ ragSmart: false }); }catch{} }
+        else { ragSmartEl.checked = !!saved.ragSmart; }
+      }
       // Initialize page-window control
       try{
         const w = Math.max(1, Math.min(10, Number(saved.pageWindow||4)));
         if (pageWindowEl) pageWindowEl.value = String(w);
         if (pageWindowVal) pageWindowVal.textContent = String(w);
+  const ms = Math.max(1, Math.min(10, Number(saved.pageMaxSteps||5)));
+  if (pageMaxStepsEl) pageMaxStepsEl.value = String(ms);
+  if (pageMaxStepsVal) pageMaxStepsVal.textContent = String(ms);
         if (pagewiseScope){ const on = !!(pagewiseEl && pagewiseEl.checked); pagewiseScope.style.opacity = on ? '1' : '0.6'; pagewiseScope.style.pointerEvents = on ? '' : 'none'; }
       }catch{}
       if (enableToolsEl){
@@ -1074,7 +1091,9 @@
   // removed web listeners
   apiKeyEl?.addEventListener('input', ()=>{ persist({ apiKey: apiKeyEl.value||'' }); updateKeyBadge(); });
   pagewiseEl?.addEventListener('change', ()=>{ persist({ pagewise: !!pagewiseEl.checked }); try{ if (pagewiseScope){ const on = !!pagewiseEl.checked; pagewiseScope.style.opacity = on ? '1' : '0.6'; pagewiseScope.style.pointerEvents = on ? '' : 'none'; } }catch{} });
+  ragSmartEl?.addEventListener('change', ()=>{ persist({ ragSmart: !!ragSmartEl.checked }); });
   pageWindowEl?.addEventListener('input', ()=>{ const n=Math.max(1, Math.min(10, Number(pageWindowEl.value)||4)); if (pageWindowVal) pageWindowVal.textContent = String(n); persist({ pageWindow: n }); });
+  pageMaxStepsEl?.addEventListener('input', ()=>{ const n=Math.max(1, Math.min(10, Number(pageMaxStepsEl.value)||5)); if (pageMaxStepsVal) pageMaxStepsVal.textContent = String(n); persist({ pageMaxSteps: n }); });
   enableToolsEl?.addEventListener('change', ()=>{ persist({ enableTools: !!enableToolsEl.checked }); });
   forcePythonEl?.addEventListener('change', ()=>{ persist({ forcePython: !!forcePythonEl.checked }); });
     }catch{}
