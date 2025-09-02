@@ -94,7 +94,7 @@
     try{
       if (!containerEl) return;
       if (containerEl.__refsWired) return; containerEl.__refsWired = true;
-      const isPdf = (x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+  const isPdf = (x)=>{ try{ return !!(window.Pdf && Pdf.isPdf(x)); }catch{ return false; } };
       containerEl.addEventListener('click', (ev)=>{
         try{
           const tgt = ev.target && ev.target.closest ? ev.target.closest('a') : null; if (!tgt) return;
@@ -107,7 +107,7 @@
               const httpUrl = it.url || '';
               const blobUrl = it.origUrl || it.blobUrl || (function(){ const blob=new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
               let finalHref = httpUrl || blobUrl;
-              if (isPdf(it) && httpUrl){ finalHref = httpUrl + `#page=${encodeURIComponent(Math.max(1,page))}`; }
+              if (isPdf(it) && httpUrl && window.Pdf){ finalHref = Pdf.pageAnchorUrl(it, Math.max(1,page)); }
               ev.preventDefault(); ev.stopPropagation();
               try{ openIfExists(finalHref); }catch{ const tmp=document.createElement('a'); tmp.href=finalHref; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
               return;
@@ -120,15 +120,10 @@
               const httpUrl = it.url || '';
               const blobUrl = it.origUrl || it.blobUrl || (function(){ const blob=new Blob([String(it.text||'')], { type:(it.mime||'text/plain')+';charset=utf-8' }); it.blobUrl = URL.createObjectURL(blob); return it.blobUrl; })();
               let finalHref = httpUrl || blobUrl;
-              if (isPdf(it) && httpUrl && hintText){
+        if (isPdf(it) && httpUrl && hintText && window.Pdf){
                 try{
-                  const pages = Array.isArray(it.pages)? it.pages : [];
-                  const q = String(hintText||'').trim().slice(0,120);
-                  const tokens = q.split(/\s+/).filter(Boolean).slice(0,8);
-                  const needle = tokens.slice(0,3).join(' ');
-                  let pick=null;
-                  for (const p of pages){ const t = String(p.text||''); if (!t) continue; if (needle && t.toLowerCase().includes(needle.toLowerCase())){ pick={ page:Number(p.page)||null }; break; } for (const tok of tokens){ if (tok.length>=4 && t.toLowerCase().includes(tok.toLowerCase())){ pick={ page:Number(p.page)||null }; break; } } if (pick) break; }
-                  if (pick && pick.page){ finalHref = httpUrl + `#page=${encodeURIComponent(pick.page)}`; }
+          const pick = Pdf.pickPageByHint(it, hintText);
+          if (pick && pick.page){ finalHref = Pdf.pageAnchorUrl(it, pick.page); }
                 }catch{}
               }
               ev.preventDefault(); ev.stopPropagation();

@@ -552,12 +552,13 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
     const wantPagewise = !!ns.pagewise;
     // Default behavior: pagewise when attachments exist and origin is neither coworker nor section
     // If user enabled pagewise, honor it for coworker too, but keep section-sourced grading/improving streaming by default
-    if (hasMaterials){
-      if (!fromCoworker && !fromSection){
-        body.pgwise = { enable: true, startPage: _pgStart };
-      } else if (fromCoworker && !fromSection && wantPagewise){
-        body.pgwise = { enable: true, startPage: _pgStart };
-      }
+    if (hasMaterials && window.Pdf){
+      const cfg = Pdf.computePgwiseConfig({ attachments: requestAIReply._lastAttachments||[], fromCoworker, fromSection, nodeSettings: ns, startPage: _pgStart });
+      if (cfg && cfg.enable){ body.pgwise = { enable: true, startPage: Math.max(1, Number(cfg.startPage)||1) }; }
+    } else if (hasMaterials){
+      // Fallback to legacy behavior if Pdf helper is unavailable
+      if (!fromCoworker && !fromSection){ body.pgwise = { enable: true, startPage: _pgStart }; }
+      else if (fromCoworker && !fromSection && wantPagewise){ body.pgwise = { enable: true, startPage: _pgStart }; }
     }
   }catch{}
   if (systemPrompt) body.system = systemPrompt;
@@ -908,7 +909,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
   const ui = ensureStreamUI();
   let finalText = String(acc||'');
     // Clean MER_SIDOR if present in non-pgwise flows (should not appear)
-  try{ finalText = finalText.replace(/\bMER_SIDOR\b/g,'').trim(); }catch{}
+  try{ finalText = (window.Pdf ? Pdf.cleanMerSidor(finalText) : String(finalText||'').replace(/\bMER_SIDOR\b/g,'').trim()); }catch{}
   if (!finalText) finalText = 'Tomt svar från AI';
     // Update graph and propagate
     let ts = Date.now();
@@ -970,7 +971,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
             const foot=document.createElement('div'); foot.className='subtle footers-block'; foot.style.marginTop='6px'; foot.style.fontSize='12px';
             const lab=document.createElement('div'); lab.textContent='Material:'; foot.appendChild(lab);
             const ol=document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0';
-            const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+            const isPdf=(x)=>{ try{ return !!(window.Pdf && Pdf.isPdf(x)); }catch{ return false; } };
             flatAtt.forEach((it,i)=>{
               const li=document.createElement('li'); const a=document.createElement('a');
               try{
@@ -1002,10 +1003,10 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
                   const attLen = flatAtt.length; const total = attLen + flatCit.length;
                   if (attLen === 1 && bil > 1) bil = 1;
                   if (bil <= attLen){
-                    const it = flatAtt[bil-1]; const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+                    const it = flatAtt[bil-1]; const isPdf=(x)=>{ try{ return !!(window.Pdf && Pdf.isPdf(x)); }catch{ return false; } };
                     const base = it.url || it.origUrl || it.blobUrl || '';
                     let href = base;
-                    if (isPdf(it) && it.url){ const eff = Math.max(1, page); href = it.url + `#page=${encodeURIComponent(eff)}`; }
+                    if (isPdf(it) && it.url && window.Pdf){ const eff = Math.max(1, page); href = Pdf.pageAnchorUrl(it, eff); }
                     if (href){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
                   } else if (bil <= total){
                     const c = flatCit[bil - attLen - 1]; const href = String(c?.url||'#'); if(href && href !== '#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
@@ -1117,7 +1118,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
       reply = data?.error ? `Fel: ${data.error}` : 'Tomt svar från AI';
     }
     // Remove any stray MER_SIDOR token from final display
-  try{ reply = reply.replace(/\bMER_SIDOR\b/g, '').trim(); }catch{}
+  try{ reply = (window.Pdf ? Pdf.cleanMerSidor(reply) : String(reply||'').replace(/\bMER_SIDOR\b/g,'').trim()); }catch{}
   if (!reply) {
     // Final guard: one last try without tools if still enabled and not tried
     if (!triedNoTools && toolsEnabled){
@@ -1215,7 +1216,7 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
             const foot=document.createElement('div'); foot.className='subtle footers-block'; foot.style.marginTop='6px'; foot.style.fontSize='12px';
             const lab=document.createElement('div'); lab.textContent='Material:'; foot.appendChild(lab);
             const ol=document.createElement('ol'); ol.style.margin='6px 0 0 16px'; ol.style.padding='0';
-            const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+            const isPdf=(x)=>{ try{ return !!(window.Pdf && Pdf.isPdf(x)); }catch{ return false; } };
             flatAtt.forEach((it,i)=>{
               const li=document.createElement('li'); const a=document.createElement('a');
               try{
@@ -1247,10 +1248,10 @@ console.log('[DEBUG] connect.js loaded with tool debugging enabled');
                   const attLen = flatAtt.length; const total = attLen + flatCit.length;
                   if (attLen === 1 && bil > 1) bil = 1;
                   if (bil <= attLen){
-                    const it = flatAtt[bil-1]; const isPdf=(x)=>{ try{ return /pdf/i.test(String(x?.mime||'')) || /\.pdf$/i.test(String(x?.name||'')); }catch{ return false; } };
+                    const it = flatAtt[bil-1]; const isPdf=(x)=>{ try{ return !!(window.Pdf && Pdf.isPdf(x)); }catch{ return false; } };
                     const base = it.url || it.origUrl || it.blobUrl || '';
                     let href = base;
-                    if (isPdf(it) && it.url){ const eff = Math.max(1, page); href = it.url + `#page=${encodeURIComponent(eff)}`; }
+                    if (isPdf(it) && it.url && window.Pdf){ const eff = Math.max(1, page); href = Pdf.pageAnchorUrl(it, eff); }
                     if (href){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
                   } else if (bil <= total){
                     const c = flatCit[bil - attLen - 1]; const href = String(c?.url||'#'); if(href && href !== '#'){ const tmp=document.createElement('a'); tmp.href=href; tmp.target='_blank'; tmp.rel='noopener'; document.body.appendChild(tmp); tmp.click(); tmp.remove(); }
