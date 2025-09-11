@@ -104,6 +104,10 @@ def create_app():
         from .routes.tools import tools_bp  # type: ignore
     except Exception:
         from routes.tools import tools_bp  # type: ignore
+    try:
+        from .routes.snapshots import bp as snapshots_bp  # type: ignore
+    except Exception:
+        from routes.snapshots import bp as snapshots_bp  # type: ignore
 
     app.register_blueprint(chat_bp)
     app.register_blueprint(upload_bp)
@@ -113,6 +117,7 @@ def create_app():
     app.register_blueprint(summarize_bp)
     app.register_blueprint(sliding_bp)
     app.register_blueprint(tools_bp)
+    app.register_blueprint(snapshots_bp)
     return app
 
 

@@ -1,12 +1,22 @@
 // Persistence: Save/Load full board state (nodes, connections, settings, sections, chat logs)
-// Responsibility: Endast snapshot-lagring/återställning (localStorage). Ingen UI här.
-// Lightweight, localStorage-based snapshots addressed by a user-provided name.
+// Responsibility: Snapshot storage (database + localStorage fallback). No UI here.
+// Database-backed snapshots with localStorage fallback for resilience.
 // SOLID hints:
 // - S: UI för snapshots bor i snapshot-panel.js. Denna fil exponerar endast window.save/load/list/delete.
 // - O: Lägg nya fält i snapshot-objektet utan att bryta API. Versionera vid stora ändringar.
 (function(){
   const LS_PREFIX = 'snapshot:';
   const LS_LAST_USED = 'snapshot:last-used';
+  
+  // Helper to get API base URL
+  function getApiBase(){
+    try{
+      if (window.API_BASE && typeof window.API_BASE==='string') return window.API_BASE;
+      if (location.protocol==='file:') return 'http://localhost:8000';
+      if (location.port && location.port!=='8000') return 'http://localhost:8000';
+    }catch{}
+    return '';
+  }
 
   function collectSections(){
     const secs = [];
@@ -347,17 +357,54 @@
   setTimeout(()=>{ try{ window.updateConnectionsFor && document.querySelectorAll('.fab,.panel').forEach(el=> window.updateConnectionsFor(el)); }catch{} }, 0);
   }
 
-  function saveSnapshot(name){
+  async function saveSnapshot(name){
     if (!name) return { ok:false, error:'namn krävs' };
-    const key = LS_PREFIX + name;
+    
     try{
-      localStorage.setItem(key, JSON.stringify(snapshot()));
-      try{ localStorage.setItem(LS_LAST_USED, String(name)); }catch{}
-      return { ok:true, key };
-    }catch(e){ return { ok:false, error: String(e) } }
+      const data = snapshot();
+      const apiBase = getApiBase();
+      
+      const response = await fetch(`${apiBase}/snapshots/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, data })
+      });
+      
+      const result = await response.json();
+      
+      if (result.ok) {
+        try{ localStorage.setItem(LS_LAST_USED, String(name)); }catch{}
+      }
+      
+      return result;
+    }catch(e){ 
+      // Fallback to localStorage if API fails
+      console.warn('Database save failed, trying localStorage:', e);
+      const key = LS_PREFIX + name;
+      try{
+        localStorage.setItem(key, JSON.stringify(snapshot()));
+        try{ localStorage.setItem(LS_LAST_USED, String(name)); }catch{}
+        return { ok:true, key, fallback: true };
+      }catch(localErr){ 
+        return { ok:false, error: `Databas: ${String(e)}, LocalStorage: ${String(localErr)}` };
+      }
+    }
   }
 
-  function listSnapshots(){
+  async function listSnapshots(){
+    try{
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/snapshots/list`);
+      const result = await response.json();
+      
+      if (result.ok) {
+        return result.snapshots.map(s => s.name).sort();
+      }
+    }catch(e){
+      console.warn('Database list failed, trying localStorage:', e);
+    }
+    
+    // Fallback to localStorage
     const out = [];
     try{
       for (let i=0; i<localStorage.length; i++){
@@ -368,23 +415,58 @@
     return out.sort();
   }
 
-  function deleteSnapshot(name){
+  async function deleteSnapshot(name){
     if (!name) return { ok:false, error:'namn saknas' };
+    
+    try{
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/snapshots/delete/${encodeURIComponent(name)}`, {
+        method: 'DELETE'
+      });
+      const result = await response.json();
+      
+      if (result.ok) return result;
+    }catch(e){
+      console.warn('Database delete failed, trying localStorage:', e);
+    }
+    
+    // Fallback to localStorage
     const key = LS_PREFIX + name;
-    try{ localStorage.removeItem(key); return { ok:true };
-    }catch(e){ return { ok:false, error: String(e) } }
+    try{ 
+      localStorage.removeItem(key); 
+      return { ok:true, fallback: true };
+    }catch(e){ 
+      return { ok:false, error: String(e) };
+    }
   }
 
-  function loadSnapshot(name){
+  async function loadSnapshot(name){
+    try{
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/snapshots/load/${encodeURIComponent(name)}`);
+      const result = await response.json();
+      
+      if (result.ok && result.data) {
+        restore(result.data);
+        try{ localStorage.setItem(LS_LAST_USED, String(name)); }catch{}
+        return { ok:true };
+      }
+    }catch(e){
+      console.warn('Database load failed, trying localStorage:', e);
+    }
+    
+    // Fallback to localStorage
     const key = LS_PREFIX + name;
     try{
       const raw = localStorage.getItem(key);
       if (!raw) return { ok:false, error:'saknas' };
       const data = JSON.parse(raw);
       restore(data);
-  try{ localStorage.setItem(LS_LAST_USED, String(name)); }catch{}
-  return { ok:true };
-    }catch(e){ return { ok:false, error: String(e) } }
+      try{ localStorage.setItem(LS_LAST_USED, String(name)); }catch{}
+      return { ok:true, fallback: true };
+    }catch(e){ 
+      return { ok:false, error: String(e) };
+    }
   }
 
   // Snapshot UI has been moved to `snapshot-panel.js` to separate concerns (UI vs persistence).
@@ -398,11 +480,11 @@
   window.listSnapshots = listSnapshots;
   window.deleteSnapshot = deleteSnapshot;
   // Auto-load last used snapshot on full page load
-  window.addEventListener('load', ()=>{
+  window.addEventListener('load', async ()=>{
     try{
       const last = localStorage.getItem(LS_LAST_USED);
       if (!last) return;
-      const res = loadSnapshot(last);
+      const res = await loadSnapshot(last);
       if (!res || res.ok !== true){ try{ localStorage.removeItem(LS_LAST_USED); }catch{} }
     }catch{}
   });

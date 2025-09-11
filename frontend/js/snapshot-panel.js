@@ -11,10 +11,14 @@
   /**
    * Refresh the <select> listing available snapshots.
    */
-  function refreshList(){
+  async function refreshList(){
     const list = document.getElementById('snapList'); if (!list) return;
-    const items = (window.listSnapshots && typeof window.listSnapshots === 'function') ? window.listSnapshots() : [];
-    list.innerHTML = items.map(n=>`<option value="${n}">${n}</option>`).join('');
+    try {
+      const items = (window.listSnapshots && typeof window.listSnapshots === 'function') ? await window.listSnapshots() : [];
+      list.innerHTML = items.map(n=>`<option value="${n}">${n}</option>`).join('');
+    } catch(e) {
+      console.warn('Failed to refresh snapshot list:', e);
+    }
   }
 
   /**
@@ -55,27 +59,65 @@
     document.body.appendChild(bar);
 
     // Wire basic actions using the persistence API exposed on window
-    document.getElementById('btnSaveSnap')?.addEventListener('click', ()=>{
+    document.getElementById('btnSaveSnap')?.addEventListener('click', async ()=>{
       const name = (document.getElementById('snapName')?.value || '').trim();
       if (!name){ alert('Ange ett namn innan du sparar.'); return; }
-      const res = window.saveSnapshot ? window.saveSnapshot(name) : { ok:false, error:'saknas saveSnapshot' };
-      if (!res.ok) { alert('Kunde inte spara: '+res.error); return; }
-      alert(`Sparat: ${name}`);
-      refreshList();
+      
+      const btn = document.getElementById('btnSaveSnap');
+      if (btn) btn.textContent = 'Sparar...';
+      
+      try {
+        const res = window.saveSnapshot ? await window.saveSnapshot(name) : { ok:false, error:'saknas saveSnapshot' };
+        if (!res.ok) { 
+          alert('Kunde inte spara: '+res.error); 
+          return; 
+        }
+        
+        const msg = res.fallback ? 
+          `Sparat lokalt: ${name} (databas ej tillgänglig)` : 
+          `Sparat i databas: ${name}${res.size_kb ? ` (${res.size_kb}KB)` : ''}`;
+        alert(msg);
+        await refreshList();
+      } finally {
+        if (btn) btn.textContent = 'Save';
+      }
     });
-    document.getElementById('btnLoadSnap')?.addEventListener('click', ()=>{
+    document.getElementById('btnLoadSnap')?.addEventListener('click', async ()=>{
       const list = document.getElementById('snapList'); const name = list && list.value;
       if (!name){ alert('Välj en sparning att ladda.'); return; }
-      const res = window.loadSnapshot ? window.loadSnapshot(name) : { ok:false, error:'saknas loadSnapshot' };
-      if (!res.ok) alert('Kunde inte ladda: '+res.error);
+      
+      const btn = document.getElementById('btnLoadSnap');
+      if (btn) btn.textContent = 'Laddar...';
+      
+      try {
+        const res = window.loadSnapshot ? await window.loadSnapshot(name) : { ok:false, error:'saknas loadSnapshot' };
+        if (!res.ok) {
+          alert('Kunde inte ladda: '+res.error);
+        } else if (res.fallback) {
+          alert(`Laddad från lokal lagring: ${name}`);
+        }
+      } finally {
+        if (btn) btn.textContent = 'Load';
+      }
     });
-    document.getElementById('btnDeleteSnap')?.addEventListener('click', ()=>{
+    document.getElementById('btnDeleteSnap')?.addEventListener('click', async ()=>{
       const list = document.getElementById('snapList'); const name = list && list.value;
       if (!name){ alert('Välj en sparning att ta bort.'); return; }
       if (!confirm(`Ta bort "${name}"?`)) return;
-      const res = window.deleteSnapshot ? window.deleteSnapshot(name) : { ok:false, error:'saknas deleteSnapshot' };
-      if (!res.ok) { alert('Kunde inte ta bort: '+res.error); return; }
-      refreshList();
+      
+      const btn = document.getElementById('btnDeleteSnap');
+      if (btn) btn.textContent = 'Tar bort...';
+      
+      try {
+        const res = window.deleteSnapshot ? await window.deleteSnapshot(name) : { ok:false, error:'saknas deleteSnapshot' };
+        if (!res.ok) { 
+          alert('Kunde inte ta bort: '+res.error); 
+          return; 
+        }
+        await refreshList();
+      } finally {
+        if (btn) btn.textContent = 'Delete';
+      }
     });
 
     // Clear local storage from snapshot bar
@@ -104,7 +146,9 @@
       applyCollapsed(collapsed);
       try{ localStorage.setItem(LS_UI_COLLAPSED, collapsed ? '1' : '0'); }catch{}
     });
-    refreshList();
+    
+    // Initial list refresh
+    refreshList().catch(e => console.warn('Initial snapshot list refresh failed:', e));
 
     // Inline + add menu wiring (create nodes from the menu)
     try{
